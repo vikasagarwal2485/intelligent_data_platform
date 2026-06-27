@@ -19,7 +19,7 @@ lakehouse) to the richer **TM Forum SID / JSON:API** data model actually present
 5. [ML Algorithm — Credit-Limit Prediction](#5-ml-algorithm--credit-limit-prediction)
 6. [ML Algorithm — Fraud Detection](#6-ml-algorithm--fraud-detection)
 7. [Phased Implementation Roadmap](#7-phased-implementation-roadmap)
-8. [Open Questions for Reviewer](#8-open-questions-for-reviewer)
+8. [Resolved Decisions (PR #1 review)](#9-resolved-decisions)
 
 ---
 
@@ -51,16 +51,25 @@ events link to a subscriber via `service-id` (MSISDN) and to `agreements/product
 ## 1. System Architecture Design
 
 ### 1.1 Guiding principles
+*(Reflects reviewer decisions on PR #1 — see [§9 Resolved Decisions](#9-resolved-decisions).)*
 - **Medallion architecture** (Bronze → Silver → Gold) as in the skill, extended with a
   **Feature Store** and **ML Serving** layer for the two use cases.
 - **Lakehouse table format = Apache Iceberg** on object storage (S3 / MinIO) for Silver:
   ACID, schema evolution, time-travel (matches skill's Q6 recommendation).
+- **Iceberg catalog = Nessie** (git-like, branchable catalog) — reviewer decision.
 - **TimescaleDB = Gold serving layer** for low-latency features/aggregates and APIs
   (matches skill's Q4/Q6).
-- **Streaming + batch (Lambda-style)**: Kafka + Flink for real-time fraud scoring;
-  Spark + Airflow for batch feature/credit-scorecard refresh.
-- **Prototype-first**: everything runs locally via Docker Compose; the same component
-  choices map 1:1 to a Kubernetes production deployment later.
+- **Batch-first**: Spark + Airflow drive feature engineering, credit scoring, and fraud
+  scoring in the prototype. Kafka + Flink real-time scoring is **deferred to a later phase**
+  (reviewer: *"start with batch"*). Kafka is still used for ingestion decoupling.
+- **Kafka = Apache Kafka (open source)**, deployed via the **Strimzi** operator — reviewer
+  decision (no Confluent/Redpanda).
+- **Kubernetes-native, prototype-first**: the prototype runs on **local Kubernetes
+  (minikube)**; production targets **AWS (EKS)**. Same Helm charts/manifests across both —
+  reviewer decision.
+- **Multi-tenancy, data isolation & RBAC are first-class** architectural requirements (not
+  add-ons) — see [§1.5](#15-multi-tenancy-data-isolation--rbac). **GDPR** compliance baked in
+  from Phase 1.
 
 ### 1.2 Logical architecture (medallion + ML)
 
@@ -95,32 +104,35 @@ flowchart TB
         M1["Credit-Limit model (LightGBM)"]
         M2["Fraud model (XGBoost + IsolationForest)"]
         REG["MLflow registry"]
-        API["FastAPI scoring service"]
-        RT["Flink real-time fraud scoring"]
+        API["FastAPI scoring service (batch + on-demand)"]
+        RT["Flink real-time fraud scoring<br/>(DEFERRED — later phase)"]
     end
 
-    subgraph OPS["Orchestration & Observability"]
+    subgraph OPS["Orchestration, Governance & Observability"]
         AF["Airflow (batch DAGs)"]
         MON["Prometheus + Grafana"]
-        TR["Trino (ad-hoc SQL)"]
+        TR["Trino (ad-hoc SQL, RBAC-scoped)"]
+        GOV["Multi-tenancy + RBAC + GDPR<br/>(Keycloak/OPA, tenant_id isolation)"]
     end
 
+    SYN["Synthetic data generator"] --> E1 & E2
     E1 --> NIFI --> KAFKA
     E2 --> NIFI --> KAFKA
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
-    KAFKA --> FLINK[Flink stream proc] --> S
+    KAFKA --> SPARK[Spark batch curate] --> S
     B -.backfill.-> S
     S --> G1 & G2
     G1 --> FS
     FS --> M1 & M2
     M1 & M2 --> REG --> API
-    KAFKA --> RT
-    FS --> RT
-    AF --> S & G1 & M1 & M2
+    KAFKA -.deferred.-> RT
+    FS -.deferred.-> RT
+    AF --> SPARK & S & G1 & M1 & M2
     S --> TR
     G1 --> TR
-    FLINK -.metrics.-> MON
+    GOV -.enforces.-> S & G1 & TR & API
+    SPARK -.metrics.-> MON
     API -.metrics.-> MON
 ```
 
@@ -129,115 +141,194 @@ flowchart TB
 | Layer | Component | Why (rationale anchored in skill) |
 |---|---|---|
 | Ingestion | **Apache NiFi** | File landing, CSV/JSON→Avro, routing, DLQ, backpressure (skill §Components.1) |
-| Streaming bus | **Apache Kafka** + **Schema Registry** | Central event backbone, Avro contracts, compatibility (skill §2,§3) |
-| Object store | **MinIO** (prod: S3/ADLS) | S3-compatible, cheap, decoupled compute/storage (skill §4) |
-| Stream proc | **Apache Flink (PyFlink)** | Exactly-once, real-time enrich + fraud scoring (skill §5, Q3) |
-| Table format | **Apache Iceberg** + REST catalog (Nessie/Polaris) | ACID, schema/partition evolution, time-travel (skill Q6) |
-| Batch proc | **Apache Spark** | Heavy joins, feature batches, Gold aggregation (skill §Data Flow Phase 4) |
+| Streaming bus | **Apache Kafka (open source)** via **Strimzi** + **Schema Registry** (Apicurio, open source) | Central event backbone, Avro contracts, compatibility (skill §2,§3); reviewer: open-source Kafka |
+| Object store | **MinIO** (prod: **AWS S3**) | S3-compatible, cheap, decoupled compute/storage (skill §4) |
+| Stream proc | **Apache Flink (PyFlink)** — **DEFERRED** | Real-time fraud scoring; added in later phase (reviewer: batch first) |
+| Table format | **Apache Iceberg** + **Nessie** catalog | ACID, schema/partition evolution, time-travel, branchable catalog (skill Q6; reviewer: Nessie) |
+| Batch proc | **Apache Spark** | Curation, heavy joins, feature batches, Gold aggregation, **batch scoring** (skill §Phase 4) |
 | Serving DB | **TimescaleDB** | Low-latency feature/KPI serving, time-series (skill Q4/Q6) |
-| Query | **Trino** | Ad-hoc SQL across Iceberg + Timescale (skill §Query) |
+| Query | **Trino** | Ad-hoc SQL across Iceberg + Timescale, **RBAC-scoped per tenant** (skill §Query) |
 | Orchestration | **Apache Airflow** | Data-first DAGs, backfill, SLAs (skill Q5 recommendation) |
 | Feature store | **Feast** | Offline/online parity; train-serve consistency (new, for ML) |
 | Experiment/registry | **MLflow** | Tracking, model registry, staging→prod promotion (new) |
-| Serving API | **FastAPI** | Synchronous credit/fraud scoring endpoints (new) |
+| Serving API | **FastAPI** | Credit/fraud scoring endpoints (new) |
+| **AuthN/AuthZ** | **Keycloak** (OIDC) + **OPA** (policy) | Multi-tenant identity, RBAC, attribute-based row/column policies (new — reviewer) |
+| **Secrets** | **External Secrets / Vault** | GDPR-grade secret & key management (new — reviewer) |
 | Observability | **Prometheus + Grafana (LGTM)** | Pipeline + data-quality + model metrics (skill §Monitoring) |
 | Data quality | **Great Expectations** (+ Soda optional) | Contract & quality gates at Bronze→Silver (new) |
+| Local K8s | **minikube** | Local prototype runtime (reviewer) |
+| Prod K8s | **AWS EKS** | Production runtime (reviewer) |
 
 ### 1.4 Storage layout
 
+Every layer is **partitioned by `tenant_id` first** to guarantee physical data isolation
+(see §1.5).
+
 ```
 s3://idp-lakehouse/
-  bronze/  {entity}/year=/month=/day=/*.avro|*.json     # raw, immutable, 90d→glacier
-  silver/  iceberg/{dim_*,fact_*}/...                    # curated Iceberg tables
-  gold/    iceberg/feature_*/ + mirrored to TimescaleDB  # features + aggregates
-  ml/      models/, features/, checkpoints/
-  flink-checkpoints/ , flink-savepoints/
+  bronze/  tenant=<id>/{entity}/year=/month=/day=/*.avro|*.json   # raw, immutable, 90d→glacier
+  silver/  iceberg/{dim_*,fact_*}/  (tenant_id partition col)     # curated Iceberg tables
+  gold/    iceberg/feature_*/ + mirrored to TimescaleDB           # features + aggregates
+  ml/      models/<tenant>/, features/, checkpoints/
+  flink-checkpoints/ , flink-savepoints/   (deferred phase)
 ```
+
+### 1.5 Multi-tenancy, data isolation & RBAC
+
+*(Reviewer requirement: "Architecture shall support multi-tenancy with data isolation with
+RBAC policy" + "GDPR".)*
+
+**Tenancy model — shared-platform, isolated-data (pooled with hard guardrails):**
+- A `tenant_id` is stamped on every record at ingestion (NiFi sets it from the source
+  channel / API key) and carried through Bronze → Silver → Gold as a **leading partition
+  column** and a **mandatory predicate** on all reads.
+- **Kafka:** per-tenant topic prefixes (`t.<tenant>.tmf.*`) and ACLs (Strimzi
+  `KafkaUser` + `AclRule`) so a tenant's consumers/producers cannot cross boundaries.
+- **Object store:** per-tenant prefixes + bucket policies; optional per-tenant KMS keys.
+- **Iceberg/Nessie:** namespace-per-tenant (`silver_<tenant>`) and/or `tenant_id`
+  partitioning; Nessie branches enable per-tenant isolated experimentation.
+- **Compute isolation:** Kubernetes **namespace + NetworkPolicy + ResourceQuota per
+  tenant** on EKS; for the minikube prototype, namespaces simulate this.
+
+**RBAC / AuthZ:**
+- **Keycloak (OIDC)** issues tokens carrying `tenant_id` + roles
+  (`data_engineer`, `ds_credit`, `ds_fraud`, `analyst`, `fraud_ops`, `admin`).
+- **Open Policy Agent (OPA)** enforces row-level (tenant) and column-level (PII) policies;
+  **Trino** uses an OPA/Ranger access-control plugin so every SQL query is tenant- and
+  role-scoped; **FastAPI** validates the token and injects the `tenant_id` filter server-side.
+
+**GDPR controls:**
+- **PII minimization & tokenization** at Silver (hash MSISDN/IMSI/IMEI/email/phone with
+  per-tenant salt; reversible vault tokens only where lawful).
+- **Consent enforcement:** the `privacy-consent` block in `parties` gates feature/ML usage
+  (e.g., analytics consent required to include a subscriber in training).
+- **Right-to-erasure / RTBF:** Iceberg row-level deletes + a delete-propagation DAG across
+  Bronze/Silver/Gold/Feature-store/online-store; audited.
+- **Data retention & lineage:** lifecycle policies (Bronze 90d→Glacier), full lineage
+  (OpenLineage/Marquez), immutable audit log of access and erasure.
+- **Data residency:** per-tenant region pinning on AWS (EKS + S3 region per tenant if required).
 
 ---
 
 ## 2. Step-by-Step Installation & Deployment Plan
 
-Two tracks: **(2A) Local prototype via Docker Compose** (default for this repo), and
-**(2B) Production on Kubernetes** (target). Local first.
-
-### 2A. Local prototype (Docker Compose)
-
-**Prereqs:** Docker ≥ 24, Docker Compose v2, ≥ 16 GB RAM (24 GB comfortable), Python 3.11, `make`.
+**Kubernetes-native on both tiers** (reviewer decision): **(2A) Local = minikube**,
+**(2B) Production = AWS EKS**. The *same* Helm charts / Kustomize overlays deploy to both —
+only the overlay (resource sizes, storage class, ingress, secrets backend) differs. No
+Docker Compose.
 
 **Proposed repo layout to be created (Phase 0):**
 ```
-deploy/compose/docker-compose.yml      # all services
-deploy/compose/.env                    # ports, creds (dev only)
-config/ (kafka topics, nifi flow, iceberg catalog, trino, airflow)
-schemas/avro/*.avsc                    # ingestion contracts
+deploy/
+  helm/            # umbrella chart + per-component subcharts/values
+  base/            # Kustomize base manifests (namespaces, RBAC, quotas, NetworkPolicy)
+  overlays/local/  # minikube overlay (small resources, hostPath/MinIO, NodePort)
+  overlays/aws/    # EKS overlay (S3, IRSA, ALB ingress, External Secrets)
+  argocd/          # Argo CD Application manifests (GitOps)
+config/   (kafka topics, nifi flow, nessie, trino+OPA, airflow, keycloak realms)
+schemas/avro/*.avsc
 ingestion/ (nifi templates, kafka-connect s3-sink config)
-pipelines/flink/ , pipelines/spark/ , pipelines/airflow/dags/
+synthetic/ (synthetic data generator)
+pipelines/spark/ , pipelines/airflow/dags/   (pipelines/flink/ added in deferred phase)
 features/ (feast repo) , ml/ (training, serving)
 tests/ , Makefile
 ```
 
-**Bring-up order (each becomes a `make` target):**
-1. `make net` — create Docker network + MinIO buckets (`bronze/silver/gold/ml`).
-2. `make infra-up` — MinIO, Kafka (Redpanda or Confluent), Schema Registry, Nessie (Iceberg REST catalog), TimescaleDB, Redis (online store).
-3. `make topics` — create Kafka topics + register Avro schemas.
-4. `make catalog` — initialize Iceberg namespaces (`silver`, `gold`) via Spark/Trino.
-5. `make proc-up` — Flink JobManager/TaskManager, Spark, Trino.
-6. `make orch-up` — Airflow (webserver/scheduler), NiFi.
-7. `make ml-up` — MLflow, Feast registry, FastAPI scorer.
-8. `make obs-up` — Prometheus, Grafana (preloaded dashboards).
-9. `make smoke` — health checks + load `data_samples/` → assert rows in Silver.
+### 2A. Local prototype (minikube)
 
-**Validation gates:** each step exposes a health endpoint; `make smoke` runs an
-end-to-end sample (ingest → Bronze → Silver → one feature row → one model score).
+**Prereqs:** Docker, **minikube** (≥ 8 CPU / 16–24 GB allotted), `kubectl`, `helm`,
+`kustomize`, Python 3.11.
 
-### 2B. Production deployment (Kubernetes) — outline
-- **Packaging:** Helm charts per component; Strimzi (Kafka), Flink Kubernetes Operator,
-  Spark Operator, Airflow Helm (KubernetesExecutor — per skill Q5), Trino Helm.
-- **Storage:** real S3 (+ lifecycle: Glacier after 90d per skill §Bronze).
-- **CI/CD:** GitHub Actions build/test → push images → Argo CD deploy (skill's hybrid
-  Airflow-for-data / Argo-for-CICD suggestion, Q5).
-- **Secrets:** External Secrets / Vault; no creds in repo.
-- **Scaling:** Kafka partitions = 12 (skill §2), Flink parallelism = 12, autoscaled.
-- **Observability:** LGTM stack, model-drift alerts, data-quality SLAs.
+**Bring-up order (each a `make` target wrapping helm/kubectl):**
+1. `make mk-up` — `minikube start` with addons (ingress, metrics-server, storage-provisioner).
+2. `make namespaces` — create platform + per-tenant namespaces with **ResourceQuota +
+   NetworkPolicy + RBAC** (multi-tenancy guardrails, §1.5).
+3. `make infra` — MinIO (S3), **Strimzi → Apache Kafka** + Apicurio Schema Registry,
+   **Nessie** + Iceberg, TimescaleDB, Redis, **Keycloak**, **OPA**.
+4. `make topics` — create per-tenant Kafka topics/ACLs + register Avro schemas.
+5. `make catalog` — init Nessie namespaces (`silver`, `gold`) via Spark/Trino.
+6. `make proc` — Spark (Spark-on-K8s), Trino (with OPA access-control plugin).
+   *(Flink deferred — not deployed in the batch-first prototype.)*
+7. `make orch` — Airflow (KubernetesExecutor), NiFi.
+8. `make ml` — MLflow, Feast registry, FastAPI scorer.
+9. `make obs` — Prometheus, Grafana (preloaded dashboards), OpenLineage/Marquez.
+10. `make seed` — run the **synthetic data generator** → land files for ingestion.
+11. `make smoke` — end-to-end: ingest → Bronze → Silver → feature row → one batch score,
+    asserting tenant isolation (a tenant-A token cannot read tenant-B rows via Trino/API).
+
+**Validation gates:** each component exposes a readiness probe; `make smoke` is the
+end-to-end + isolation acceptance test.
+
+### 2B. Production deployment (AWS EKS)
+- **Cluster:** EKS (managed node groups + optional Karpenter autoscaling), per-tenant
+  namespaces with quotas/NetworkPolicy; **IRSA** for pod-level S3 access.
+- **Packaging/GitOps:** same Helm charts via `overlays/aws`; **Argo CD** continuous deploy.
+  GitHub Actions build/test/scan images → push to ECR → Argo CD syncs (skill Q5 hybrid:
+  Airflow-for-data, Argo-for-CICD).
+- **Storage:** **S3** (lifecycle: Glacier after 90 days, skill §Bronze); per-tenant KMS keys.
+- **Data services:** Strimzi Kafka on EKS; TimescaleDB (RDS/self-managed); MSK optional later.
+- **Security/GDPR:** **External Secrets + AWS Secrets Manager/KMS**, Keycloak + OPA for RBAC,
+  private subnets, per-tenant data residency via region pinning.
+- **Scaling:** Kafka partitions = 12 (skill §2); Spark dynamic allocation; autoscaling.
+- **Observability:** LGTM stack, model-drift + data-quality SLA alerts.
 
 ---
 
 ## 3. Data Ingestion Pipeline Plan
 
-Driven by the seven sample entities. Two ingest modes, mirroring skill §Data-Flow Phases 1–3.
+Driven by the seven sample entities. **Batch-first** in the prototype (reviewer): all sources
+ingest as micro-batches through Kafka into Bronze, then Spark curates to Silver. Kafka remains
+the decoupling backbone so the *deferred* real-time path can attach later without re-plumbing.
 
-### 3.1 Source classification
-| Source | Cadence | Mode | Topic |
+### 3.0 Synthetic data generator (reviewer: required)
+The `data_samples/` files are single illustrative schema docs — insufficient for ML training.
+A **synthetic data generator** (`synthetic/`, Python + Faker/NumPy) is a Phase-0 deliverable:
+- Generates coherent, referentially-consistent records across all 7 entities
+  (party→account→agreement→product, with matching `service-id`/MSISDN, IMSI, IMEI).
+- Emits realistic **multi-tenant** volumes (configurable: N tenants × M subscribers ×
+  T days of usage/recharge events).
+- Injects **labeled signals** so ML is trainable: a configurable fraction of fraud cases
+  (SIM-box, recharge/card fraud, roaming fraud) and credit-outcome labels (default/repay),
+  with controllable base rates and class imbalance.
+- Produces JSON:API files into `/data/landing/<tenant>/{entity}/` for NiFi to pick up, plus
+  a holdout ground-truth file for evaluation.
+
+### 3.1 Source classification (prototype = batch)
+| Source | Cadence | Prototype mode | Topic |
 |---|---|---|---|
-| parties, accounts, agreements, products | slowly-changing (reference) | **batch / CDC** | `tmf.parties`, `tmf.accounts`, `tmf.agreements`, `tmf.products` |
-| voice & data usage events | high-volume stream | **streaming** | `tmf.usage.voice`, `tmf.usage.data` |
-| recharge events | medium-volume stream | **streaming** | `tmf.recharge` |
+| parties, accounts, agreements, products | slowly-changing (reference) | **batch / CDC** | `t.<tenant>.tmf.parties/accounts/agreements/products` |
+| voice & data usage events | high-volume | **micro-batch** (stream deferred) | `t.<tenant>.tmf.usage.voice/data` |
+| recharge events | medium-volume | **micro-batch** (stream deferred) | `t.<tenant>.tmf.recharge` |
 | any failed/invalid record | — | DLQ | `*.dlq` |
 
 ### 3.2 Bronze ingestion flow
-1. **Landing:** files dropped to `/data/landing/{entity}/` (prototype seeds from `data_samples/`).
-2. **NiFi** `ListFile→FetchFile→ValidateRecord→ConvertRecord (JSON→Avro via Schema Registry)→PublishKafka`.
-3. **Kafka Connect S3 Sink** writes raw Avro to `bronze/{entity}/…` (immutable backup, skill Q2),
-   time-partitioned (hourly).
+1. **Landing:** generator/source files arrive at `/data/landing/<tenant>/{entity}/`.
+2. **NiFi** `ListFile→FetchFile→ (stamp tenant_id) →ValidateRecord→ConvertRecord
+   (JSON→Avro via Schema Registry)→PublishKafka` to the tenant-scoped topic.
+3. **Kafka Connect S3 Sink** writes raw Avro to `bronze/tenant=<id>/{entity}/…`
+   (immutable backup, skill Q2), time-partitioned (hourly).
 4. Invalid records → `{entity}.dlq` with error annotation.
 
-### 3.3 Silver curation (Bronze → Iceberg)
-A **flatten + canonicalize** step (Flink for events, Spark for entities) that:
+### 3.3 Silver curation (Bronze → Iceberg, Spark batch)
+A **Spark** flatten + canonicalize job (one engine for all entities in the batch-first
+prototype) that:
 - Unwraps JSON:API envelope (`data.attributes`, `data.relationships`).
+- Carries `tenant_id` as the leading partition column (data isolation, §1.5).
 - Resolves IDs (strip `UUID(...)` wrapper seen in samples → clean UUID).
 - Normalizes money: split `tax-free-amount` + `tax-amounts` → `gross_amount`, `tax_amount`, `currency`.
 - Normalizes units: voice→seconds, data→kilobytes→bytes; standardize timestamps to UTC.
-- **PII handling:** hash/tokenize MSISDN, IMSI, IMEI, email, phone (respect `privacy-consent`
-  purposes from `parties`); keep salted hash for joins (skill CDM `MASK_PII`).
+- **PII handling (GDPR):** hash/tokenize MSISDN, IMSI, IMEI, email, phone with per-tenant
+  salt; respect `privacy-consent` purposes from `parties`; keep salted hash for joins (skill
+  CDM `MASK_PII`).
 - Deduplicate (record `id` + event window), enforce schema, write to Iceberg.
 
-**Proposed Silver tables** (Iceberg, partitioned by date; events also by network/region):
+**Proposed Silver tables** (Iceberg, partitioned by `tenant_id` + date; events also by network/region):
 - `dim_party`, `dim_account`, `dim_agreement`, `dim_product` (SCD-2 with `valid-from`/`valid-to`).
-- `fact_usage` (unified voice+data: `service_id, event_type, started_at, gross_amount, tax_amount,
-  qty, unit, is_roaming, network_tech, traffic_case, other_party_number, imei, location, agreement_id`).
-- `fact_recharge` (`service_id, created_at, amount, payment_method, status, failure_reason_code,
-  source, recharge_type, agreement_id`).
+- `fact_usage` (unified voice+data: `tenant_id, service_id, event_type, started_at, gross_amount,
+  tax_amount, qty, unit, is_roaming, network_tech, traffic_case, other_party_number, imei,
+  location, agreement_id`).
+- `fact_recharge` (`tenant_id, service_id, created_at, amount, payment_method, status,
+  failure_reason_code, source, recharge_type, agreement_id`).
 
 ### 3.4 Data quality gates (Great Expectations)
 Per entity, at Bronze→Silver: non-null keys (`id`, `service-id`), valid enums (account-type,
@@ -366,20 +457,24 @@ for on-demand scoring; MLflow registry gates staging→prod; monitor PSI/KS drif
 ## 6. ML Algorithm — Fraud Detection
 
 ### 6.1 Problem framing
-Fraud is **rare, evolving, and adversarial** → a **hybrid, layered** approach (no single model):
+Fraud is **rare, evolving, and adversarial** → a **hybrid, layered** approach (no single model).
+**Batch-first** (reviewer): the prototype runs all layers as scheduled batch scoring; the
+real-time (Flink) variant of Layer 1 is **deferred** to a later phase.
 
 ```
-Layer 1: Rules engine (Flink)        → known patterns, instant block, zero training
-Layer 2: Supervised classifier        → labeled fraud, high precision
-Layer 3: Unsupervised anomaly         → novel/unknown fraud
-Layer 4: Graph analytics (batch)       → SIM-box rings / collusion
+Layer 1: Rules engine                  → known patterns, zero training   [batch now; Flink real-time DEFERRED]
+Layer 2: Supervised classifier         → labeled fraud, high precision   [batch]
+Layer 3: Unsupervised anomaly          → novel/unknown fraud             [batch]
+Layer 4: Graph analytics               → SIM-box rings / collusion       [batch]
 → score fusion + analyst feedback loop
 ```
 
-### 6.2 Layer 1 — Real-time rules (Flink)
-Deterministic velocity/threshold rules (e.g., call-velocity, recharge burst, new-account-high-card-recharge,
-originating-ratio for SIM-box). Runs in Flink on `tmf.usage.*` / `tmf.recharge` streams for
-sub-second blocking; cheap, explainable, catches known fraud immediately.
+### 6.2 Layer 1 — Rules engine (batch-first; Flink real-time deferred)
+Deterministic velocity/threshold rules (call-velocity, recharge burst, new-account-high-card-
+recharge, originating-ratio for SIM-box). **Prototype:** evaluated in scheduled **Spark/SQL
+batch** over `fact_usage`/`fact_recharge` to flag cases for the case queue. **Deferred phase:**
+the *same rule definitions* are ported to **Flink** on `t.<tenant>.tmf.*` streams for sub-second
+blocking — kept as portable predicates so no rewrite is needed.
 
 ### 6.3 Layer 2 — Supervised classifier (primary when labels exist)
 - **Algorithm (recommended):** **XGBoost** (binary classification). Strong on imbalanced tabular
@@ -403,8 +498,10 @@ features back to Layer 2.
 ### 6.6 Score fusion, feedback & serving
 - Combine layer outputs into a unified fraud score + reason set; route high scores to a case-
   management queue; **analyst dispositions become new labels** (active-learning loop).
-- **Real-time path:** Flink (rules + online model via Feast/Redis) → block/alert.
-- **Batch path:** nightly retrain candidates, graph refresh, drift monitoring.
+- **Batch path (prototype):** scheduled scoring (rules + classifier + anomaly), nightly retrain
+  candidates, graph refresh, drift monitoring; scores written to Gold/TimescaleDB + FastAPI
+  `/fraud-score` for on-demand lookups.
+- **Real-time path (deferred phase):** Flink (rules + online model via Feast/Redis) → block/alert.
 - **Metrics:** PR-AUC, precision@k, recall, false-positive rate, fraud-$ caught, alert volume,
   detection latency; drift via PSI.
 
@@ -417,36 +514,39 @@ features back to Layer 2.
 
 | Phase | Goal | Key deliverables | Exit criteria |
 |---|---|---|---|
-| **0. Foundations** | Repo + local stack | Compose stack, Makefile, MinIO/Kafka/Iceberg/Trino up, CI skeleton, schemas/avro contracts | `make smoke` green; sample data lands in Bronze |
-| **1. Ingestion → Bronze/Silver** | Canonical lakehouse | NiFi flow, Kafka topics+SR, S3 sink, Flink/Spark flatten jobs, Iceberg dim_/fact_ tables, Great Expectations gates | All 7 entities queryable in Silver via Trino; DQ gates pass |
-| **2. Gold + Feature Engineering** | Feature tables | Spark feature jobs (§4), Gold Iceberg + TimescaleDB mirror, Feast repo, Airflow DAGs | Point-in-time feature retrieval works; daily DAG runs |
-| **3. Credit-Limit ML** | Credit use case | Stage-0 heuristic, LightGBM PD + scorecard baseline, SHAP, limit sizing, MLflow, FastAPI `/credit-limit` | Back-tested PD (AUC/KS) + limit policy report; endpoint serves |
-| **4. Fraud ML** | Fraud use case | Flink rules, XGBoost classifier, Isolation Forest, graph features, score fusion, real-time scoring | PR-AUC + precision@k report; real-time alert demo |
-| **5. Hardening / Prod** | K8s + observability | Helm/Argo CD, drift monitoring, dashboards, runbooks, security review | Deploy to K8s target; dashboards + alerts live |
+| **0. Foundations** | Repo + **minikube** stack + multi-tenancy skeleton + synthetic data | Helm/Kustomize (local overlay), Makefile, MinIO/**Strimzi Kafka**/**Nessie**+Iceberg/Trino/TimescaleDB up, **Keycloak+OPA** + per-tenant namespaces/quotas/NetworkPolicy, **synthetic data generator**, CI skeleton, schemas/avro | `make smoke` green incl. **tenant-isolation test**; synthetic data lands in Bronze |
+| **1. Ingestion → Bronze/Silver** | Canonical, tenant-isolated lakehouse | NiFi flow (tenant stamping), Kafka topics+ACLs+SR, S3 sink, **Spark** flatten jobs, Iceberg `dim_/fact_` (tenant-partitioned), Great Expectations gates, **GDPR PII masking + consent** | All 7 entities queryable in Silver via Trino with **RBAC/row-level isolation**; DQ gates pass |
+| **2. Gold + Feature Engineering** | Feature tables | Spark feature jobs (§4), Gold Iceberg + TimescaleDB mirror, Feast repo, Airflow DAGs | Point-in-time, tenant-scoped feature retrieval works; daily DAG runs |
+| **3. Credit-Limit ML (batch)** | Credit use case | Stage-0 heuristic, LightGBM PD + scorecard baseline, SHAP, limit sizing, MLflow, FastAPI `/credit-limit` (batch + on-demand) | Back-tested PD (AUC/KS) + limit policy report; endpoint serves (tenant-scoped) |
+| **4. Fraud ML (batch)** | Fraud use case | **Batch** rules, XGBoost classifier, Isolation Forest, graph features (GraphFrames), score fusion, FastAPI `/fraud-score` | PR-AUC + precision@k report; case-queue demo |
+| **5. AWS + real-time + hardening** | Prod + deferred streaming | **AWS EKS** overlay + Argo CD/ECR, **Flink real-time** scoring (ported rules + online Feast/Redis), drift monitoring, dashboards, runbooks, security/GDPR review | Deployed to EKS; real-time alert demo; dashboards + alerts live |
 
-**Cross-cutting (every phase):** unit/integration tests, data contracts, PII masking, lineage,
-docs, observability.
-
----
-
-## 8. Open Questions for Reviewer
-
-1. **Deployment target:** Local Docker Compose prototype first (recommended), or go straight to
-   Kubernetes/cloud (which cloud — AWS/Azure/GCP)?
-2. **Kafka distribution:** Confluent Platform vs **Redpanda** (lighter for local) — preference?
-3. **Iceberg catalog:** **Nessie** (git-like, recommended) vs Polaris vs Hive Metastore vs AWS Glue?
-4. **Credit-limit label:** Is there (or will there be) any ground-truth on credit limits /
-   defaults / postpaid bill payment? This decides Stage-0-only vs full supervised PD.
-5. **Fraud labels:** Any historical confirmed-fraud cases to seed supervised training, or start
-   unsupervised + rules only?
-6. **Data volume & realism:** `data_samples/` are single illustrative docs. Should Phase 0 include
-   a **synthetic data generator** to produce realistic volumes for ML training?
-7. **Compliance scope:** Any specific regulatory constraints (GDPR, fair-lending/adverse-action,
-   model explainability requirements) to bake in from Phase 1?
-8. **Real-time vs batch priority:** Is real-time fraud scoring required for the prototype, or is
-   batch sufficient initially (affects Flink investment in early phases)?
+**Cross-cutting (every phase):** unit/integration tests, data contracts, **multi-tenancy &
+RBAC enforcement**, **GDPR** (PII masking, consent, retention, RTBF), lineage, docs, observability.
 
 ---
 
-*Prepared for review. On approval, I will start at **Phase 0** and proceed phase-by-phase,
-committing working increments to `claude/lakehouse-prototyping-plan-8igpny`.*
+## 9. Resolved Decisions
+
+Decisions captured from reviewer comments on **PR #1** (all incorporated above):
+
+| # | Topic | Decision | Where applied |
+|---|---|---|---|
+| 1 | Deployment target | **Local = K8s minikube; Prod = AWS (EKS)** — no Docker Compose | §1.1, §2 |
+| 2 | Kafka | **Apache Kafka (open source)** via Strimzi (+ Apicurio Schema Registry) | §1.3, §2, §3 |
+| 3 | Iceberg catalog | **Nessie** | §1.1, §1.3, §2 |
+| 4 | Synthetic data | **Required** — generator is a Phase-0 deliverable | §3.0, §7 (Phase 0) |
+| 5 | Compliance | **GDPR + RBAC + multi-tenancy** as first-class requirements | §1.5, §3.3, §7 |
+| 6 | Multi-tenancy | **Data isolation + RBAC** (tenant_id partitioning, Keycloak+OPA, namespace isolation) | §1.4, §1.5 |
+| 7 | Real-time vs batch | **Start with batch**; Flink real-time deferred to Phase 5 | §1.1, §6.2, §6.6, §7 |
+
+### Remaining inputs (non-blocking — sensible defaults assumed unless you say otherwise)
+- **Credit/fraud labels:** assumed **synthetically generated** (per decision #4) so models are
+  trainable now; will swap to real labels when available.
+- **Tenancy granularity for prod data residency** (per-tenant AWS region) — confirm only if needed.
+
+---
+
+*Updated per PR #1 review. On approval, I will start at **Phase 0** (minikube stack +
+multi-tenancy skeleton + synthetic data generator) and proceed phase-by-phase, committing
+working increments to `claude/lakehouse-prototyping-plan-8igpny`.*
