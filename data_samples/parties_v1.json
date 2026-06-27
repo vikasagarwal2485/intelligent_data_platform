@@ -1,0 +1,72 @@
+{
+    "data": {
+      "type": "parties",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "role": ["owner", "payer", "user", "administrator", "contact", "power-of-attorney"],
+        "valid-for" : {
+            "meta" : {
+                "type" : "valid-for-datetime"
+            },
+            "valid-from" : "2026-02-18T03:47:01.708Z"
+        },
+        "personal-details": { 
+            "first-name": "John",
+            "last-name": "Doe",
+            "date-of-birth": "1990-01-01",
+            "language": "en-US"
+        },
+        "company-details": {
+            "company-name": "ABC Corporation",
+            "industry": "Technology",
+            "number-of-employees": 500
+        },
+        "contact-media": [
+            { 
+                "meta" : {
+                    "type": "phone-number"
+                },
+                "primary-phone": "+1234567890",
+                "secondary-phone": "+1234567890"
+            },
+            {
+                "meta" : {
+                    "type": "email-address"
+                },
+                "email": "john.doe@example.com"
+            },
+            {
+                "meta" : {
+                    "type": "postal-address"
+                },
+                "address": "123 Main St, Anytown, USA",
+                "street": "123 Main St",
+                "city": "Anytown",
+                "state": "CA",
+                "postal-code": "12345",
+                "country": "USA"
+            }
+        ],
+        "privacy-consent": [{
+            "meta" : {
+                "type": "privacy-consent"
+            },
+            "consent-given": true,
+            "consent-date": "2026-02-18T03:47:01.708Z",
+            "consent-method": "online-form",
+            "consent-purpose": ["marketing", "analytics", "third-party-sharing"],
+            "valid-for" : {
+                "meta" : {
+                    "type" : "valid-for-datetime"
+                },
+                "valid-from" : "2026-02-18T03:47:01.708Z"
+            }
+        }]
+      },
+      "relationships": {
+        "accounts": [{
+          "data": { "type": "accounts", "id": "UUID(116100030984920447)" }
+        }]
+      }
+    }
+}

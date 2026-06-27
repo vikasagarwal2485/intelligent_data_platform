@@ -1,0 +1,32 @@
+{
+    "data": {
+      "type": "products",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "product-type": "addon",
+        "name": "Data 1 GB",
+        "valid-for" : {
+            "meta" : {
+                "type" : "valid-for-datetime"
+            },
+            "valid-from" : "2026-02-18T03:47:01.708Z"
+        },
+        "lifecycle-status": ["active", "inactive", "pending", "terminated"],
+        "characteristics": {}
+      },
+      "relationships": {
+        "agreements": {
+          "data": { "type": "agreements", "id": "UUID(116100030984920447)" }
+        },
+        "child-products": [{
+          "data": { "type": "products", "id": "UUID(116100030984920447)" }
+        }],
+        "parent-products": [{
+          "data": { "type": "products", "id": "UUID(116100030984920447)" }
+        }],
+        "product-offering": {
+          "data": { "type": "product-offerings", "id": "DATA_1GB" }
+        }
+      }
+    }
+}

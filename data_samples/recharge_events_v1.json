@@ -1,0 +1,35 @@
+{
+    "data": {
+      "type": "recharge-events",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "created-at": "2016-09-27T13:42:16.000Z",
+        "recharge-amount": {
+          "tax-free-amount": {"amount": 20.0, "currency": "EUR"},
+          "tax-amounts": []
+        },
+        "characteristics": {
+            "external-reference-id": "ext-ref-1234567890",
+            "reference-id": "internal-ref-1234567890",
+            "source": "web",
+            "requestor": "vikas",
+            "payment-method": "credit-card"
+        },
+        "event-status": "successful",
+        "failure-reason-code": null,
+        "service-id": "595984920447",
+        "recharge-type": "manual"
+      },
+      "relationships": {
+        "target": {
+          "data": { "type": "agreements", "id": "UUID(116100030984920447)" }
+        },
+        "recharge-specification": {
+          "data": {
+            "type": "recharge-specifications",
+            "id": "default-specification"
+          }
+        }
+      }
+    }
+}

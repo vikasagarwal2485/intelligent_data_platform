@@ -1,0 +1,32 @@
+{
+    "data": {
+      "type": "agreements",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "agreement-type": ["device", "subscription", "etc"],
+        "business-line-type": ["mobile", "broadband", "iptv", "fixed-line-telephony", "iot", "energy", "insurance"],
+        "valid-for" : {
+            "meta" : {
+                "type" : "valid-for-datetime"
+            },
+            "valid-from" : "2026-02-18T03:47:01.708Z"
+        },
+        "lifecycle-status": ["active", "inactive", "pending", "terminated"],
+        "characteristics": { 
+            "meta" : {
+                "type": "mobile-subscription-characteristics"
+            },
+            "msisdn": "595984920447",
+            "imsi": "123456789012345"
+        }
+      },
+      "relationships": {
+        "account": {
+          "data": { "type": "accounts", "id": "UUID(116100030984920447)" }
+        },
+        "product": [{
+          "data": { "type": "products", "id": "UUID(116100030984920447)" }
+        }]
+      }
+    }
+}

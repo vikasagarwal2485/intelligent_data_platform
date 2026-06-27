@@ -1,0 +1,50 @@
+{
+    "data": {
+      "type": "usage-events",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "created-at": "2016-09-27T13:42:16.000Z",
+        "started-at": "2016-09-27T13:31:16.000Z",
+        "total-charged-amount": {
+          "tax-free-amount": {
+            "amount": 5.40909,
+            "currency": "EUR"
+          },
+          "tax-amounts": [
+            {"tax-amount": {"amount": 0.540909, "currency": "EUR"}, "tax-rate": 10}
+          ]
+        },
+        "total-charged-non-monetary-amounts": [
+          {
+            "amount": 572,
+            "unit-of-measure": "kilobytes"
+          }
+        ],
+        "used-service-units": [{
+          "amount": 657,
+          "unit-of-measure": "kilobytes",
+          "usage-type": "total-data"
+        }],
+        "service-id": "595984920447",
+        "event-type": "data",
+        "event-details": {
+          "meta": {
+            "type": "data-event-details"
+          },
+          "characteristics": {},
+          "access-point-name": "data",
+          "is-roaming": false,
+          "imei": "123456789012345",
+          "network-technology": ["2G", "3G", "3G+", "4G", "4G+", "5G", "undefined"],
+          "user-location": {
+            "destination": "network-a"
+          }
+        }
+      },
+      "relationships": {
+        "target": {
+          "data": { "type": "agreements or products", "id": "UUID(116100030984920447)" }
+        }
+      }
+    }
+}

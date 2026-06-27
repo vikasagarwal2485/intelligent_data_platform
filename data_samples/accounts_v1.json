@@ -1,0 +1,33 @@
+{
+    "data": {
+      "type": "accounts",
+      "id": "1f0c81aa-d356-4912-a79f-b9a4f58ba678",
+      "attributes": {
+        "account-type": ["company", "salaried", "self-employed", "student", "retired", "normal"],
+        "account-segment-type": ["B2C", "B2B", "B2B2C"],
+        "valid-for" : {
+            "meta" : {
+                "type" : "valid-for-datetime"
+            },
+            "valid-from" : "2026-02-18T03:47:01.708Z"
+        },
+        "lifecycle-status": ["active", "inactive", "pending", "terminated"],
+        "characteristics": { 
+            "meta" : {
+                "type": "company-account-characteristics"
+            },
+            "company-name": "ABC Corporation",
+            "industry": "Technology",
+            "number-of-employees": 500
+        }
+      },
+      "relationships": {
+        "agreements": [{
+          "data": { "type": "agreements", "id": "UUID(116100030984920447)" }
+        }],
+        "parties": [{
+          "data": { "type": "parties", "id": "UUID(116100030984920447)" }
+        }]
+      }
+    }
+}
