@@ -124,12 +124,15 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    ```bash
    make infra        # bash deploy/install-infra.sh idp-platform
    ```
-   This **adds the required Helm repositories first** (Strimzi, Nessie, Trino,
-   Airflow, MLflow, Prometheus) — the step whose absence causes
-   `Error: repo <x> not found` — then installs each component. Bitnami charts
-   (MinIO, PostgreSQL/TimescaleDB, Keycloak) are pulled via their OCI registry,
-   so they need no repo add. The script is idempotent (safe to re-run) and ends
-   with a note on Bitnami's free-image limitation and how to work around it.
+   This **adds the required Helm repositories first** (MinIO, Strimzi, Nessie,
+   Trino, Airflow, MLflow, Prometheus) — the step whose absence causes
+   `Error: repo <x> not found` — then installs each component. It deliberately
+   **avoids Bitnami charts** (whose free images were removed on 2025-08-28,
+   causing `ImagePullBackOff` on `bitnami/minio:...`): MinIO uses its official
+   chart, and TimescaleDB/Keycloak use plain manifests with upstream images
+   (`timescale/timescaledb`, `quay.io/keycloak`). The script is idempotent and
+   first removes any earlier broken Bitnami releases. See
+   [`deploy/README.md`](deploy/README.md) for the full source table.
 5. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
 6. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
 7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into

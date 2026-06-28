@@ -41,22 +41,24 @@ make infra        # or: bash deploy/install-infra.sh idp-platform
 ```
 
 The script adds the required Helm repos before installing — omitting
-`helm repo add` is what produces `Error: repo <x> not found`. Repos used:
+`helm repo add` is what produces `Error: repo <x> not found`. It deliberately
+**avoids Bitnami charts** (whose free images were removed on 2025-08-28, causing
+`ImagePullBackOff` on e.g. `bitnami/minio:...`). Sources used:
 
-| Component | Source |
-|-----------|--------|
-| MinIO, PostgreSQL/TimescaleDB, Keycloak | `oci://registry-1.docker.io/bitnamicharts/*` (OCI, no repo add) |
-| Apache Kafka (Strimzi) | `https://strimzi.io/charts/` |
-| Nessie | `https://charts.projectnessie.org` |
-| Trino | `https://trinodb.github.io/charts` |
-| Airflow | `https://airflow.apache.org` |
-| MLflow | `https://community-charts.github.io/helm-charts` |
-| Prometheus + Grafana | `https://prometheus-community.github.io/helm-charts` |
+| Component | Source | Image |
+|-----------|--------|-------|
+| MinIO | `https://charts.min.io/` (official) | `quay.io/minio/minio` |
+| TimescaleDB | plain manifest `infra/timescaledb.yaml` | `timescale/timescaledb` |
+| Keycloak | plain manifest `infra/keycloak.yaml` | `quay.io/keycloak/keycloak` |
+| Apache Kafka (Strimzi) | `https://strimzi.io/charts/` | `quay.io/strimzi/*` |
+| Nessie | `https://charts.projectnessie.org` | `ghcr.io/projectnessie/*` |
+| Trino | `https://trinodb.github.io/charts` | `trinodb/trino` |
+| Airflow | `https://airflow.apache.org` | `apache/airflow` |
+| MLflow | `https://community-charts.github.io/helm-charts` | upstream |
+| Prometheus + Grafana | `https://prometheus-community.github.io/helm-charts` | `quay.io/prometheus/*` |
 
-> **Bitnami note:** since 2025-08-28 Bitnami's free image catalogue is limited.
-> If a Bitnami pod hits `ImagePullBackOff`, re-run that chart with a
-> `bitnamilegacy` image (see the note printed by the script) or substitute a
-> non-Bitnami chart (CloudNativePG, codecentric/keycloakx).
+All images are freely pullable — no Bitnami subscription needed. The script is
+idempotent and first removes any earlier broken Bitnami releases.
 
 ## Production (AWS EKS)
 ```bash
