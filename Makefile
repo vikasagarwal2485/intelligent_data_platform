@@ -54,9 +54,17 @@ clean: ## Remove generated data and caches
 mk-up: ## Start minikube with required addons
 	minikube start --cpus=8 --memory=16384 --addons=ingress,metrics-server,storage-provisioner
 
-.PHONY: namespaces
-namespaces: ## Create platform + per-tenant namespaces with RBAC/quota/netpol
+.PHONY: image
+image: ## Build the scoring-api image INTO minikube's docker daemon (local, no registry)
+	@eval $$(minikube docker-env) && docker build -t idp/scoring-api:dev .
+	@echo "Built idp/scoring-api:dev inside minikube. Now run: make deploy"
+
+.PHONY: deploy
+deploy: ## Apply the local overlay (namespaces, RBAC, isolation, scoring API)
 	kubectl apply -k deploy/overlays/local
+
+.PHONY: namespaces
+namespaces: deploy ## Alias for `deploy` (kept for backwards compatibility)
 
 .PHONY: mk-down
 mk-down: ## Stop minikube

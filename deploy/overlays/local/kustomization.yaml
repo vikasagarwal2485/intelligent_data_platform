@@ -16,3 +16,8 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/image
         value: idp/scoring-api:dev
+      # Use the image built into minikube's docker daemon; never pull from a
+      # registry (the dev image is local-only). Build it first with `make image`.
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never

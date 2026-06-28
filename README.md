@@ -108,11 +108,19 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    ```bash
    make mk-up    # minikube start with ingress, metrics-server, storage-provisioner
    ```
-2. **Create platform + per-tenant namespaces (RBAC, quotas, NetworkPolicy)**
+2. **Build the scoring-api image into minikube's Docker daemon** (local, no registry)
    ```bash
-   make namespaces        # kubectl apply -k deploy/overlays/local
+   make image    # eval $(minikube docker-env) && docker build -t idp/scoring-api:dev .
    ```
-3. **Install platform infrastructure** (from upstream charts) into `idp-platform`:
+   The local overlay sets `imagePullPolicy: Never`, so Kubernetes uses this
+   locally-built image instead of pulling `idp/scoring-api:dev` from a registry
+   (which would fail with `ImagePullBackOff`).
+3. **Deploy platform + per-tenant namespaces (RBAC, quotas, NetworkPolicy) + scoring API**
+   ```bash
+   make deploy        # kubectl apply -k deploy/overlays/local
+   ```
+   The overlay also deploys the scoring API (from the image built in step 2).
+4. **Install platform infrastructure** (from upstream charts) into `idp-platform`:
    ```bash
    # object store, streaming, catalog, query, serving DB, identity
    helm install minio        oci://registry-1.docker.io/bitnamicharts/minio    -n idp-platform
@@ -126,9 +134,8 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    helm install kube-prom    prometheus-community/kube-prometheus-stack        -n idp-platform
    ```
    (Chart repos are listed in [`deploy/README.md`](deploy/README.md).)
-4. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
-5. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
-6. **Deploy the scoring API** (already included in the overlay from step 2).
+5. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
+6. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
 7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into
    the Airflow `dags/` folder; it schedules the daily batch run.
 8. **Smoke test**:
