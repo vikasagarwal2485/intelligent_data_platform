@@ -15,8 +15,29 @@ set -euo pipefail
 
 NS="${1:-idp-platform}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- Preflight: the Kubernetes API must be reachable -------------------------
+echo ">> Checking cluster connectivity (context: $(kubectl config current-context 2>/dev/null || echo none))"
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+ERROR: cannot reach the Kubernetes API server.
+
+This is a cluster/kubeconfig problem, not a chart problem (you saw a
+"TLS handshake timeout" / "failed to download openapi"). Fix the cluster first:
+
+  minikube status            # is it Running?
+  minikube start             # start it if Stopped/Paused
+  minikube update-context    # fix a stale kubeconfig port after a restart
+  kubectl cluster-info       # should print the control-plane URL
+
+If you use Docker Desktop, make sure it is running and not paused.
+Then re-run:  make infra
+EOF
+  exit 1
+fi
+
 echo ">> Target namespace: ${NS}"
-kubectl create namespace "${NS}" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "${NS}" 2>/dev/null || true
 
 echo ">> Adding Helm repositories"
 helm repo add minio                https://charts.min.io/
