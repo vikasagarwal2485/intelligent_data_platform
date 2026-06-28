@@ -28,15 +28,31 @@ spec:
               value: "true"
           ports:
             - containerPort: 8080
+            - containerPort: 9000   # management/health port
+          # Keycloak start-dev can take 1-2 min to boot (more on a slow node);
+          # the startupProbe gives it up to ~5 min before liveness/readiness apply.
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 9000
-            initialDelaySeconds: 30
             periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            periodSeconds: 15
+            failureThreshold: 5
           resources:
-            requests: { cpu: "250m", memory: 512Mi }
-            limits: { cpu: "1", memory: 1Gi }
+            requests: { cpu: "250m", memory: 768Mi }
+            limits: { cpu: "1", memory: 1536Mi }
 ---
 apiVersion: v1
 kind: Service
