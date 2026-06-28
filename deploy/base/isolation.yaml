@@ -1,0 +1,59 @@
+# Per-tenant resource quotas + default-deny network policy (plan 1.5).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: idp-tenant-a
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "30"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: idp-tenant-b
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "30"
+---
+# Default-deny: pods in a tenant namespace may only talk within that namespace
+# (plus DNS + the platform namespace). Cross-tenant traffic is blocked.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-cross-tenant
+  namespace: idp-tenant-a
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              idp.io/tenant: tenant_a
+        - namespaceSelector:
+            matchLabels:
+              idp.io/scope: platform
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              idp.io/tenant: tenant_a
+        - namespaceSelector:
+            matchLabels:
+              idp.io/scope: platform
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

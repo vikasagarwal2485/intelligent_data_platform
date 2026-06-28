@@ -1,0 +1,63 @@
+.DEFAULT_GOAL := help
+SHELL := /bin/bash
+VENV := .venv
+PY := $(VENV)/bin/python
+PIP := $(VENV)/bin/pip
+NAMESPACE_PLATFORM := idp-platform
+TENANTS := tenant-a tenant-b
+
+# ---------------------------------------------------------------------------
+# Local development (Python)
+# ---------------------------------------------------------------------------
+.PHONY: help
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
+
+$(VENV): ## Create the virtualenv
+	python3 -m venv $(VENV)
+
+.PHONY: install
+install: $(VENV) ## Install the package and dev dependencies
+	$(PIP) install -q --upgrade pip
+	$(PIP) install -q -e ".[dev]"
+
+.PHONY: test
+test: ## Run the test suite
+	$(PY) -m pytest
+
+.PHONY: generate
+generate: ## Generate synthetic data into the landing zone
+	$(PY) -m idp.cli generate
+
+.PHONY: run
+run: ## Run the end-to-end batch pipeline (Bronze->Silver->Features->ML->Gold)
+	$(PY) -m idp.cli run
+
+.PHONY: serve
+serve: ## Start the FastAPI scoring service on :8000
+	$(PY) -m idp.cli serve
+
+.PHONY: smoke
+smoke: ## End-to-end smoke test (pipeline + tenant isolation)
+	$(PY) -m idp.cli run --no-persist
+
+.PHONY: clean
+clean: ## Remove generated data and caches
+	rm -rf data/landing data/lake ml/artifacts .pytest_cache
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# ---------------------------------------------------------------------------
+# Local Kubernetes (minikube) - see deploy/README.md
+# ---------------------------------------------------------------------------
+.PHONY: mk-up
+mk-up: ## Start minikube with required addons
+	minikube start --cpus=8 --memory=16384 --addons=ingress,metrics-server,storage-provisioner
+
+.PHONY: namespaces
+namespaces: ## Create platform + per-tenant namespaces with RBAC/quota/netpol
+	kubectl apply -k deploy/overlays/local
+
+.PHONY: mk-down
+mk-down: ## Stop minikube
+	minikube stop

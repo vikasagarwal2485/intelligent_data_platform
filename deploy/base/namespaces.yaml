@@ -1,0 +1,26 @@
+# Platform + per-tenant namespaces (plan 1.5: compute isolation per tenant).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idp-platform
+  labels:
+    app.kubernetes.io/part-of: intelligent-data-platform
+    idp.io/scope: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idp-tenant-a
+  labels:
+    app.kubernetes.io/part-of: intelligent-data-platform
+    idp.io/scope: tenant
+    idp.io/tenant: tenant_a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idp-tenant-b
+  labels:
+    app.kubernetes.io/part-of: intelligent-data-platform
+    idp.io/scope: tenant
+    idp.io/tenant: tenant_b

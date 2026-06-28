@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Data lake (generated locally, never committed)
+data/landing/
+data/lake/
+data/synthetic/*.json
+data/synthetic/*.parquet
+data/ground_truth/
+ml/artifacts/
+*.parquet
+
+# Local infra / secrets
+.env
+*.local.yaml

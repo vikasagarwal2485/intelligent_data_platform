@@ -1,0 +1,20 @@
+# Argo CD GitOps application (plan 2B). Syncs the AWS overlay to EKS.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: intelligent-data-platform
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/vikasagarwal2485/intelligent_data_platform.git
+    targetRevision: main
+    path: deploy/overlays/aws
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
