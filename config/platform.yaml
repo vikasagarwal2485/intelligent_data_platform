@@ -1,0 +1,53 @@
+# Intelligent Data Platform - prototype configuration
+# See docs/architecture_and_implementation_plan.md
+
+platform:
+  name: intelligent-data-platform
+  environment: local            # local (minikube) | aws (eks)
+
+# Multi-tenancy (see plan section 1.5). Every record is stamped with tenant_id and
+# physically isolated by a leading partition column.
+tenants:
+  - id: tenant_a
+    name: "Acme Telecom"
+    region: eu-west-1
+    pii_salt: "salt-a-CHANGE-ME"   # per-tenant salt for GDPR PII tokenization (dev only)
+  - id: tenant_b
+    name: "Globex Mobile"
+    region: eu-central-1
+    pii_salt: "salt-b-CHANGE-ME"
+
+# Lake storage layout (s3://... in prod, local dirs in prototype)
+storage:
+  root: "data/lake"
+  landing: "data/landing"
+  bronze: "data/lake/bronze"
+  silver: "data/lake/silver"
+  gold: "data/lake/gold"
+  ml_artifacts: "ml/artifacts"
+
+# Synthetic data generation (Phase 0 - reviewer requirement)
+synthetic:
+  seed: 42
+  subscribers_per_tenant: 500
+  days: 60
+  fraud_rate: 0.10             # fraction of subscribers exhibiting fraud
+  default_rate: 0.12           # fraction defaulting on extended credit
+
+# Feature engineering lookback windows (days) - see plan section 4
+features:
+  windows: [7, 30, 90]
+
+# Credit model policy (see plan section 5)
+credit:
+  base_multiplier: 3.0         # k in limit0 = k * avg_recharge * factors
+  min_limit: 5.0
+  max_limit: 500.0
+
+# Fraud model (see plan section 6)
+fraud:
+  anomaly_contamination: 0.05
+  rule_thresholds:
+    originating_ratio: 0.9     # SIM-box signature
+    max_calls_per_day: 200
+    failed_recharge_burst: 5

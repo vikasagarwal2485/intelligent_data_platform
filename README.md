@@ -1,2 +1,188 @@
-# intelligent_data_platform
-Intelligent Data Platform
+# Intelligent Data Platform
+
+A telecom **data lakehouse** (medallion architecture) that ingests TM Forum
+entity/event data, curates it, and serves two ML use cases:
+
+1. **Alternative credit-limit scoring** — a probability-of-default model + limit sizing.
+2. **Fraud detection** — supervised + anomaly + rules (SIM-box, recharge/card, roaming).
+
+It is **multi-tenant, GDPR-aware and batch-first**, Kubernetes-native on both
+tiers (local **minikube**, production **AWS EKS**). The full design is in
+[`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
+(reviewed in PR #1).
+
+```
+synthetic data ─▶ Bronze (raw) ─▶ Silver (canonical) ─▶ Features ─▶ ML ─▶ Gold + Scoring API
+                                  Iceberg-style tables    Feast-style   credit / fraud
+```
+
+> **Prototype note.** The Python package (`src/idp`) implements the *canonical
+> pipeline logic* with pandas + scikit-learn so the whole flow is unit-testable
+> without a cluster. The production engines from the plan (Apache Kafka/Strimzi,
+> Spark, Flink, Iceberg+Nessie, Trino, TimescaleDB, Keycloak+OPA, Airflow,
+> MLflow) are deployed via [`deploy/`](deploy/) and documented below. The
+> scikit-learn `HistGradientBoosting*` models are drop-in stand-ins for the
+> LightGBM/XGBoost models named in the plan.
+
+---
+
+## Repository layout
+
+```
+src/idp/              # the platform package
+  common/             #   config, multi-tenancy guards, GDPR PII tokenization
+  synthetic/          #   synthetic data generator (Phase 0)
+  ingestion/          #   Bronze (raw, immutable, tenant-partitioned)
+  curation/           #   Silver (JSON:API unwrap, canonical dim/fact tables)
+  features/           #   credit & fraud feature engineering
+  ml/                 #   credit-limit model + fraud model
+  serving/            #   FastAPI scoring service
+  pipeline.py         #   end-to-end batch orchestration
+  cli.py              #   `idp generate | run | serve`
+tests/                # 60 tests (pytest) covering every layer
+config/               # platform.yaml + Avro schema contracts
+data/                 # generated local data (git-ignored); see data/README.md
+data_samples/         # reference TM Forum JSON:API documents
+pipelines/airflow/    # Airflow DAG for the batch pipeline
+deploy/               # Kustomize base + minikube/AWS overlays + Argo CD
+docs/                 # architecture & implementation plan
+```
+
+---
+
+## Quick start (local Python)
+
+Requires Python 3.10+.
+
+```bash
+make install      # create .venv and install the package + dev deps
+make test         # run the full test suite (~30s)
+make run          # generate data + run the full pipeline, writing to data/lake/
+make serve        # start the scoring API on http://localhost:8000
+```
+
+`make run` prints a summary like:
+
+```json
+{
+  "counts": {"subscribers": 1000, "usage_events": 1000000, "recharge_events": 31000},
+  "credit_metrics": {"auc": 0.72, "ks": 0.36, "gini": 0.44},
+  "fraud_metrics":  {"pr_auc": 0.68, "precision_at_20": 1.0}
+}
+```
+
+(Out-of-sample metrics on the synthetic default config; deterministic given the
+seed. Credit AUC ≈ 0.72 and fraud precision@20 = 1.0 — the worst offenders are
+ranked perfectly — are realistic, non-overfit numbers.)
+
+### Try the scoring API
+```bash
+curl -s localhost:8000/health
+curl -s -X POST localhost:8000/credit-limit -H 'content-type: application/json' \
+  -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"recharge_avg_amount":40,"account_tenure_days":500,"recharge_success_rate":0.95}}'
+curl -s -X POST localhost:8000/fraud-score -H 'content-type: application/json' \
+  -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"originating_ratio":0.95,"calls_per_active_day":250}}'
+```
+
+### CLI
+```bash
+idp generate                 # write synthetic landing files to data/landing/
+idp run                      # Bronze->Silver->Features->ML->Gold (writes data/lake/)
+idp run --no-persist         # in-memory smoke run
+idp serve --port 8000        # scoring API
+idp --config path.yaml run   # use a custom config
+```
+
+Configuration (tenants, volumes, model policy) lives in
+[`config/platform.yaml`](config/platform.yaml).
+
+---
+
+## Step-by-step deployment
+
+### A. Local Kubernetes (minikube)
+
+Requires `minikube`, `kubectl`, `kustomize`, `helm`.
+
+1. **Start the cluster**
+   ```bash
+   make mk-up    # minikube start with ingress, metrics-server, storage-provisioner
+   ```
+2. **Create platform + per-tenant namespaces (RBAC, quotas, NetworkPolicy)**
+   ```bash
+   make namespaces        # kubectl apply -k deploy/overlays/local
+   ```
+3. **Install platform infrastructure** (from upstream charts) into `idp-platform`:
+   ```bash
+   # object store, streaming, catalog, query, serving DB, identity
+   helm install minio        oci://registry-1.docker.io/bitnamicharts/minio    -n idp-platform
+   helm install strimzi      strimzi/strimzi-kafka-operator                    -n idp-platform
+   helm install nessie       nessie/nessie                                     -n idp-platform
+   helm install trino        trino/trino                                       -n idp-platform
+   helm install timescaledb  bitnami/postgresql                                -n idp-platform
+   helm install keycloak     bitnami/keycloak                                  -n idp-platform
+   helm install airflow      apache-airflow/airflow                            -n idp-platform
+   helm install mlflow       community-charts/mlflow                           -n idp-platform
+   helm install kube-prom    prometheus-community/kube-prometheus-stack        -n idp-platform
+   ```
+   (Chart repos are listed in [`deploy/README.md`](deploy/README.md).)
+4. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
+5. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
+6. **Deploy the scoring API** (already included in the overlay from step 2).
+7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into
+   the Airflow `dags/` folder; it schedules the daily batch run.
+8. **Smoke test**:
+   ```bash
+   make smoke    # ingest -> Bronze -> Silver -> feature -> score (asserts isolation)
+   ```
+
+### B. Production (AWS EKS)
+
+1. Provision EKS + ECR + S3 (per-tenant prefixes & KMS) + IRSA.
+2. Build and push the image to ECR (via GitHub Actions, see `.github/workflows/`).
+3. Deploy with the AWS overlay, or let **Argo CD** sync it:
+   ```bash
+   kubectl apply -k deploy/overlays/aws
+   kubectl apply -f deploy/argocd/application.yaml
+   ```
+4. Wire secrets via **External Secrets + AWS Secrets Manager/KMS**, ALB ingress,
+   and per-tenant data residency (region pinning).
+
+See [`deploy/README.md`](deploy/README.md) for overlay details.
+
+---
+
+## How it maps to the plan
+
+| Plan section | Implementation |
+|---|---|
+| 1.5 Multi-tenancy / RBAC / GDPR | `common/tenancy.py`, `common/pii.py`, `deploy/base/{rbac,isolation}.yaml` |
+| 3.0 Synthetic data | `synthetic/generator.py` (coherent, labelled, multi-tenant) |
+| 3.2 Bronze ingestion | `ingestion/bronze.py` (tenant-partitioned Parquet) |
+| 3.3 Silver curation | `curation/silver.py`, `curation/jsonapi.py` (JSON:API unwrap, PII tokenization) |
+| 4 Feature engineering | `features/credit_features.py`, `features/fraud_features.py` |
+| 5 Credit-limit ML | `ml/credit_model.py` (heuristic + PD model + limit sizing + scorecard) |
+| 6 Fraud detection | `ml/fraud_model.py` (rules + gradient boosting + IsolationForest fusion) |
+| 5.6 / 6.6 Serving | `serving/api.py` (FastAPI), `deploy/base/scoring-api.yaml` |
+| Q5 Orchestration | `pipelines/airflow/dags/idp_batch_dag.py` |
+
+---
+
+## Testing
+
+```bash
+make test        # or: .venv/bin/python -m pytest
+```
+60 tests cover: synthetic generation & referential integrity, tenant isolation,
+GDPR tokenization, JSON:API unwrap against the real `data_samples/`, ingestion
+round-trip, Silver curation, feature engineering, both ML models (signal +
+persistence), the end-to-end pipeline, and the scoring API.
+
+---
+
+## Status
+
+All six implementation phases from the plan are in place (Phase 5 real-time
+Flink scoring is intentionally deferred per the review — batch-first). The
+prototype runs end-to-end locally and the Kubernetes deployment artifacts are
+provided for minikube and EKS.

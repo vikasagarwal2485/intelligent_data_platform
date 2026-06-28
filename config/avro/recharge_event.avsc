@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "RechargeEvent",
+  "namespace": "com.idp.tmf",
+  "doc": "Canonical recharge event (flattened from JSON:API). See plan 3.3.",
+  "fields": [
+    {"name": "tenant_id", "type": "string"},
+    {"name": "id", "type": "string"},
+    {"name": "service_id", "type": "string", "doc": "MSISDN"},
+    {"name": "agreement_id", "type": ["null", "string"], "default": null},
+    {"name": "created_at", "type": "long", "logicalType": "timestamp-millis"},
+    {"name": "amount", "type": "double"},
+    {"name": "currency", "type": "string", "default": "EUR"},
+    {"name": "payment_method", "type": "string"},
+    {"name": "status", "type": {"type": "enum", "name": "RechargeStatus", "symbols": ["successful", "failed"]}},
+    {"name": "failure_reason_code", "type": ["null", "string"], "default": null},
+    {"name": "source", "type": ["null", "string"], "default": null},
+    {"name": "recharge_type", "type": ["null", "string"], "default": null}
+  ]
+}

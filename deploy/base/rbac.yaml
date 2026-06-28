@@ -1,0 +1,47 @@
+# RBAC roles aligned to the personas in plan 1.5. In production these bind to
+# Keycloak OIDC groups (tenant_id + role claims). Here they are namespace-scoped
+# Roles so a tenant's data scientists can only act within that tenant namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ds-credit
+  namespace: idp-tenant-a
+rules:
+  - apiGroups: ["", "batch"]
+    resources: ["pods", "pods/log", "jobs", "configmaps"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ds-fraud
+  namespace: idp-tenant-a
+rules:
+  - apiGroups: ["", "batch"]
+    resources: ["pods", "pods/log", "jobs", "configmaps"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: analyst
+  namespace: idp-tenant-a
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+# Example binding: the tenant_a credit DS group -> ds-credit role in tenant_a ns.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ds-credit-binding
+  namespace: idp-tenant-a
+subjects:
+  - kind: Group
+    name: "oidc:tenant_a:ds_credit"   # Keycloak group claim
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: ds-credit
+  apiGroup: rbac.authorization.k8s.io
