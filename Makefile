@@ -59,6 +59,10 @@ image: ## Build the scoring-api image INTO minikube's docker daemon (local, no r
 	@eval $$(minikube docker-env) && docker build -t idp/scoring-api:dev .
 	@echo "Built idp/scoring-api:dev inside minikube. Now run: make deploy"
 
+.PHONY: infra
+infra: ## Add Helm repos and install platform infrastructure into idp-platform
+	bash deploy/install-infra.sh idp-platform
+
 .PHONY: deploy
 deploy: ## Apply the local overlay (namespaces, RBAC, isolation, scoring API)
 	kubectl apply -k deploy/overlays/local

@@ -34,8 +34,29 @@ make deploy         # kubectl apply -k deploy/overlays/local
 
 Platform infrastructure (Apache Kafka via Strimzi, Nessie + Iceberg, MinIO,
 Trino, TimescaleDB, Keycloak, OPA, Airflow, MLflow, Prometheus/Grafana) is
-installed from upstream operators/Helm charts into `idp-platform`. See the root
-`README.md` for the full ordered bring-up.
+installed by [`install-infra.sh`](install-infra.sh):
+
+```bash
+make infra        # or: bash deploy/install-infra.sh idp-platform
+```
+
+The script adds the required Helm repos before installing — omitting
+`helm repo add` is what produces `Error: repo <x> not found`. Repos used:
+
+| Component | Source |
+|-----------|--------|
+| MinIO, PostgreSQL/TimescaleDB, Keycloak | `oci://registry-1.docker.io/bitnamicharts/*` (OCI, no repo add) |
+| Apache Kafka (Strimzi) | `https://strimzi.io/charts/` |
+| Nessie | `https://charts.projectnessie.org` |
+| Trino | `https://trinodb.github.io/charts` |
+| Airflow | `https://airflow.apache.org` |
+| MLflow | `https://community-charts.github.io/helm-charts` |
+| Prometheus + Grafana | `https://prometheus-community.github.io/helm-charts` |
+
+> **Bitnami note:** since 2025-08-28 Bitnami's free image catalogue is limited.
+> If a Bitnami pod hits `ImagePullBackOff`, re-run that chart with a
+> `bitnamilegacy` image (see the note printed by the script) or substitute a
+> non-Bitnami chart (CloudNativePG, codecentric/keycloakx).
 
 ## Production (AWS EKS)
 ```bash
