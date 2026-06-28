@@ -21,8 +21,16 @@ deploy/
 ## Local (minikube)
 ```bash
 make mk-up          # start minikube with ingress/metrics addons
-make namespaces     # kubectl apply -k deploy/overlays/local
+make image          # build idp/scoring-api:dev INTO minikube's docker daemon
+make deploy         # kubectl apply -k deploy/overlays/local
 ```
+
+> **Why `make image` first?** The scoring API runs a project image that is not
+> published to any registry. For local dev you build it directly into minikube's
+> Docker daemon (`eval $(minikube docker-env) && docker build ...`) and the local
+> overlay sets `imagePullPolicy: Never`. Skipping this causes the pod to try to
+> pull `idp/scoring-api:dev` from Docker Hub and fail with `ImagePullBackOff`.
+> On EKS the image instead comes from ECR (`overlays/aws`).
 
 Platform infrastructure (Apache Kafka via Strimzi, Nessie + Iceberg, MinIO,
 Trino, TimescaleDB, Keycloak, OPA, Airflow, MLflow, Prometheus/Grafana) is

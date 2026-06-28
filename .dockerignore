@@ -1,0 +1,14 @@
+.venv
+venv
+.git
+data/landing
+data/lake
+ml/artifacts
+tests
+docs
+deploy
+pipelines
+**/__pycache__
+*.egg-info
+.pytest_cache
+*.parquet
