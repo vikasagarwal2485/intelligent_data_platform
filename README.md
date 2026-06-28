@@ -120,20 +120,16 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    make deploy        # kubectl apply -k deploy/overlays/local
    ```
    The overlay also deploys the scoring API (from the image built in step 2).
-4. **Install platform infrastructure** (from upstream charts) into `idp-platform`:
+4. **Install platform infrastructure** into `idp-platform`:
    ```bash
-   # object store, streaming, catalog, query, serving DB, identity
-   helm install minio        oci://registry-1.docker.io/bitnamicharts/minio    -n idp-platform
-   helm install strimzi      strimzi/strimzi-kafka-operator                    -n idp-platform
-   helm install nessie       nessie/nessie                                     -n idp-platform
-   helm install trino        trino/trino                                       -n idp-platform
-   helm install timescaledb  bitnami/postgresql                                -n idp-platform
-   helm install keycloak     bitnami/keycloak                                  -n idp-platform
-   helm install airflow      apache-airflow/airflow                            -n idp-platform
-   helm install mlflow       community-charts/mlflow                           -n idp-platform
-   helm install kube-prom    prometheus-community/kube-prometheus-stack        -n idp-platform
+   make infra        # bash deploy/install-infra.sh idp-platform
    ```
-   (Chart repos are listed in [`deploy/README.md`](deploy/README.md).)
+   This **adds the required Helm repositories first** (Strimzi, Nessie, Trino,
+   Airflow, MLflow, Prometheus) — the step whose absence causes
+   `Error: repo <x> not found` — then installs each component. Bitnami charts
+   (MinIO, PostgreSQL/TimescaleDB, Keycloak) are pulled via their OCI registry,
+   so they need no repo add. The script is idempotent (safe to re-run) and ends
+   with a note on Bitnami's free-image limitation and how to work around it.
 5. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
 6. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
 7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into
