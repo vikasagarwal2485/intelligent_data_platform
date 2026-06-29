@@ -133,7 +133,15 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    (`timescale/timescaledb`, `quay.io/keycloak`). The script is idempotent and
    first removes any earlier broken Bitnami releases. See
    [`deploy/README.md`](deploy/README.md) for the full source table.
-5. **Create Kafka topics + register Avro schemas** from [`config/avro/`](config/avro).
+5. **Deploy Kafka, create topics + register Avro schemas**
+   ```bash
+   make kafka        # bash deploy/kafka/setup-kafka.sh idp-platform
+   ```
+   Deploys a Strimzi Kafka cluster + Apicurio Schema Registry, creates the
+   per-tenant `t.<tenant>.tmf.*` topics, and registers the Avro contracts from
+   [`config/avro/`](config/avro) as `<topic>-value` subjects. Full step-by-step
+   (and the imperative CLI alternative) is in
+   [`deploy/kafka/README.md`](deploy/kafka/README.md).
 6. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
 7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into
    the Airflow `dags/` folder; it schedules the daily batch run.

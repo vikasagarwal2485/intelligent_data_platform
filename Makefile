@@ -63,6 +63,18 @@ image: ## Build the scoring-api image INTO minikube's docker daemon (local, no r
 infra: ## Add Helm repos and install platform infrastructure into idp-platform
 	bash deploy/install-infra.sh idp-platform
 
+.PHONY: kafka
+kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
+	bash deploy/kafka/setup-kafka.sh idp-platform
+
+.PHONY: topics
+topics: ## Create Kafka topics only (KafkaTopic CRs)
+	bash deploy/kafka/create-topics.sh idp-platform
+
+.PHONY: schemas
+schemas: ## Register Avro schemas only (config/avro/*.avsc)
+	bash deploy/kafka/register-schemas.sh idp-platform
+
 .PHONY: deploy
 deploy: ## Apply the local overlay (namespaces, RBAC, isolation, scoring API)
 	kubectl apply -k deploy/overlays/local
