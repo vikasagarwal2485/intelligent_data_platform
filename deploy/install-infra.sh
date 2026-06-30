@@ -88,8 +88,8 @@ kubectl get crd 2>/dev/null | grep -i strimzi || echo "  WARN: no Strimzi CRDs f
 echo ">> Iceberg catalog (Nessie)"
 hi nessie nessie/nessie
 
-echo ">> query engine (Trino)"
-hi trino trino/trino
+echo ">> query engine (Trino, tuned small for local)"
+hi trino trino/trino -f "${HERE}/trino-values.yaml"
 
 echo ">> orchestration (Airflow)"
 hi airflow apache-airflow/airflow

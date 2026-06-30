@@ -1,0 +1,42 @@
+# Trino tuned for a small local (minikube) cluster.
+#
+# Why: the chart defaults to an 8G JVM heap and separate worker pods, which
+# OOM-kills the coordinator on a small node (symptoms: 'container not running',
+# 'connection reset by peer', startup/liveness probe failures, CrashLoop).
+#
+# This runs Trino coordinator-only (no workers) with a small heap so queries
+# execute on the coordinator itself.
+#
+# Use:  helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
+
+server:
+  workers: 0          # coordinator-only; no separate worker pods
+
+# Let the coordinator also act as a worker (required when workers=0), and keep
+# query memory within the small heap.
+additionalConfigProperties:
+  - node-scheduler.include-coordinator=true
+  - query.max-memory-per-node=512MB
+  - memory.heap-headroom-per-node=320MB
+
+coordinator:
+  jvm:
+    maxHeapSize: "1536M"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+  # Give the JVM time to start before health checks fail (slow nodes).
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 12

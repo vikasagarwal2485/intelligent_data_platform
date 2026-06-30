@@ -71,6 +71,15 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
 	bash deploy/kafka/setup-kafka.sh idp-platform
 
+.PHONY: kafka-ui
+kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
+	kubectl apply -n idp-platform -f deploy/kafka/kafka-ui.yaml
+	kubectl -n idp-platform rollout status deploy/kafka-ui --timeout=300s
+	@echo ""
+	@echo "Kafka UI deployed. Access it with:"
+	@echo "  kubectl -n idp-platform port-forward svc/kafka-ui 8080:8080"
+	@echo "Then open http://localhost:8080"
+
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)
 	bash deploy/kafka/create-topics.sh idp-platform
