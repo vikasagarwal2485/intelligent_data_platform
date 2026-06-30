@@ -15,12 +15,26 @@ deploy/kafka/
 
 ## Prerequisites
 1. A running cluster (`minikube status` → Running).
-2. The Strimzi **operator** installed — this is done by `make infra`
+2. The Strimzi **operator** installed and Ready — this is done by `make infra`
    (`deploy/install-infra.sh` installs `strimzi/strimzi-kafka-operator`).
-   Confirm it is Ready:
+   The operator is what installs the `Kafka`/`KafkaNodePool` **CRDs**; without
+   them `make kafka` fails with `no matches for kind "Kafka" in version
+   "kafka.strimzi.io/v1beta2" — ensure CRDs are installed first`.
+
+   Verify both the CRDs and the operator before running `make kafka`:
    ```bash
+   kubectl get crd | grep strimzi                                   # CRDs must exist
    kubectl -n idp-platform rollout status deploy/strimzi-cluster-operator
    ```
+   If the CRDs are missing, (re)install the operator:
+   ```bash
+   helm repo add strimzi https://strimzi.io/charts/ && helm repo update
+   helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n idp-platform \
+     --set resources.requests.memory=384Mi --set resources.limits.memory=768Mi
+   bash deploy/strimzi-tune.sh idp-platform        # if the operator probes flap
+   ```
+   `make kafka` now runs this CRD preflight automatically and prints the exact
+   remediation if the CRDs are absent.
 
 ## TL;DR
 ```bash
