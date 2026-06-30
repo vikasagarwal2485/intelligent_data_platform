@@ -55,7 +55,25 @@ sed -E "s#(kafka\.strimzi\.io/)v[0-9a-z]+#\1${KVER}#g" "${HERE}/kafka-cluster.ya
 kubectl apply -n "${NS}" -f "${HERE}/schema-registry.yaml"
 
 echo "==> 2/5 Wait for Kafka to become Ready (this can take a few minutes)"
-kubectl -n "${NS}" wait kafka/idp-kafka --for=condition=Ready --timeout=600s
+if ! kubectl -n "${NS}" wait kafka/idp-kafka --for=condition=Ready --timeout=600s; then
+  echo "" >&2
+  echo "ERROR: Kafka did not become Ready. Diagnostics:" >&2
+  echo "--- Kafka status conditions ---" >&2
+  kubectl -n "${NS}" get kafka idp-kafka \
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' 2>/dev/null >&2 || true
+  echo "--- pods (strimzi.io/cluster=idp-kafka) ---" >&2
+  kubectl -n "${NS}" get pods -l strimzi.io/cluster=idp-kafka >&2 || true
+  echo "--- recent pod events ---" >&2
+  kubectl -n "${NS}" describe pod -l strimzi.io/cluster=idp-kafka 2>/dev/null | grep -A20 -i "events:" | tail -20 >&2 || true
+  cat >&2 <<EOF
+Common causes:
+  * Unsupported spec.kafka.version: edit deploy/kafka/kafka-cluster.yaml to a
+    version your operator supports (the status message above names it), e.g. 3.8.0.
+  * Pod Pending / OOM: node is out of resources — give minikube more headroom
+    (minikube stop && minikube start --cpus=8 --memory=16384) or free other pods.
+EOF
+  exit 1
+fi
 
 echo "==> 3/5 Create topics"
 bash "${HERE}/create-topics.sh" "${NS}"
