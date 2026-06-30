@@ -1,0 +1,50 @@
+# Single-node Apache Kafka cluster managed by the Strimzi operator (KRaft mode).
+# The entityOperator.topicOperator lets us manage topics declaratively via
+# KafkaTopic CRs. For production raise replicas and use persistent storage.
+#
+# NOTE: set spec.kafka.version to a version your installed Strimzi operator
+# supports — check with:
+#   kubectl -n idp-platform get csv,deploy strimzi-cluster-operator -o yaml | grep -i version
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  labels:
+    strimzi.io/cluster: idp-kafka
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  storage:
+    type: ephemeral
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: idp-kafka
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 3.9.0
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      # single-broker friendly replication settings
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}

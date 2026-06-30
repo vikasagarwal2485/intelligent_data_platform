@@ -1,0 +1,51 @@
+# Apicurio Registry (open-source schema registry, plan section 3) in in-memory
+# mode. Exposes a Confluent-compatible API at /apis/ccompat/v7 so standard
+# Schema-Registry clients (and our register-schemas.sh) work unchanged.
+# In-memory storage is fine for a prototype; use the SQL/Kafka storage variant
+# for persistence in production.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apicurio-registry
+  labels:
+    app: apicurio-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apicurio-registry
+  template:
+    metadata:
+      labels:
+        app: apicurio-registry
+    spec:
+      containers:
+        - name: registry
+          image: quay.io/apicurio/apicurio-registry-mem:2.5.11.Final
+          ports:
+            - containerPort: 8080
+          env:
+            - name: QUARKUS_PROFILE
+              value: prod
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: 256Mi }
+            limits: { cpu: "500m", memory: 768Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apicurio-registry
+  labels:
+    app: apicurio-registry
+spec:
+  selector:
+    app: apicurio-registry
+  ports:
+    - port: 8080
+      targetPort: 8080
