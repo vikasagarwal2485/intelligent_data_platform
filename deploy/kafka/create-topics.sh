@@ -13,8 +13,8 @@ TENANTS=("tenant_a" "tenant_b")
 
 # Topic suffixes per the plan: entity (batch/CDC) + event (streaming) + DLQ.
 SUFFIXES=(
-  tmf.parties tmf.accounts tmf.agreements tmf.products
-  tmf.usage.voice tmf.usage.data tmf.recharge tmf.dlq
+  parties accounts agreements products
+  usage.voice usage.data recharge dlq
 )
 
 if ! kubectl cluster-info >/dev/null 2>&1; then

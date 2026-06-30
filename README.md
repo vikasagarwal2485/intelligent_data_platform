@@ -138,7 +138,7 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
    make kafka        # bash deploy/kafka/setup-kafka.sh idp-platform
    ```
    Deploys a Strimzi Kafka cluster + Apicurio Schema Registry, creates the
-   per-tenant `t.<tenant>.tmf.*` topics, and registers the Avro contracts from
+   per-tenant `t.<tenant>.*` topics, and registers the Avro contracts from
    [`config/avro/`](config/avro) as `<topic>-value` subjects. Full step-by-step
    (and the imperative CLI alternative) is in
    [`deploy/kafka/README.md`](deploy/kafka/README.md).

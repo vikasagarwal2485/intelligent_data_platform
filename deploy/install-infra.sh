@@ -73,8 +73,12 @@ echo ">> identity (Keycloak, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/infra/keycloak.yaml"
 
 echo ">> streaming (Apache Kafka via Strimzi operator)"
-hi strimzi strimzi/strimzi-kafka-operator
-# After the operator is Ready, create a Kafka cluster CR (e.g. a Strimzi Kafka).
+hi strimzi strimzi/strimzi-kafka-operator \
+  --set resources.requests.cpu=200m --set resources.requests.memory=384Mi \
+  --set resources.limits.cpu=1 --set resources.limits.memory=768Mi
+# Relax the operator's health probes so it survives slow/over-subscribed nodes.
+bash "${HERE}/strimzi-tune.sh" "${NS}" || echo "WARN: strimzi-tune failed; see notes above"
+# After the operator is Ready, run: make kafka  (creates the Kafka cluster CR).
 
 echo ">> Iceberg catalog (Nessie)"
 hi nessie nessie/nessie

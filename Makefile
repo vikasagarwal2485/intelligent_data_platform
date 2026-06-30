@@ -63,6 +63,10 @@ image: ## Build the scoring-api image INTO minikube's docker daemon (local, no r
 infra: ## Add Helm repos and install platform infrastructure into idp-platform
 	bash deploy/install-infra.sh idp-platform
 
+.PHONY: strimzi-fix
+strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failures)
+	bash deploy/strimzi-tune.sh idp-platform
+
 .PHONY: kafka
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
 	bash deploy/kafka/setup-kafka.sh idp-platform
