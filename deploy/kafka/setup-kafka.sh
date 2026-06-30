@@ -27,11 +27,13 @@ $(kubectl get crd 2>/dev/null | grep -i strimzi || echo "  (none)")
 
 Fix — install/repair the operator, then re-run 'make kafka':
   helm repo add strimzi https://strimzi.io/charts/ && helm repo update
-  helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n ${NS} \\
-    --set resources.requests.memory=384Mi --set resources.limits.memory=768Mi
-  kubectl get crd | grep strimzi                                   # CRDs should appear
-  kubectl -n ${NS} rollout status deploy/strimzi-cluster-operator  # operator Ready
-  bash deploy/strimzi-tune.sh ${NS}                                # if probes flap
+  helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n ${NS} --set resources.limits.memory=768Mi
+  kubectl get crd | grep strimzi
+  kubectl -n ${NS} rollout status deploy/strimzi-cluster-operator
+
+If 'kubectl get crd | grep strimzi' shows nothing, install the operator+CRDs
+from the official bundle instead:
+  kubectl create -f 'https://strimzi.io/install/latest?namespace=${NS}' -n ${NS}
 EOF
   exit 1
 fi

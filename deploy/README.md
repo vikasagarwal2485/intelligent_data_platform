@@ -73,11 +73,16 @@ Secrets for credentials, ECR for images, ALB ingress.
 **Strimzi operator pod not Ready** (`Liveness/Readiness probe failed: .../healthy
 context deadline exceeded` or `connection refused`):
 ```bash
-make strimzi-fix      # bash deploy/strimzi-tune.sh idp-platform
+make strimzi-fix
 ```
 This widens the operator's probe timeouts/initialDelay and raises its memory
-limit. The underlying cause is usually node resource pressure — if it still
-won't go Ready, give minikube more headroom:
+limit **via Helm** (so Helm remains the single field owner). Do **not** use
+`kubectl patch` for this — it creates a second field owner and later
+`helm upgrade` fails with `conflicts with "kubectl-patch" ...
+livenessProbe.initialDelaySeconds`. If you already hit that conflict, reinstall
+cleanly: `helm uninstall strimzi -n idp-platform` then re-run `make strimzi-fix`.
+The underlying cause is usually node resource pressure — if it still won't go
+Ready, give minikube more headroom:
 `minikube stop && minikube start --cpus=8 --memory=16384`.
 
 **Apiserver flapping** (`TLS handshake timeout`, `connection refused` to the

@@ -73,11 +73,16 @@ echo ">> identity (Keycloak, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/infra/keycloak.yaml"
 
 echo ">> streaming (Apache Kafka via Strimzi operator)"
+# Tune resources + probe delays via Helm values (single field owner = Helm).
+# Do NOT 'kubectl patch' the operator afterwards or later helm upgrades will
+# fail with a field-ownership conflict.
 hi strimzi strimzi/strimzi-kafka-operator \
   --set resources.requests.cpu=200m --set resources.requests.memory=384Mi \
-  --set resources.limits.cpu=1 --set resources.limits.memory=768Mi
-# Relax the operator's health probes so it survives slow/over-subscribed nodes.
-bash "${HERE}/strimzi-tune.sh" "${NS}" || echo "WARN: strimzi-tune failed; see notes above"
+  --set resources.limits.cpu=1 --set resources.limits.memory=768Mi \
+  --set livenessProbe.initialDelaySeconds=90 --set livenessProbe.timeoutSeconds=10 \
+  --set readinessProbe.initialDelaySeconds=90 --set readinessProbe.timeoutSeconds=10
+echo ">> Verifying Strimzi CRDs were installed:"
+kubectl get crd 2>/dev/null | grep -i strimzi || echo "  WARN: no Strimzi CRDs found yet"
 # After the operator is Ready, run: make kafka  (creates the Kafka cluster CR).
 
 echo ">> Iceberg catalog (Nessie)"
