@@ -38,21 +38,20 @@ EOF
   exit 1
 fi
 
-# Surface the served API versions + node-pool support to catch mismatches.
-SERVED="$(kubectl get crd kafkas.kafka.strimzi.io -o jsonpath='{.spec.versions[*].name}' 2>/dev/null || true)"
-echo ">> Strimzi Kafka CRD served versions: ${SERVED:-unknown}"
-case " ${SERVED} " in
-  *" v1beta2 "*) : ;;
-  *) echo "WARN: this manifest uses kafka.strimzi.io/v1beta2 but the CRD serves '${SERVED}'." >&2
-     echo "      Edit the apiVersion in deploy/kafka/kafka-cluster.yaml to match." >&2 ;;
-esac
 if ! kubectl get crd kafkanodepools.kafka.strimzi.io >/dev/null 2>&1; then
   echo "WARN: KafkaNodePool CRD missing — your Strimzi version may predate node pools." >&2
   echo "      Upgrade Strimzi, or replace kafka-cluster.yaml with a ZooKeeper-based Kafka CR." >&2
 fi
 
+# Detect the API version the CRD actually serves (Strimzi promoted the group
+# from v1beta2 to v1) and render the manifest with it, so this works on either.
+KVER="$(kubectl get crd kafkas.kafka.strimzi.io -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null || true)"
+KVER="${KVER:-v1}"
+echo ">> Using API version kafka.strimzi.io/${KVER}"
+
 echo "==> 1/5 Deploy Kafka cluster + Schema Registry"
-kubectl apply -n "${NS}" -f "${HERE}/kafka-cluster.yaml"
+sed -E "s#(kafka\.strimzi\.io/)v[0-9a-z]+#\1${KVER}#g" "${HERE}/kafka-cluster.yaml" \
+  | kubectl apply -n "${NS}" -f -
 kubectl apply -n "${NS}" -f "${HERE}/schema-registry.yaml"
 
 echo "==> 2/5 Wait for Kafka to become Ready (this can take a few minutes)"

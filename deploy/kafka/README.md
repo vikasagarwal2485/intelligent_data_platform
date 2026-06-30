@@ -69,9 +69,16 @@ kubectl -n idp-platform wait kafka/idp-kafka --for=condition=Ready --timeout=600
   enabled (so topics can be managed as `KafkaTopic` CRs).
 - In-cluster bootstrap address: `idp-kafka-kafka-bootstrap.idp-platform.svc:9092`.
 
+> The scripts **auto-detect** whether your Strimzi serves the API at
+> `kafka.strimzi.io/v1` (newer operators) or `v1beta2` (older) and render the
+> manifests accordingly — so `no matches for kind "Kafka" in version
+> "kafka.strimzi.io/v1beta2"` no longer happens. `kafka-cluster.yaml` is checked
+> in as `v1`; `setup-kafka.sh` rewrites it to match your cluster.
+>
 > If `wait` times out, check `kubectl -n idp-platform describe kafka idp-kafka`.
-> The most common issue is `spec.kafka.version` not being supported by your
-> Strimzi operator — edit it in `kafka-cluster.yaml` to a supported version.
+> A common issue is `spec.kafka.version` (the Kafka broker version, distinct
+> from the API version) not being supported by your operator — edit it in
+> `kafka-cluster.yaml` to a supported version.
 
 ## Step 2 — Create the topics
 ```bash
