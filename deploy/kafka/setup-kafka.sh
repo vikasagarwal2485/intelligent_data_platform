@@ -14,6 +14,41 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 
+# --- Preflight: the Strimzi CRDs must be installed by the operator ----------
+# Applying a Kafka/KafkaNodePool before the operator's CRDs exist fails with
+# 'no matches for kind "Kafka" in version "kafka.strimzi.io/v1beta2"'.
+if ! kubectl get crd kafkas.kafka.strimzi.io >/dev/null 2>&1; then
+  cat >&2 <<EOF
+ERROR: Strimzi CRDs are not installed, so the Kafka cluster cannot be created.
+The Strimzi *operator* (which installs the CRDs) must be running first.
+
+Currently installed Strimzi CRDs:
+$(kubectl get crd 2>/dev/null | grep -i strimzi || echo "  (none)")
+
+Fix — install/repair the operator, then re-run 'make kafka':
+  helm repo add strimzi https://strimzi.io/charts/ && helm repo update
+  helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n ${NS} \\
+    --set resources.requests.memory=384Mi --set resources.limits.memory=768Mi
+  kubectl get crd | grep strimzi                                   # CRDs should appear
+  kubectl -n ${NS} rollout status deploy/strimzi-cluster-operator  # operator Ready
+  bash deploy/strimzi-tune.sh ${NS}                                # if probes flap
+EOF
+  exit 1
+fi
+
+# Surface the served API versions + node-pool support to catch mismatches.
+SERVED="$(kubectl get crd kafkas.kafka.strimzi.io -o jsonpath='{.spec.versions[*].name}' 2>/dev/null || true)"
+echo ">> Strimzi Kafka CRD served versions: ${SERVED:-unknown}"
+case " ${SERVED} " in
+  *" v1beta2 "*) : ;;
+  *) echo "WARN: this manifest uses kafka.strimzi.io/v1beta2 but the CRD serves '${SERVED}'." >&2
+     echo "      Edit the apiVersion in deploy/kafka/kafka-cluster.yaml to match." >&2 ;;
+esac
+if ! kubectl get crd kafkanodepools.kafka.strimzi.io >/dev/null 2>&1; then
+  echo "WARN: KafkaNodePool CRD missing — your Strimzi version may predate node pools." >&2
+  echo "      Upgrade Strimzi, or replace kafka-cluster.yaml with a ZooKeeper-based Kafka CR." >&2
+fi
+
 echo "==> 1/5 Deploy Kafka cluster + Schema Registry"
 kubectl apply -n "${NS}" -f "${HERE}/kafka-cluster.yaml"
 kubectl apply -n "${NS}" -f "${HERE}/schema-registry.yaml"
