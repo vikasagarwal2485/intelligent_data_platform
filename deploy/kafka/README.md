@@ -23,17 +23,32 @@ deploy/kafka/
 
    Verify both the CRDs and the operator before running `make kafka`:
    ```bash
-   kubectl get crd | grep strimzi                                   # CRDs must exist
+   kubectl get crd | grep strimzi
    kubectl -n idp-platform rollout status deploy/strimzi-cluster-operator
    ```
-   If the CRDs are missing, (re)install the operator:
+   The first command must list `kafkas.kafka.strimzi.io` and
+   `kafkanodepools.kafka.strimzi.io`. If it lists nothing, (re)install the
+   operator (this also installs the CRDs):
    ```bash
    helm repo add strimzi https://strimzi.io/charts/ && helm repo update
-   helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n idp-platform \
-     --set resources.requests.memory=384Mi --set resources.limits.memory=768Mi
-   bash deploy/strimzi-tune.sh idp-platform        # if the operator probes flap
+   helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n idp-platform --set resources.limits.memory=768Mi --set livenessProbe.initialDelaySeconds=90 --set readinessProbe.initialDelaySeconds=90
    ```
-   `make kafka` now runs this CRD preflight automatically and prints the exact
+   If the Helm release is wedged (e.g. a prior `kubectl patch` causes a
+   field-ownership conflict), reinstall cleanly or use the official bundle:
+   ```bash
+   helm uninstall strimzi -n idp-platform
+   kubectl create -f 'https://strimzi.io/install/latest?namespace=idp-platform' -n idp-platform
+   ```
+
+   > **macOS/zsh note:** don't paste shell lines with trailing `# comments` —
+   > zsh treats `#` literally in interactive mode (you'll see
+   > `grep: #: No such file or directory`). All snippets here are comment-free.
+
+   > **Tuning:** configure the operator's probes/memory via Helm `--set`
+   > (above), **not** `kubectl patch` — patching makes a second field owner and
+   > later `helm upgrade` fails with a conflict.
+
+   `make kafka` runs a CRD preflight automatically and prints the exact
    remediation if the CRDs are absent.
 
 ## TL;DR

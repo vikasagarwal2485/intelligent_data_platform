@@ -1,55 +1,47 @@
 #!/usr/bin/env bash
-# Relax the Strimzi operator's liveness/readiness probes and raise its memory.
+# Tune the Strimzi operator (probe delays + memory) THROUGH HELM, so Kubernetes
+# field ownership stays with Helm. Do NOT use 'kubectl patch' for this: it makes
+# 'kubectl-patch' the field owner and later 'helm upgrade' fails with
+#   conflicts with "kubectl-patch" ... livenessProbe.initialDelaySeconds
 #
-# Symptom this fixes:
-#   Liveness/Readiness probe failed: Get ".../healthy|/ready":
-#   context deadline exceeded / connection refused
-# On a slow or over-subscribed node the operator can't answer the health
-# endpoint within the tight default probe timeouts, so the kubelet kills it in a
-# restart loop. We widen the timeouts/initialDelay and bump the memory limit.
+# Symptom this addresses: operator Liveness/Readiness probe failures
+# (context deadline exceeded / connection refused) on slow/over-subscribed nodes.
 #
 # Usage:  bash deploy/strimzi-tune.sh [namespace]
 set -euo pipefail
 
 NS="${1:-idp-platform}"
-DEP="strimzi-cluster-operator"
 
 if ! kubectl cluster-info >/dev/null 2>&1; then
   echo "ERROR: Kubernetes API unreachable. Start minikube and retry." >&2
   exit 1
 fi
 
-echo ">> Waiting for the ${DEP} deployment to exist..."
-for i in $(seq 1 30); do
-  kubectl -n "${NS}" get deploy "${DEP}" >/dev/null 2>&1 && break
-  sleep 2
-  [[ $i -eq 30 ]] && { echo "ERROR: ${DEP} not found (run 'make infra' first)." >&2; exit 1; }
-done
+helm repo add strimzi https://strimzi.io/charts/ >/dev/null 2>&1 || true
+helm repo update strimzi >/dev/null 2>&1 || true
 
-echo ">> Relaxing probes and raising memory on ${DEP}"
-kubectl -n "${NS}" patch deploy "${DEP}" -p '{
-  "spec": {"template": {"spec": {"containers": [{
-    "name": "strimzi-cluster-operator",
-    "livenessProbe":  {"initialDelaySeconds": 90, "periodSeconds": 30, "timeoutSeconds": 10, "failureThreshold": 6},
-    "readinessProbe": {"initialDelaySeconds": 90, "periodSeconds": 30, "timeoutSeconds": 10, "failureThreshold": 6},
-    "resources": {"requests": {"cpu": "200m", "memory": "384Mi"}, "limits": {"cpu": "1", "memory": "768Mi"}}
-  }]}}}
-}'
+echo ">> Tuning strimzi operator via Helm (memory + probe delays)"
+if ! helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n "${NS}" --reuse-values \
+    --set resources.requests.cpu=200m --set resources.requests.memory=384Mi \
+    --set resources.limits.cpu=1 --set resources.limits.memory=768Mi \
+    --set livenessProbe.initialDelaySeconds=90 --set livenessProbe.timeoutSeconds=10 \
+    --set readinessProbe.initialDelaySeconds=90 --set readinessProbe.timeoutSeconds=10; then
+  cat >&2 <<EOF
 
-echo ">> Waiting for rollout..."
-if ! kubectl -n "${NS}" rollout status deploy/"${DEP}" --timeout=300s; then
-  cat >&2 <<'EOF'
+Helm upgrade failed. This usually means the Deployment was previously modified
+with 'kubectl patch' (field-ownership conflict). Do a CLEAN reinstall so Helm
+owns the resource again:
 
-Operator still not Ready after tuning. This is almost certainly NODE RESOURCE
-PRESSURE (the whole stack is heavy for a small minikube). Check:
+  helm uninstall strimzi -n ${NS}
+  helm upgrade --install strimzi strimzi/strimzi-kafka-operator -n ${NS} \\
+    --set resources.limits.memory=768Mi \\
+    --set livenessProbe.initialDelaySeconds=90 \\
+    --set readinessProbe.initialDelaySeconds=90
 
-  kubectl top nodes
-  kubectl -n idp-platform describe pod -l strimzi.io/kind=cluster-operator | tail -30
-  kubectl get events -n idp-platform --sort-by=.lastTimestamp | tail -20
-
-Give minikube more headroom and retry:
-  minikube stop && minikube start --cpus=8 --memory=16384
+(Helm does not delete CRDs on uninstall, so your Kafka CRDs are preserved.)
 EOF
   exit 1
 fi
-echo ">> Strimzi operator is Ready."
+
+kubectl -n "${NS}" rollout status deploy/strimzi-cluster-operator --timeout=300s
+echo ">> Strimzi operator tuned and Ready."
