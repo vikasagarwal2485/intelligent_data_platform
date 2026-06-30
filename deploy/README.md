@@ -88,3 +88,13 @@ Ready, give minikube more headroom:
 **Apiserver flapping** (`TLS handshake timeout`, `connection refused` to the
 API, SA-token mount failures): the cluster is overloaded or kubeconfig is stale.
 Run `minikube status`, `minikube update-context`, and increase resources.
+
+**Trino coordinator CrashLoop / OOM** (`container not running`, `connection
+reset by peer`, startup/liveness probe failures): the chart defaults to an 8G
+heap + worker pods, too big for a small node. Reinstall with the tuned values
+(coordinator-only, ~1.5G heap):
+```bash
+helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
+kubectl -n idp-platform rollout status deploy/trino-coordinator
+```
+`make infra` already applies this file for fresh installs.
