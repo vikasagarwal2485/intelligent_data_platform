@@ -49,14 +49,14 @@ kubectl -n idp-platform wait kafka/idp-kafka --for=condition=Ready --timeout=600
 make topics      # or: bash deploy/kafka/create-topics.sh idp-platform
 ```
 Creates one `KafkaTopic` per **tenant × entity** following the plan's naming
-`t.<tenant>.tmf.<entity>`:
+`t.<tenant>.<entity>`:
 
 | Topic (per tenant `tenant_a`, `tenant_b`) | Partitions | Purpose |
 |---|---|---|
-| `t.<tenant>.tmf.parties` / `.accounts` / `.agreements` / `.products` | 3 | entity (batch/CDC) |
-| `t.<tenant>.tmf.usage.voice` / `.usage.data` | 6 | streaming usage events |
-| `t.<tenant>.tmf.recharge` | 3 | streaming recharge events |
-| `t.<tenant>.tmf.dlq` | 3 | dead-letter queue |
+| `t.<tenant>.parties` / `.accounts` / `.agreements` / `.products` | 3 | entity (batch/CDC) |
+| `t.<tenant>.usage.voice` / `.usage.data` | 6 | streaming usage events |
+| `t.<tenant>.recharge` | 3 | streaming recharge events |
+| `t.<tenant>.dlq` | 3 | dead-letter queue |
 
 Verify:
 ```bash
@@ -70,7 +70,7 @@ kubectl -n idp-platform exec -it idp-kafka-dual-role-0 -- \
 ```bash
 kubectl -n idp-platform exec -it idp-kafka-dual-role-0 -- \
   bin/kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --topic t.tenant_a.tmf.usage.voice --partitions 6 --replication-factor 1
+  --create --topic t.tenant_a.usage.voice --partitions 6 --replication-factor 1
 ```
 
 ## Step 3 — Deploy the Schema Registry
@@ -90,9 +90,9 @@ schema of its topic (subject = `<topic>-value`, `TopicNameStrategy`):
 
 | Subject | Schema file |
 |---|---|
-| `t.<tenant>.tmf.usage.voice-value` | `config/avro/usage_event.avsc` |
-| `t.<tenant>.tmf.usage.data-value` | `config/avro/usage_event.avsc` |
-| `t.<tenant>.tmf.recharge-value` | `config/avro/recharge_event.avsc` |
+| `t.<tenant>.usage.voice-value` | `config/avro/usage_event.avsc` |
+| `t.<tenant>.usage.data-value` | `config/avro/usage_event.avsc` |
+| `t.<tenant>.recharge-value` | `config/avro/recharge_event.avsc` |
 
 (Entity topics are batch/CDC; register their schemas the same way by extending
 the `MAP` array in `register-schemas.sh`.)
@@ -101,7 +101,7 @@ Verify:
 ```bash
 kubectl -n idp-platform port-forward svc/apicurio-registry 8080:8080 &
 curl -s http://localhost:8080/apis/ccompat/v7/subjects | tr ',' '\n'
-curl -s http://localhost:8080/apis/ccompat/v7/subjects/t.tenant_a.tmf.recharge-value/versions/latest
+curl -s http://localhost:8080/apis/ccompat/v7/subjects/t.tenant_a.recharge-value/versions/latest
 ```
 
 ---

@@ -14,9 +14,9 @@ TENANTS=("tenant_a" "tenant_b")
 # Map each streaming topic suffix -> the Avro schema file that defines its value.
 # (Entity topics are batch/CDC; add their schemas here the same way if needed.)
 MAP=(
-  "tmf.usage.voice:usage_event.avsc"
-  "tmf.usage.data:usage_event.avsc"
-  "tmf.recharge:recharge_event.avsc"
+  "usage.voice:usage_event.avsc"
+  "usage.data:usage_event.avsc"
+  "recharge:recharge_event.avsc"
 )
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }

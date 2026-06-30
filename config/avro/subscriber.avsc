@@ -1,7 +1,7 @@
 {
   "type": "record",
   "name": "Subscriber",
-  "namespace": "com.idp.tmf",
+  "namespace": "com.idp",
   "doc": "Canonical subscriber dimension joining party/account/agreement/product. See plan 3.3/4.1.",
   "fields": [
     {"name": "tenant_id", "type": "string"},

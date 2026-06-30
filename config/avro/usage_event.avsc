@@ -1,7 +1,7 @@
 {
   "type": "record",
   "name": "UsageEvent",
-  "namespace": "com.idp.tmf",
+  "namespace": "com.idp",
   "doc": "Canonical voice/data usage event (flattened from JSON:API). See plan 3.3.",
   "fields": [
     {"name": "tenant_id", "type": "string"},

@@ -67,3 +67,19 @@ kubectl apply -f deploy/argocd/application.yaml
 ```
 EKS specifics: S3 (per-tenant prefixes + KMS), IRSA for pod S3 access, External
 Secrets for credentials, ECR for images, ALB ingress.
+
+## Troubleshooting
+
+**Strimzi operator pod not Ready** (`Liveness/Readiness probe failed: .../healthy
+context deadline exceeded` or `connection refused`):
+```bash
+make strimzi-fix      # bash deploy/strimzi-tune.sh idp-platform
+```
+This widens the operator's probe timeouts/initialDelay and raises its memory
+limit. The underlying cause is usually node resource pressure — if it still
+won't go Ready, give minikube more headroom:
+`minikube stop && minikube start --cpus=8 --memory=16384`.
+
+**Apiserver flapping** (`TLS handshake timeout`, `connection refused` to the
+API, SA-token mount failures): the cluster is overloaded or kubeconfig is stale.
+Run `minikube status`, `minikube update-context`, and increase resources.
