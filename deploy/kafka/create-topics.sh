@@ -22,15 +22,20 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 
+# Detect the served API version of the KafkaTopic CRD (v1beta2 vs v1).
+TVER="$(kubectl get crd kafkatopics.kafka.strimzi.io -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null || true)"
+TVER="${TVER:-v1}"
+echo ">> Creating KafkaTopics with apiVersion kafka.strimzi.io/${TVER}"
+
 for t in "${TENANTS[@]}"; do
   for s in "${SUFFIXES[@]}"; do
     topic="t.${t}.${s}"
-    # DNS-safe metadata name (no dots/underscores): t-tenant-a-tmf-usage-voice
+    # DNS-safe metadata name (no dots/underscores): t-tenant-a-usage-voice
     name="t-${t//_/-}-${s//./-}"
     partitions=3
     [[ "$s" == *usage* ]] && partitions=6   # higher throughput for usage events
     cat <<EOF | kubectl apply -n "${NS}" -f -
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/${TVER}
 kind: KafkaTopic
 metadata:
   name: ${name}
