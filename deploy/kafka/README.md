@@ -142,6 +142,28 @@ curl -s http://localhost:8080/apis/ccompat/v7/subjects/t.tenant_a.recharge-value
 
 ---
 
+## Admin UI (manage topics from a browser)
+
+Deploy **Kafbat Kafka UI** (the maintained successor to provectus/kafka-ui) to
+create/browse/configure topics, view messages and inspect the schema registry:
+
+```bash
+make kafka-ui
+```
+Then access it (ClusterIP, so port-forward):
+```bash
+kubectl -n idp-platform port-forward svc/kafka-ui 8080:8080
+```
+Open <http://localhost:8080>. It is preconfigured against:
+- bootstrap `idp-kafka-kafka-bootstrap:9092`
+- schema registry `http://apicurio-registry:8080/apis/ccompat/v7`
+
+From the UI you can add a topic (e.g. `t.tenant_a.usage.voice`), change
+partitions/configs, produce/consume test messages, and view registered schemas.
+
+> Prefer something else? Redpanda Console (`redpandadata/console`) and AKHQ are
+> drop-in alternatives — point them at the same bootstrap + registry URLs.
+
 ## How producers/consumers use this
 - **Bootstrap servers:** `idp-kafka-kafka-bootstrap.idp-platform.svc:9092`
 - **Schema Registry URL:** `http://apicurio-registry.idp-platform.svc:8080/apis/ccompat/v7`
