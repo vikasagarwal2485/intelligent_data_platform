@@ -28,6 +28,8 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
+    # If this version is unsupported by your operator, Ready stays false with a
+    # message naming the supported versions — set one of those here (e.g. 3.8.0).
     version: 3.9.0
     listeners:
       - name: plain
@@ -45,6 +47,17 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
+    # Keep the broker small so it fits a local minikube node (avoids OOM/Pending).
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "1Gi"
+      limits:
+        cpu: "1"
+        memory: "1536Mi"
+    jvmOptions:
+      -Xms: 512m
+      -Xmx: 1024m
   entityOperator:
     topicOperator: {}
     userOperator: {}
