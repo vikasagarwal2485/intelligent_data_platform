@@ -68,9 +68,8 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 	bash deploy/strimzi-tune.sh idp-platform
 
 .PHONY: trino-fix
-trino-fix: ## Re-apply tuned Trino values (coordinator-only, fixes OOM/CrashLoop)
-	helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
-	kubectl -n idp-platform rollout status deploy/trino-coordinator --timeout=300s
+trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
+	bash deploy/trino-tune.sh idp-platform
 
 .PHONY: kafka
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
