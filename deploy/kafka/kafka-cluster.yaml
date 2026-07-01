@@ -2,9 +2,12 @@
 # The entityOperator.topicOperator lets us manage topics declaratively via
 # KafkaTopic CRs. For production raise replicas and use persistent storage.
 #
-# NOTE: set spec.kafka.version to a version your installed Strimzi operator
-# supports — check with:
-#   kubectl -n idp-platform get csv,deploy strimzi-cluster-operator -o yaml | grep -i version
+# Strimzi API notes (v1 + KafkaNodePool):
+#  * Broker sizing (resources / storage / replicas) lives on the KafkaNodePool,
+#    NOT on Kafka.spec.kafka (that field was removed and is strict-rejected).
+#  * spec.kafka.version must be one your operator supports. Check with:
+#      kubectl -n idp-platform get kafka idp-kafka -o jsonpath='{.status.conditions}'
+#    (an unsupported version reports the supported list in the NotReady message).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
@@ -18,6 +21,15 @@ spec:
     - broker
   storage:
     type: ephemeral
+  # Keep the broker small so it fits a local minikube node (avoids OOM/Pending).
+  # With a memory limit set and no explicit -Xmx, Strimzi auto-sizes the JVM heap.
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "1536Mi"
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
@@ -28,9 +40,9 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    # If this version is unsupported by your operator, Ready stays false with a
-    # message naming the supported versions — set one of those here (e.g. 3.8.0).
-    version: 3.9.0
+    # Must be a version supported by the installed operator. Strimzi 1.1.x
+    # supports Kafka 4.2.0 / 4.2.1 / 4.3.0.
+    version: 4.3.0
     listeners:
       - name: plain
         port: 9092
@@ -47,17 +59,6 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-    # Keep the broker small so it fits a local minikube node (avoids OOM/Pending).
-    resources:
-      requests:
-        cpu: "250m"
-        memory: "1Gi"
-      limits:
-        cpu: "1"
-        memory: "1536Mi"
-    jvmOptions:
-      -Xms: 512m
-      -Xmx: 1024m
   entityOperator:
     topicOperator: {}
     userOperator: {}

@@ -47,10 +47,20 @@ fi
 # from v1beta2 to v1) and render the manifest with it, so this works on either.
 KVER="$(kubectl get crd kafkas.kafka.strimzi.io -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null || true)"
 KVER="${KVER:-v1}"
-echo ">> Using API version kafka.strimzi.io/${KVER}"
+
+# Auto-select a Kafka broker version this operator actually supports (the list
+# changes between Strimzi releases). We read the operator's STRIMZI_KAFKA_IMAGES
+# env (entries like "4.3.0=quay.io/strimzi/kafka:...") and pick the latest.
+KAFKAVER="$(kubectl -n "${NS}" get deploy strimzi-cluster-operator \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_KAFKA_IMAGES")].value}' 2>/dev/null \
+  | tr ' ' '\n' | sed -n 's/^\([0-9][0-9.]*\)=.*/\1/p' | sort -V | tail -1)"
+echo ">> Using API kafka.strimzi.io/${KVER}; Kafka version ${KAFKAVER:-<manifest default>}"
 
 echo "==> 1/5 Deploy Kafka cluster + Schema Registry"
+# Render the manifest: substitute the served API version, and the detected Kafka
+# version if we found one (otherwise keep the manifest's default).
 sed -E "s#(kafka\.strimzi\.io/)v[0-9a-z]+#\1${KVER}#g" "${HERE}/kafka-cluster.yaml" \
+  | if [ -n "${KAFKAVER}" ]; then sed -E "s/^( *version: ).*/\1${KAFKAVER}/"; else cat; fi \
   | kubectl apply -n "${NS}" -f -
 kubectl apply -n "${NS}" -f "${HERE}/schema-registry.yaml"
 
