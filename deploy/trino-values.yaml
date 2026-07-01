@@ -1,35 +1,61 @@
 # Trino tuned for a small local (minikube) cluster.
 #
-# Why: the chart defaults to an 8G JVM heap and separate worker pods, which
-# OOM-kills the coordinator on a small node (symptoms: 'container not running',
-# 'connection reset by peer', startup/liveness probe failures, CrashLoop).
+# Why pods OOMKill / CrashLoop with the defaults:
+#  * the chart defaults to an 8G JVM heap and 2 worker pods -> too big for a
+#    small node;
+#  * Trino uses a LOT of off-heap memory (direct buffers, GC, metaspace), so the
+#    container memory LIMIT must sit well ABOVE -Xmx. If limit ~= heap, the
+#    kernel OOM-kills the container.
 #
-# This runs Trino coordinator-only (no workers) with a small heap so queries
-# execute on the coordinator itself.
+# This config: coordinator-only (no workers), a modest 1G heap, and a 2Gi limit
+# (~1Gi of off-heap headroom) so the JVM can't exceed the cgroup limit.
 #
-# Use:  helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
+# Apply/upgrade:
+#   helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
 
 server:
-  workers: 0          # coordinator-only; no separate worker pods
+  workers: 0          # coordinator-only; removes the worker pods entirely
 
-# Let the coordinator also act as a worker (required when workers=0), and keep
-# query memory within the small heap.
+# Coordinator also executes tasks (needed when workers=0); keep query memory
+# safely below (heap - heap-headroom) so a query can't push the JVM past -Xmx.
 additionalConfigProperties:
   - node-scheduler.include-coordinator=true
-  - query.max-memory-per-node=512MB
-  - memory.heap-headroom-per-node=320MB
+  - query.max-memory-per-node=400MB
+  - memory.heap-headroom-per-node=256MB
 
 coordinator:
   jvm:
-    maxHeapSize: "1536M"
+    maxHeapSize: "1G"          # -Xmx; keep it ~50% of the memory limit
   resources:
     requests:
       cpu: "500m"
-      memory: "1Gi"
+      memory: "1500Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"            # ~1Gi headroom above the heap for off-heap use
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 12
+
+# Sized identically in case workers are ever enabled (server.workers > 0);
+# harmless while workers=0.
+worker:
+  jvm:
+    maxHeapSize: "1G"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1500Mi"
     limits:
       cpu: "2"
       memory: "2Gi"
-  # Give the JVM time to start before health checks fail (slow nodes).
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 15
