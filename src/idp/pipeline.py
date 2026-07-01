@@ -29,6 +29,51 @@ def _salts(cfg: PlatformConfig) -> dict[str, str]:
     return {t.id: t.pii_salt for t in cfg.tenants}
 
 
+def process_bronze(cfg: PlatformConfig, bronze: dict, *, persist: bool = True) -> dict:
+    """Streaming-path medallion: Bronze frames -> Silver -> Gold feature tables.
+
+    Used by the Kafka path (`idp consume`), where records arrive without ML
+    labels. It curates Silver, builds the Gold feature tables, and — if trained
+    models exist in the artifact store — scores them. Training itself uses the
+    labelled batch path (`idp run`).
+    """
+    from idp.common import storage
+
+    salts = _salts(cfg)
+    windows = tuple(cfg.features.get("windows", [30, 90]))
+
+    silver = curate(bronze, salts)
+    credit_feats = build_credit_features(silver, windows)
+    fraud_feats = build_fraud_features(silver, windows)
+
+    outputs = {"credit_features": credit_feats, "fraud_features": fraud_feats}
+
+    # Optionally score with previously trained models.
+    art = Path(cfg.storage.ml_artifacts)
+    if (art / "credit_model.joblib").exists():
+        outputs["credit_scores"] = CreditLimitModel.load(art / "credit_model.joblib").recommend_limit(credit_feats)
+    if (art / "fraud_model.joblib").exists():
+        outputs["fraud_scores"] = FraudModel.load(art / "fraud_model.joblib").score(fraud_feats)
+
+    if persist:
+        for name, df in silver.items():
+            storage.write_parquet(df, f"{storage.lake_uri(cfg, 'silver')}/{name}", cfg,
+                                  partition_cols=["tenant_id"])
+        for name, df in outputs.items():
+            storage.write_parquet(df, f"{storage.lake_uri(cfg, 'gold')}/{name}", cfg)
+
+    return {
+        "counts": {
+            "subscribers": int(len(silver["dim_subscriber"])),
+            "usage_events": int(len(silver["fact_usage"])),
+            "recharge_events": int(len(silver["fact_recharge"])),
+        },
+        "gold_tables": list(outputs),
+        "silver": silver,
+        **outputs,
+    }
+
+
 def _tokenize_labels(labels: pd.DataFrame, salts: dict[str, str]) -> pd.DataFrame:
     """Tokenize label service_id with the per-tenant salt so it joins to Silver."""
     parts = []

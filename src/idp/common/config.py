@@ -67,6 +67,27 @@ class PlatformConfig:
     def fraud(self) -> dict[str, Any]:
         return self.raw.get("fraud", {})
 
+    @property
+    def kafka(self) -> dict[str, Any]:
+        k = dict(self.raw.get("kafka", {}))
+        k["bootstrap"] = os.environ.get("IDP_KAFKA_BOOTSTRAP", k.get("bootstrap", "localhost:9092"))
+        k["schema_registry"] = os.environ.get("IDP_SCHEMA_REGISTRY", k.get("schema_registry", ""))
+        k.setdefault("topic_prefix", "t")
+        return k
+
+    @property
+    def s3(self) -> dict[str, Any]:
+        s = dict(self.raw.get("s3", {}))
+        env = os.environ
+        if "IDP_S3_ENDPOINT" in env:
+            s["enabled"] = True
+            s["endpoint"] = env["IDP_S3_ENDPOINT"]
+        s["access_key"] = env.get("IDP_S3_ACCESS_KEY", s.get("access_key", ""))
+        s["secret_key"] = env.get("IDP_S3_SECRET_KEY", s.get("secret_key", ""))
+        s["bucket"] = env.get("IDP_S3_BUCKET", s.get("bucket", "idp-bronze"))
+        s.setdefault("enabled", False)
+        return s
+
 
 def load_config(path: str | os.PathLike | None = None) -> PlatformConfig:
     """Load platform configuration from YAML."""

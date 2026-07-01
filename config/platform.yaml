@@ -26,6 +26,23 @@ storage:
   gold: "data/lake/gold"
   ml_artifacts: "ml/artifacts"
 
+# Kafka streaming path (produce synthetic data -> topics -> Bronze).
+# Overridable via env: IDP_KAFKA_BOOTSTRAP, IDP_SCHEMA_REGISTRY.
+kafka:
+  bootstrap: "idp-kafka-kafka-bootstrap:9092"          # in-cluster address
+  schema_registry: "http://apicurio-registry:8080/apis/ccompat/v7"
+  topic_prefix: "t"                                     # topics: t.<tenant>.<entity>
+
+# Object store for the lake. When enabled, Bronze/Silver/Gold are written to
+# MinIO/S3 instead of local dirs. Overridable via env: IDP_S3_ENDPOINT,
+# IDP_S3_ACCESS_KEY, IDP_S3_SECRET_KEY, IDP_S3_BUCKET.
+s3:
+  enabled: false                                        # true when running in-cluster
+  endpoint: "http://minio:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin123"
+  bucket: "idp-bronze"
+
 # Synthetic data generation (Phase 0 - reviewer requirement)
 synthetic:
   seed: 42
