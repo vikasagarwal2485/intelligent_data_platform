@@ -50,6 +50,60 @@ docs/                 # architecture & implementation plan
 
 ---
 
+## Running the pipeline (Bronze → Silver → Gold) — two paths
+
+There are **two ways** to run the medallion pipeline. They produce the same
+Bronze/Silver/Gold data; pick based on whether you want to exercise the deployed
+Kafka cluster.
+
+| | **Path A — Batch (local)** | **Path B — Streaming (Kafka, in-cluster)** |
+|---|---|---|
+| Command | `make run` | `make stream` |
+| Data path | synthetic → Bronze → Silver → Gold **in one process** | synthetic → **Kafka topics** → Bronze → Silver → Gold |
+| Needs the cluster? | No (runs in the Python venv) | Yes (uses your deployed Kafka + MinIO) |
+| Output | `data/lake/{bronze,silver,gold}/` (local) | MinIO bucket `idp-bronze` (prefixes `bronze/`,`silver/`,`gold/`) |
+| ML training | Yes (labelled synthetic data) | No — produces Gold **feature tables**; scoring only if models exist |
+| Use it for | fast dev, tests, model training | demonstrating the streaming architecture end-to-end |
+
+> **Why two paths?** ML training needs the synthetic *labels* (fraud/default),
+> which only exist in-process. The Kafka path streams the *entity/event* data
+> (no labels), so it builds the Gold feature tables and applies already-trained
+> models. Train with Path A, stream with Path B.
+
+### Path A — batch (simplest, always works)
+```bash
+make run          # synthetic → Bronze → Silver → Gold + ML, into data/lake/
+```
+
+### Path B — streaming through your deployed Kafka
+Prereqs: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
+
+1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
+   load it into minikube:
+   ```bash
+   make image
+   ```
+2. **Produce + consume** (runs two Kubernetes Jobs in-cluster, so they use the
+   internal Kafka DNS — external access from a Mac/minikube is unreliable):
+   ```bash
+   make stream
+   ```
+   - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics.
+   - `idp-consume` drains the topics → Bronze → Silver → Gold, written to MinIO.
+3. **Watch / verify**:
+   ```bash
+   kubectl -n idp-platform logs -f job/idp-produce      # per-topic message counts
+   kubectl -n idp-platform logs -f job/idp-consume      # bronze/silver/gold counts
+   ```
+   - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
+   - In the **MinIO console** you'll see `idp-bronze/{bronze,silver,gold}/…`.
+
+> Tip: the default synthetic volume (~1M usage events) is a lot to stream on a
+> small node. For a quicker demo, lower `synthetic.subscribers_per_tenant` and
+> `synthetic.days` in `config/platform.yaml` before `make stream`.
+
+---
+
 ## Quick start (local Python)
 
 Requires Python 3.10+.
@@ -145,7 +199,10 @@ Requires `minikube`, `kubectl`, `kustomize`, `helm`.
 6. **Initialize Nessie/Iceberg namespaces** (`silver`, `gold`) via Trino/Spark.
 7. **Load the Airflow DAG**: mount `pipelines/airflow/dags/idp_batch_dag.py` into
    the Airflow `dags/` folder; it schedules the daily batch run.
-8. **Smoke test**:
+8. **Run the pipeline**: see
+   [Running the pipeline (Bronze → Silver → Gold)](#running-the-pipeline-bronze--silver--gold)
+   above — `make stream` to flow synthetic data through Kafka into the lake, or
+   `make run` for the local batch pipeline. Quick in-venv smoke check:
    ```bash
    make smoke    # ingest -> Bronze -> Silver -> feature -> score (asserts isolation)
    ```

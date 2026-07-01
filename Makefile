@@ -84,6 +84,16 @@ kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 	@echo "  kubectl -n idp-platform port-forward svc/kafka-ui 8080:8080"
 	@echo "Then open http://localhost:8080"
 
+.PHONY: stream
+stream: ## Kafka path (in-cluster): produce synthetic data, then consume -> Bronze->Silver->Gold
+	kubectl -n idp-platform delete job idp-produce idp-consume --ignore-not-found
+	kubectl -n idp-platform apply -f deploy/kafka/streaming-jobs.yaml
+	@echo ""
+	@echo "Producing then consuming. Follow along with:"
+	@echo "  kubectl -n idp-platform get jobs,pods -l app=idp-streaming -w"
+	@echo "  kubectl -n idp-platform logs -f job/idp-produce"
+	@echo "  kubectl -n idp-platform logs -f job/idp-consume"
+
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)
 	bash deploy/kafka/create-topics.sh idp-platform

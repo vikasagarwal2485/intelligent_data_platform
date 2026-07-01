@@ -1,0 +1,71 @@
+# In-cluster Kafka streaming jobs (plan section 3).
+#
+# Run these AS PODS (not from your laptop) so they use the internal Kafka
+# bootstrap DNS — external access to Strimzi from a Mac/minikube is unreliable.
+# They use the scoring-api image, which must be built WITH the streaming deps
+# (kafka-python, s3fs) via `make image` after pulling the latest code.
+#
+#   idp-produce: generate synthetic data -> publish to t.<tenant>.<entity> topics
+#   idp-consume: drain topics -> Bronze -> Silver -> Gold (written to MinIO)
+#
+# Apply/rerun:  kubectl -n idp-platform delete job idp-produce idp-consume --ignore-not-found
+#               kubectl -n idp-platform apply -f deploy/kafka/streaming-jobs.yaml
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-produce
+  labels: { app: idp-streaming }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-streaming }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: produce
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never          # use the image built into minikube
+          command: ["idp", "produce"]
+          env:
+            - name: IDP_KAFKA_BOOTSTRAP
+              value: "idp-kafka-kafka-bootstrap:9092"
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-consume
+  labels: { app: idp-streaming }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-streaming }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: consume
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "consume", "--idle-timeout", "25"]
+          env:
+            - name: IDP_KAFKA_BOOTSTRAP
+              value: "idp-kafka-kafka-bootstrap:9092"
+            # Write the lake to MinIO (single bucket, layer prefixes).
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET
+              value: "idp-bronze"
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits: { cpu: "1", memory: 1536Mi }
