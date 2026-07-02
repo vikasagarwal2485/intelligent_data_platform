@@ -79,6 +79,16 @@ nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
 	bash deploy/kafka/setup-kafka.sh idp-platform
 
+.PHONY: minio-ls
+minio-ls: ## List the lake objects in MinIO bucket idp-bronze (bronze/silver/gold)
+	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+	  "mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && mc ls -r m/idp-bronze/"
+
+.PHONY: minio-console
+minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
+	@echo "Open http://localhost:9001  (user: minioadmin  pass: minioadmin123)"
+	kubectl -n idp-platform port-forward svc/minio-console 9001:9001
+
 .PHONY: kafka-ui
 kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 	kubectl apply -n idp-platform -f deploy/kafka/kafka-ui.yaml

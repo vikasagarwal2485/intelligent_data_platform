@@ -99,7 +99,11 @@ make run          # synthetic → Bronze → Silver → Gold + ML, into data/lak
    kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
    ```
    - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
-   - In the **MinIO console** you'll see `idp-bronze/{bronze,silver,gold}/…`.
+   - Inspect the lake in MinIO:
+     ```bash
+     make minio-ls          # list idp-bronze objects (bronze/silver/gold prefixes)
+     make minio-console     # web UI at http://localhost:9001 (minioadmin/minioadmin123)
+     ```
 
 > **Namespaces:** platform services (Kafka, MinIO, Trino, Nessie…) run in
 > `idp-platform`; application workloads (scoring API, streaming jobs) run in
