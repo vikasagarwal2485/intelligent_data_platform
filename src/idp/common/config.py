@@ -53,7 +53,15 @@ class PlatformConfig:
 
     @property
     def synthetic(self) -> dict[str, Any]:
-        return self.raw.get("synthetic", {})
+        s = dict(self.raw.get("synthetic", {}))
+        env = os.environ
+        if "IDP_SUBSCRIBERS" in env:
+            s["subscribers_per_tenant"] = int(env["IDP_SUBSCRIBERS"])
+        if "IDP_DAYS" in env:
+            s["days"] = int(env["IDP_DAYS"])
+        if "IDP_FRAUD_RATE" in env:
+            s["fraud_rate"] = float(env["IDP_FRAUD_RATE"])
+        return s
 
     @property
     def features(self) -> dict[str, Any]:

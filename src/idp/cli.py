@@ -45,22 +45,30 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 def _cmd_produce(args: argparse.Namespace) -> None:
     from idp.streaming.producer import produce
-    from idp.synthetic.generator import generate_for_tenants
+    from idp.synthetic.generator import generate
 
     cfg = load_config(args.config)
     syn = cfg.synthetic
     bootstrap = args.bootstrap or cfg.kafka["bootstrap"]
-    dataset = generate_for_tenants(
-        cfg.tenant_ids,
-        subscribers=int(syn.get("subscribers_per_tenant", 200)),
-        days=int(syn.get("days", 60)),
-        fraud_rate=float(syn.get("fraud_rate", 0.05)),
-        default_rate=float(syn.get("default_rate", 0.12)),
-        seed=int(syn.get("seed", 42)),
-    )
-    counts = produce(dataset, bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+    # Generate + publish one tenant at a time to cap peak memory (avoids OOM on
+    # small nodes; the whole multi-tenant dataset would be large in RAM).
+    totals: dict[str, int] = {}
+    for tenant_id in cfg.tenant_ids:
+        dataset = generate(
+            tenant_id,
+            subscribers=int(syn.get("subscribers_per_tenant", 200)),
+            days=int(syn.get("days", 60)),
+            fraud_rate=float(syn.get("fraud_rate", 0.05)),
+            default_rate=float(syn.get("default_rate", 0.12)),
+            seed=int(syn.get("seed", 42)),
+        )
+        counts = produce(dataset, bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+        for k, v in counts.items():
+            totals[k] = totals.get(k, 0) + v
+        del dataset
+        print(f"[{tenant_id}] published {sum(counts.values())} messages")
     print(f"Published to Kafka at {bootstrap}:")
-    print(json.dumps(counts, indent=2))
+    print(json.dumps(totals, indent=2))
 
 
 def _cmd_consume(args: argparse.Namespace) -> None:
@@ -75,6 +83,13 @@ def _cmd_consume(args: argparse.Namespace) -> None:
         bootstrap, cfg.tenant_ids,
         topic_prefix=cfg.kafka["topic_prefix"], idle_timeout=args.idle_timeout,
     )
+    total = sum(len(df) for df in bronze.values())
+    print(f"Consumed {total} records across tables: "
+          f"{ {k: len(v) for k, v in bronze.items()} }")
+    if total == 0:
+        print("No messages consumed (topics empty or producer not finished yet). "
+              "Run 'idp produce' first, then re-run consume.")
+        return
     # persist raw Bronze
     for name, df in bronze.items():
         storage.write_parquet(df, f"{storage.lake_uri(cfg, 'bronze')}/{name}", cfg,

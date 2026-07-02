@@ -42,6 +42,14 @@ def process_bronze(cfg: PlatformConfig, bronze: dict, *, persist: bool = True) -
     salts = _salts(cfg)
     windows = tuple(cfg.features.get("windows", [30, 90]))
 
+    required = ["parties", "accounts", "agreements"]
+    missing = [t for t in required if t not in bronze or bronze[t].empty]
+    if missing:
+        raise RuntimeError(
+            f"Bronze is missing entity tables {missing}. The producer may not have "
+            "finished (topics empty) — run 'idp produce' to completion first."
+        )
+
     silver = curate(bronze, salts)
     credit_feats = build_credit_features(silver, windows)
     fraud_feats = build_fraud_features(silver, windows)

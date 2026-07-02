@@ -83,20 +83,28 @@ Prereqs: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
    ```bash
    make image
    ```
-2. **Produce + consume** (runs two Kubernetes Jobs in-cluster, so they use the
-   internal Kafka DNS — external access from a Mac/minikube is unreliable):
+2. **Produce + consume** (two Kubernetes Jobs in the **`idp-app`** namespace, so
+   they use in-cluster DNS — external Kafka access from a Mac/minikube is
+   unreliable). `make stream` runs produce, **waits for it to finish**, then
+   runs consume (ordering matters):
    ```bash
    make stream
    ```
-   - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics.
+   - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
+     (small default volume: 150 subscribers × 14 days, via env, to fit memory).
    - `idp-consume` drains the topics → Bronze → Silver → Gold, written to MinIO.
-3. **Watch / verify**:
+3. **Watch / verify** (jobs are in `idp-app`):
    ```bash
-   kubectl -n idp-platform logs -f job/idp-produce      # per-topic message counts
-   kubectl -n idp-platform logs -f job/idp-consume      # bronze/silver/gold counts
+   kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
+   kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
    ```
    - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
    - In the **MinIO console** you'll see `idp-bronze/{bronze,silver,gold}/…`.
+
+> **Namespaces:** platform services (Kafka, MinIO, Trino, Nessie…) run in
+> `idp-platform`; application workloads (scoring API, streaming jobs) run in
+> `idp-app` and reach the platform via cross-namespace DNS
+> (`<svc>.idp-platform.svc`).
 
 > Tip: the default synthetic volume (~1M usage events) is a lot to stream on a
 > small node. For a quicker demo, lower `synthetic.subscribers_per_tenant` and

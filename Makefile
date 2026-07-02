@@ -71,6 +71,10 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/trino-tune.sh idp-platform
 
+.PHONY: nessie-fix
+nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
+	bash deploy/nessie-tune.sh idp-platform
+
 .PHONY: kafka
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
 	bash deploy/kafka/setup-kafka.sh idp-platform
@@ -85,14 +89,15 @@ kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 	@echo "Then open http://localhost:8080"
 
 .PHONY: stream
-stream: ## Kafka path (in-cluster): produce synthetic data, then consume -> Bronze->Silver->Gold
-	kubectl -n idp-platform delete job idp-produce idp-consume --ignore-not-found
-	kubectl -n idp-platform apply -f deploy/kafka/streaming-jobs.yaml
-	@echo ""
-	@echo "Producing then consuming. Follow along with:"
-	@echo "  kubectl -n idp-platform get jobs,pods -l app=idp-streaming -w"
-	@echo "  kubectl -n idp-platform logs -f job/idp-produce"
-	@echo "  kubectl -n idp-platform logs -f job/idp-consume"
+stream: ## Kafka path (in-cluster, idp-app): produce, wait, then consume -> Bronze->Silver->Gold
+	kubectl -n idp-app delete job idp-produce idp-consume --ignore-not-found
+	kubectl -n idp-app apply -f deploy/kafka/produce-job.yaml
+	@echo ">> Producing... (follow: kubectl -n idp-app logs -f job/idp-produce)"
+	kubectl -n idp-app wait --for=condition=complete job/idp-produce --timeout=900s
+	kubectl -n idp-app apply -f deploy/kafka/consume-job.yaml
+	@echo ">> Consuming... (follow: kubectl -n idp-app logs -f job/idp-consume)"
+	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
+	@echo ">> Done. Check MinIO bucket idp-bronze for bronze/silver/gold prefixes."
 
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)

@@ -4,7 +4,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: scoring-api
-  namespace: idp-platform
+  namespace: idp-app
   labels:
     app: scoring-api
 spec:
@@ -41,7 +41,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: scoring-api
-  namespace: idp-platform
+  namespace: idp-app
 spec:
   selector:
     app: scoring-api
