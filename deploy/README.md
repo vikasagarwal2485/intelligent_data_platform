@@ -91,10 +91,16 @@ Run `minikube status`, `minikube update-context`, and increase resources.
 
 **Trino coordinator CrashLoop / OOM** (`container not running`, `connection
 reset by peer`, startup/liveness probe failures): the chart defaults to an 8G
-heap + worker pods, too big for a small node. Reinstall with the tuned values
-(coordinator-only, ~1.5G heap):
+heap + worker pods, too big for a small node.
 ```bash
-helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
-kubectl -n idp-platform rollout status deploy/trino-coordinator
+make trino-fix        # coordinator-only, ~1G heap, auto-recovers stuck releases
 ```
-`make infra` already applies this file for fresh installs.
+
+**Nessie CrashLoopBackOff**: the chart can default to a version store needing an
+external DB, or OOM on too small a limit.
+```bash
+make nessie-fix       # in-memory store + more memory; check logs first:
+kubectl -n idp-platform logs deploy/nessie --previous --tail=40
+```
+
+`make infra` already applies the tuned Trino/Nessie values for fresh installs.

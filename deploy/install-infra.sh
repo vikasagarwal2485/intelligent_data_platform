@@ -85,8 +85,8 @@ echo ">> Verifying Strimzi CRDs were installed:"
 kubectl get crd 2>/dev/null | grep -i strimzi || echo "  WARN: no Strimzi CRDs found yet"
 # After the operator is Ready, run: make kafka  (creates the Kafka cluster CR).
 
-echo ">> Iceberg catalog (Nessie)"
-hi nessie nessie/nessie
+echo ">> Iceberg catalog (Nessie, in-memory store, tuned)"
+hi nessie nessie/nessie -f "${HERE}/nessie-values.yaml"
 
 echo ">> query engine (Trino, tuned small for local)"
 hi trino trino/trino -f "${HERE}/trino-values.yaml"

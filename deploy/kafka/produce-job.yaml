@@ -1,0 +1,32 @@
+# Split from streaming-jobs.yaml so produce can run to completion before consume.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-produce
+  namespace: idp-app
+  labels: { app: idp-streaming }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-streaming }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: produce
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never          # use the image built into minikube
+          command: ["idp", "produce"]
+          env:
+            - name: IDP_KAFKA_BOOTSTRAP
+              value: "idp-kafka-kafka-bootstrap.idp-platform.svc:9092"
+            # Keep the streaming demo volume small so the producer fits in memory.
+            - name: IDP_SUBSCRIBERS
+              value: "150"
+            - name: IDP_DAYS
+              value: "14"
+          resources:
+            requests: { cpu: "250m", memory: 1Gi }
+            limits: { cpu: "1", memory: 2Gi }

@@ -1,0 +1,36 @@
+# Split from streaming-jobs.yaml so produce can run to completion before consume.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-consume
+  namespace: idp-app
+  labels: { app: idp-streaming }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-streaming }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: consume
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "consume", "--idle-timeout", "25"]
+          env:
+            - name: IDP_KAFKA_BOOTSTRAP
+              value: "idp-kafka-kafka-bootstrap.idp-platform.svc:9092"
+            # Write the lake to MinIO (single bucket, layer prefixes).
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio.idp-platform.svc:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET
+              value: "idp-bronze"
+          resources:
+            requests: { cpu: "250m", memory: 1Gi }
+            limits: { cpu: "1", memory: 2Gi }
