@@ -76,7 +76,7 @@ make run          # synthetic → Bronze → Silver → Gold + ML, into data/lak
 ```
 
 ### Path B — streaming through your deployed Kafka
-Prereqs: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
+0. **Prereqs**: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
 
 1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
    load it into minikube:
