@@ -61,7 +61,7 @@ Kafka cluster.
 | Command | `make run` | `make stream` |
 | Data path | synthetic → Bronze → Silver → Gold **in one process** | synthetic → **Kafka topics** → Bronze → Silver → Gold |
 | Needs the cluster? | No (runs in the Python venv) | Yes (uses your deployed Kafka + MinIO) |
-| Output | `data/lake/{bronze,silver,gold}/` (local) | MinIO bucket `idp-bronze` (prefixes `bronze/`,`silver/`,`gold/`) |
+| Output | `data/lake/{bronze,silver,gold}/` (local) | MinIO buckets `idp-bronze` / `idp-silver` / `idp-gold` |
 | ML training | Yes (labelled synthetic data) | No — produces Gold **feature tables**; scoring only if models exist |
 | Use it for | fast dev, tests, model training | demonstrating the streaming architecture end-to-end |
 
@@ -99,9 +99,9 @@ Prereqs: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
    kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
    ```
    - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
-   - Inspect the lake in MinIO:
+   - Inspect the lake in MinIO (one bucket per layer):
      ```bash
-     make minio-ls          # list idp-bronze objects (bronze/silver/gold prefixes)
+     make minio-ls          # lists idp-bronze / idp-silver / idp-gold
      make minio-console     # web UI at http://localhost:9001 (minioadmin/minioadmin123)
      ```
 
