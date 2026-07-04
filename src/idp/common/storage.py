@@ -27,10 +27,15 @@ def storage_options(cfg: PlatformConfig) -> dict[str, Any] | None:
 
 
 def lake_uri(cfg: PlatformConfig, layer: str) -> str:
-    """Return the base URI for a lake layer ('bronze'|'silver'|'gold')."""
+    """Return the base URI for a lake layer ('bronze'|'silver'|'gold').
+
+    On S3 each layer maps to its own bucket ``<prefix>-<layer>`` (e.g.
+    ``idp-bronze``, ``idp-silver``, ``idp-gold``) — matching the buckets created
+    by deploy/install-infra.sh.
+    """
     s3 = cfg.s3
     if s3.get("enabled"):
-        return f"s3://{s3['bucket']}/{layer}"
+        return f"s3://{s3['bucket_prefix']}-{layer}"
     return getattr(cfg.storage, layer)
 
 

@@ -80,9 +80,9 @@ kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schema
 	bash deploy/kafka/setup-kafka.sh idp-platform
 
 .PHONY: minio-ls
-minio-ls: ## List the lake objects in MinIO bucket idp-bronze (bronze/silver/gold)
+minio-ls: ## List the lake objects in MinIO (idp-bronze / idp-silver / idp-gold)
 	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
-	  "mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && mc ls -r m/idp-bronze/"
+	  "mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo \"== $$b ==\"; mc ls -r m/$$b/; done"
 
 .PHONY: minio-console
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
@@ -107,7 +107,7 @@ stream: ## Kafka path (in-cluster, idp-app): produce, wait, then consume -> Bron
 	kubectl -n idp-app apply -f deploy/kafka/consume-job.yaml
 	@echo ">> Consuming... (follow: kubectl -n idp-app logs -f job/idp-consume)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
-	@echo ">> Done. Check MinIO bucket idp-bronze for bronze/silver/gold prefixes."
+	@echo ">> Done. Check MinIO buckets idp-bronze / idp-silver / idp-gold (make minio-ls)."
 
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)

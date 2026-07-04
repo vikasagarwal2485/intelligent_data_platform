@@ -92,7 +92,8 @@ class PlatformConfig:
             s["endpoint"] = env["IDP_S3_ENDPOINT"]
         s["access_key"] = env.get("IDP_S3_ACCESS_KEY", s.get("access_key", ""))
         s["secret_key"] = env.get("IDP_S3_SECRET_KEY", s.get("secret_key", ""))
-        s["bucket"] = env.get("IDP_S3_BUCKET", s.get("bucket", "idp-bronze"))
+        # One bucket per medallion layer: <prefix>-bronze / -silver / -gold.
+        s["bucket_prefix"] = env.get("IDP_S3_BUCKET_PREFIX", s.get("bucket_prefix", "idp"))
         s.setdefault("enabled", False)
         return s
 

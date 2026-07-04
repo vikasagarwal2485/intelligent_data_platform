@@ -33,15 +33,16 @@ kafka:
   schema_registry: "http://apicurio-registry:8080/apis/ccompat/v7"
   topic_prefix: "t"                                     # topics: t.<tenant>.<entity>
 
-# Object store for the lake. When enabled, Bronze/Silver/Gold are written to
-# MinIO/S3 instead of local dirs. Overridable via env: IDP_S3_ENDPOINT,
-# IDP_S3_ACCESS_KEY, IDP_S3_SECRET_KEY, IDP_S3_BUCKET.
+# Object store for the lake. When enabled, each medallion layer goes to its own
+# bucket: <bucket_prefix>-bronze / -silver / -gold (created by install-infra.sh).
+# Overridable via env: IDP_S3_ENDPOINT, IDP_S3_ACCESS_KEY, IDP_S3_SECRET_KEY,
+# IDP_S3_BUCKET_PREFIX.
 s3:
   enabled: false                                        # true when running in-cluster
   endpoint: "http://minio:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin123"
-  bucket: "idp-bronze"
+  bucket_prefix: "idp"                                  # -> idp-bronze / idp-silver / idp-gold
 
 # Synthetic data generation (Phase 0 - reviewer requirement)
 synthetic:
