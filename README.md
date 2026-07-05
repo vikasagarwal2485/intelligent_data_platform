@@ -191,6 +191,44 @@ Dockerfile                   # scoring-api / jobs image (idp package)
 ```
 
 Run `make help` to list every target with a description.
+### Path B — streaming through your deployed Kafka
+0. **Prereqs**: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
+
+1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
+   load it into minikube:
+   ```bash
+   make image
+   ```
+2. **Produce + consume** (two Kubernetes Jobs in the **`idp-app`** namespace, so
+   they use in-cluster DNS — external Kafka access from a Mac/minikube is
+   unreliable). `make stream` runs produce, **waits for it to finish**, then
+   runs consume (ordering matters):
+   ```bash
+   make stream
+   ```
+   - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
+     (small default volume: 150 subscribers × 14 days, via env, to fit memory).
+   - `idp-consume` drains the topics → Bronze → Silver → Gold, written to MinIO.
+3. **Watch / verify** (jobs are in `idp-app`):
+   ```bash
+   kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
+   kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
+   ```
+   - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
+   - Inspect the lake in MinIO (one bucket per layer):
+     ```bash
+     make minio-ls          # lists idp-bronze / idp-silver / idp-gold
+     make minio-console     # web UI at http://localhost:9001 (minioadmin/minioadmin123)
+     ```
+
+> **Namespaces:** platform services (Kafka, MinIO, Trino, Nessie…) run in
+> `idp-platform`; application workloads (scoring API, streaming jobs) run in
+> `idp-app` and reach the platform via cross-namespace DNS
+> (`<svc>.idp-platform.svc`).
+
+> Tip: the default synthetic volume (~1M usage events) is a lot to stream on a
+> small node. For a quicker demo, lower `synthetic.subscribers_per_tenant` and
+> `synthetic.days` in `config/platform.yaml` before `make stream`.
 
 ---
 
