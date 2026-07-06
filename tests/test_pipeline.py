@@ -33,8 +33,15 @@ def pipeline_result(tmp_path_factory):
 def test_pipeline_persists_gold_and_artifacts(pipeline_result):
     tmp_path, summary = pipeline_result
     assert summary["counts"]["subscribers"] == 600  # 2 tenants x 300
-    assert (tmp_path / "gold" / "credit_scores.parquet").exists()
-    assert (tmp_path / "gold" / "fraud_scores.parquet").exists()
+    # Gold tables are tenant-partitioned directories (one per table).
+    assert (tmp_path / "gold" / "credit_features").is_dir()
+    assert (tmp_path / "gold" / "fraud_features").is_dir()
+    assert (tmp_path / "gold" / "credit_scores").is_dir()
+    assert (tmp_path / "gold" / "fraud_scores").is_dir()
+    # Silver + Bronze layers were written by their stages too.
+    assert (tmp_path / "silver" / "dim_subscriber").is_dir()
+    assert (tmp_path / "bronze" / "parties").is_dir()
+    # Trained models saved by the training stage.
     assert (tmp_path / "ml" / "credit_model.joblib").exists()
     assert (tmp_path / "ml" / "fraud_model.joblib").exists()
 

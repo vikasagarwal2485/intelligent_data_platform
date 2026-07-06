@@ -104,15 +104,29 @@ kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 	@echo "Then open http://localhost:8080"
 
 .PHONY: stream
-stream: ## Kafka path (in-cluster, idp-app): produce, wait, then consume -> Bronze->Silver->Gold
+stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). Bronze stage only.
 	kubectl -n idp-app delete job idp-produce idp-consume --ignore-not-found
 	kubectl -n idp-app apply -f deploy/kafka/produce-job.yaml
 	@echo ">> Producing... (follow: kubectl -n idp-app logs -f job/idp-produce)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-produce --timeout=900s
 	kubectl -n idp-app apply -f deploy/kafka/consume-job.yaml
-	@echo ">> Consuming... (follow: kubectl -n idp-app logs -f job/idp-consume)"
+	@echo ">> Consuming -> Bronze... (follow: kubectl -n idp-app logs -f job/idp-consume)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
-	@echo ">> Done. Check MinIO buckets idp-bronze / idp-silver / idp-gold (make minio-ls)."
+	@echo ">> Bronze ready. Next: make silver, then make gold."
+
+.PHONY: silver
+silver: ## Silver stage (idp-app): Bronze (S3) -> canonical Silver (S3)
+	kubectl -n idp-app delete job idp-silver --ignore-not-found
+	kubectl -n idp-app apply -f deploy/jobs/silver-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=600s
+	kubectl -n idp-app logs job/idp-silver
+
+.PHONY: gold
+gold: ## Gold stage (idp-app): Silver (S3) -> feature tables (+scores) (S3)
+	kubectl -n idp-app delete job idp-gold --ignore-not-found
+	kubectl -n idp-app apply -f deploy/jobs/gold-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
+	kubectl -n idp-app logs job/idp-gold
 
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)
