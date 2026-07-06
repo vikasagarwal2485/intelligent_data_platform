@@ -1,10 +1,13 @@
 """Command-line entrypoint for the platform.
 
-Usage:
+Usage (separated medallion stages):
+    idp produce    # synthetic data -> Kafka topics
+    idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
+    idp silver     # Bronze (S3) -> Silver (S3)    [Silver stage]
+    idp gold       # Silver (S3) -> Gold (S3)      [Gold stage: features + scores]
+    idp train      # labelled data -> saved models [offline ML]
+    idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
-    idp run        # batch: synthetic -> Bronze -> Silver -> Gold + ML (local)
-    idp produce    # streaming: publish synthetic data to Kafka topics
-    idp consume    # streaming: drain Kafka -> Bronze -> Silver -> Gold
     idp serve      # start the FastAPI scoring service
 """
 from __future__ import annotations
@@ -72,9 +75,9 @@ def _cmd_produce(args: argparse.Namespace) -> None:
 
 
 def _cmd_consume(args: argparse.Namespace) -> None:
+    """Bronze stage only: Kafka -> Bronze. Silver/Gold are separate stages."""
     from idp.streaming.consumer import consume_to_bronze
-    from idp.pipeline import process_bronze
-    from idp.common import storage
+    from idp.pipeline import to_bronze
 
     cfg = load_config(args.config)
     bootstrap = args.bootstrap or cfg.kafka["bootstrap"]
@@ -84,19 +87,44 @@ def _cmd_consume(args: argparse.Namespace) -> None:
         topic_prefix=cfg.kafka["topic_prefix"], idle_timeout=args.idle_timeout,
     )
     total = sum(len(df) for df in bronze.values())
-    print(f"Consumed {total} records across tables: "
-          f"{ {k: len(v) for k, v in bronze.items()} }")
+    print(f"Consumed {total} records: { {k: len(v) for k, v in bronze.items()} }")
     if total == 0:
-        print("No messages consumed (topics empty or producer not finished yet). "
-              "Run 'idp produce' first, then re-run consume.")
+        print("No messages consumed (topics empty or producer not finished). "
+              "Run 'idp produce' first.")
         return
-    # persist raw Bronze
-    for name, df in bronze.items():
-        storage.write_parquet(df, f"{storage.lake_uri(cfg, 'bronze')}/{name}", cfg,
-                              partition_cols=["tenant_id"])
-    summary = process_bronze(cfg, bronze, persist=True)
-    print(json.dumps({"bronze_tables": list(bronze), "counts": summary["counts"],
-                      "gold_tables": summary["gold_tables"]}, indent=2, default=str))
+    result = to_bronze(cfg, bronze, persist=True)
+    print(f"Wrote Bronze tables: {result['bronze_tables']}")
+    print("Next: 'idp silver' to build Silver from Bronze.")
+
+
+def _cmd_silver(args: argparse.Namespace) -> None:
+    """Silver stage: Bronze (S3) -> canonical Silver (S3)."""
+    from idp.pipeline import to_silver
+
+    cfg = load_config(args.config)
+    silver = to_silver(cfg, persist=True)
+    print(json.dumps({"silver_tables": {k: len(v) for k, v in silver.items()}}, indent=2))
+    print("Next: 'idp gold' to build Gold from Silver.")
+
+
+def _cmd_gold(args: argparse.Namespace) -> None:
+    """Gold stage: Silver (S3) -> feature tables (+ scores if models exist) (S3)."""
+    from idp.pipeline import to_gold
+
+    cfg = load_config(args.config)
+    result = to_gold(cfg, persist=True)
+    print(json.dumps({"gold_tables": result["gold_tables"], "counts": result["counts"]},
+                     indent=2, default=str))
+
+
+def _cmd_train(args: argparse.Namespace) -> None:
+    """Offline ML training on a labelled dataset -> saved models."""
+    from idp.pipeline import train
+
+    cfg = load_config(args.config)
+    result = train(cfg, persist=True)
+    print(json.dumps({"credit_metrics": result["credit_metrics"],
+                      "fraud_metrics": result["fraud_metrics"]}, indent=2, default=str))
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
@@ -120,11 +148,15 @@ def main(argv: list[str] | None = None) -> int:
     p_prod.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_prod.set_defaults(func=_cmd_produce)
 
-    p_cons = sub.add_parser("consume", help="Drain Kafka topics -> Bronze -> Silver -> Gold")
+    p_cons = sub.add_parser("consume", help="Bronze stage: drain Kafka topics -> Bronze (S3)")
     p_cons.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_cons.add_argument("--idle-timeout", type=float, default=15.0,
                         help="Stop after N seconds with no new messages")
     p_cons.set_defaults(func=_cmd_consume)
+
+    sub.add_parser("silver", help="Silver stage: Bronze (S3) -> canonical Silver (S3)").set_defaults(func=_cmd_silver)
+    sub.add_parser("gold", help="Gold stage: Silver (S3) -> feature tables + scores (S3)").set_defaults(func=_cmd_gold)
+    sub.add_parser("train", help="Offline ML training on labelled data -> saved models").set_defaults(func=_cmd_train)
 
     p_serve = sub.add_parser("serve", help="Start the scoring API")
     p_serve.add_argument("--host", default="0.0.0.0")

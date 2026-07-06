@@ -85,9 +85,11 @@ Workloads that use the platform, deployed into the **`idp-app`** namespace.
 | Application | Purpose |
 |---|---|
 | **scoring-api** (FastAPI) | On-demand `/credit-limit` and `/fraud-score` endpoints; loads trained models |
-| **idp-produce** (K8s Job) | Generates synthetic data and publishes it to `t.<tenant>.<entity>` Kafka topics |
-| **idp-consume** (K8s Job) | Drains topics → Bronze → Silver → Gold (writes to MinIO) |
-| **`idp` CLI** | `generate` · `run` (batch) · `produce` / `consume` (streaming) · `serve` |
+| **idp-produce** (K8s Job) | Publishes synthetic data to `t.<tenant>.<entity>` Kafka topics |
+| **idp-consume** (K8s Job) | **Bronze stage**: drains topics → Bronze (S3). Does not chain into Silver/Gold |
+| **idp-silver** (K8s Job) | **Silver stage**: Bronze (S3) → canonical Silver (S3) |
+| **idp-gold** (K8s Job) | **Gold stage**: Silver (S3) → feature tables (+scores) (S3) |
+| **`idp` CLI** | `produce` · `consume` · `silver` · `gold` · `train` · `run` (local compose) · `serve` |
 
 ### 1.4 System integration architecture
 
@@ -110,12 +112,13 @@ flowchart LR
       SILVER["Silver<br/>s3://idp-silver"]
       GOLD["Gold<br/>s3://idp-gold"]
       KAFKA <--> SR
-      KAFKA --> BRONZE --> SILVER --> GOLD
+      KAFKA -->|idp consume| BRONZE
+      BRONZE -->|idp silver| SILVER
+      SILVER -->|idp gold| GOLD
     end
 
     SYN --> B_ALL
     SYN -->|idp produce| KAFKA
-    KAFKA -->|idp consume| BRONZE
 
     GOLD --> API["scoring-api<br/>/credit-limit /fraud-score"]
     B_OUT --> MODELS["ml/artifacts<br/>trained models"]
@@ -258,10 +261,18 @@ make serve        # scoring API at http://localhost:8000
   "credit_metrics": {"auc": 0.72, "ks": 0.36}, "fraud_metrics": {"pr_auc": 0.68, "precision_at_20": 1.0} }
 ```
 
-**Production (as an in-cluster job / Airflow):** the same `idp run` runs in a pod
-using the `idp` image, writing to MinIO/S3 (set `IDP_S3_ENDPOINT`, creds). In the
-target architecture this is a Spark job scheduled by the Airflow DAG in
-`pipelines/airflow/dags/idp_batch_dag.py`, writing Iceberg tables via Nessie.
+**Production:** the medallion is run as **separate stages** (not one monolith) —
+Silver/Gold orchestrated by Airflow (`pipelines/airflow/dags/idp_medallion_dag.py`)
+and Spark (`pipelines/spark/gold_job.py`), writing Iceberg via Nessie. `idp run`
+(below) is for local dev/testing and offline model training, not production ELT.
+
+> **Is batch mode obsolete?** No — its role changes. The *medallion transforms*
+> are now the standalone stages (`idp silver`, `idp gold`) used by both on-demand
+> and orchestrated runs, so there is **no duplicated logic**. `idp run` remains
+> useful as (a) the **local dev/test harness** (runs the whole flow with no
+> cluster) and (b) the **training path** — training needs ground-truth labels
+> that never enter the lake, so it stays a distinct concern (`idp train`). `run`
+> simply *composes* `to_bronze → to_silver → train → to_gold` locally.
 
 ### 3.2 Streaming mode (local vs production)
 
@@ -279,53 +290,80 @@ make kafka                              # Kafka cluster + Schema Registry + topi
 Health checks & fixes if a component is unhappy:
 `make strimzi-fix` · `make trino-fix` · `make nessie-fix` (see [`deploy/README.md`](deploy/README.md)).
 
-**Run the streaming pipeline:**
+**Run the medallion stages — each is a separate job (separation of concerns):**
 ```bash
-make stream        # idp-produce (waits for completion) then idp-consume, in idp-app
+make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
+make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
+make gold          # 3) Gold stage:   Silver (S3) -> feature tables (+scores) (S3)
 ```
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
-- `idp-consume` drains topics → Bronze → Silver → Gold on MinIO.
+- `idp-consume` drains topics and writes **only Bronze**.
+- `idp-silver` (`deploy/jobs/silver-job.yaml`) reads Bronze → writes Silver.
+- `idp-gold` (`deploy/jobs/gold-job.yaml`) reads Silver → writes Gold.
+- Models: run `idp train` (offline) to populate `ml/artifacts`; then Gold also
+  emits `credit_scores` / `fraud_scores`. Without models, Gold = feature tables only.
 
 **Verify:**
 ```bash
-kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
-kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
+kubectl -n idp-app logs job/idp-produce         # per-topic message counts
+kubectl -n idp-app logs job/idp-consume         # bronze counts
+kubectl -n idp-app logs job/idp-silver          # silver counts
+kubectl -n idp-app logs job/idp-gold            # gold tables
 make kafka-ui                                   # browse topics/messages/schemas
 make minio-ls                                   # objects in idp-bronze / idp-silver / idp-gold
 make minio-reset                                # empty the lake buckets for a clean re-run
 ```
 
-**Production (AWS EKS):** deploy with `deploy/overlays/aws` (ECR image, IRSA, S3
-buckets, External Secrets) via Argo CD (`deploy/argocd/application.yaml`). The
-streaming Jobs become long-running Flink/Kafka-Connect consumers writing Iceberg;
-the batch DAG runs on Airflow. See the plan §2B.
+**Production (AWS EKS):**
+- **Silver** — orchestrated by **Airflow** (`pipelines/airflow/dags/idp_medallion_dag.py`,
+  `idp_silver_gold` DAG: `silver >> gold`, hourly). On EKS the tasks become
+  `SparkSubmitOperator`/`KubernetesPodOperator`.
+- **Gold** — a **Spark** job (`pipelines/spark/gold_job.py`) reading Silver and
+  writing Gold on S3 (Iceberg via Nessie in the target).
+- Deploy with `deploy/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD.
+  See the plan §2B.
 
 ---
 
 ## 4. Functional implementation
 
-Entry points: batch = `pipeline.run()`; streaming = `pipeline.process_bronze()`
-(called by `idp consume`). Both reuse the same curation/feature code.
+**Separation of concerns.** Each medallion stage is an independent function in
+`pipeline.py` that reads its input layer and writes its output layer, exposed as a
+distinct CLI command / job:
+
+| Stage | Function | CLI / Job | Reads | Writes |
+|---|---|---|---|---|
+| Bronze | `to_bronze` | `idp consume` | Kafka | `s3://idp-bronze` |
+| Silver | `to_silver` | `idp silver` | `s3://idp-bronze` | `s3://idp-silver` |
+| Gold | `to_gold` | `idp gold` | `s3://idp-silver` | `s3://idp-gold` |
+| ML train | `train` | `idp train` | labelled data | `ml/artifacts` (MLflow target) |
+
+`idp run` is the **local dev orchestrator** — it composes the same stage functions
+end-to-end against local storage (see the note at the end of §4).
 
 ### 4.1 Bronze pipeline
 
-**Purpose:** capture raw records immutably, tenant-partitioned.
+**Purpose:** capture raw records immutably, tenant-partitioned. **Bronze is the
+only thing the consumer does** — it does not chain into Silver/Gold.
 
-- **Streaming** (`streaming/consumer.py` → `ingestion`/`storage`): `consume_to_bronze()`
-  subscribes to all `t.<tenant>.<entity>` topics, deserializes JSON, groups messages
-  back into per-entity frames, and writes Parquet to `s3://idp-bronze/<entity>/`
-  partitioned by `tenant_id`.
-- **Batch** (`ingestion/bronze.py`): `ingest()` persists the generated frames to
-  `data/lake/bronze/<entity>/` partitioned by `tenant_id`.
-- Every record is **tenant-stamped** at ingestion (`common/tenancy.py`), the leading
-  partition column that guarantees physical isolation.
+- `streaming/consumer.py:consume_to_bronze()` subscribes to all
+  `t.<tenant>.<entity>` topics, deserializes JSON, and **returns** per-entity
+  frames (read-only — no writes here).
+- `idp consume` (`cli.py`) then calls `pipeline.to_bronze()`, which writes the
+  frames to `s3://idp-bronze/<entity>/` partitioned by `tenant_id`. That's the end
+  of the Bronze job.
+- Every record is **tenant-stamped** at ingestion (`common/tenancy.py`), the
+  leading partition column that guarantees physical isolation.
 
 ### 4.2 Silver pipeline (batch vs stream)
 
 **Purpose:** turn raw per-entity records into clean, canonical, joinable,
-PII-safe tables. Implemented once in `curation/silver.py:curate()` and used by
-**both** paths — batch and stream produce identical Silver.
+PII-safe tables. The stage is `pipeline.to_silver()`: it **reads Bronze from
+storage** (`s3://idp-bronze`, or the in-memory frames in local `run`), applies
+`curation/silver.py:curate()`, and **writes Silver** (`s3://idp-silver`). The
+transformation logic is identical for on-demand (`idp silver`), orchestrated
+(Airflow), and local (`idp run`) — only the trigger differs.
 
 **Transformations:**
 - **JSON:API unwrap** (`curation/jsonapi.py`): flatten `data.attributes`, strip
@@ -349,13 +387,16 @@ Production target: Iceberg tables (ACID/upsert/schema-evolution) via Nessie + Sp
 
 ### 4.3 Gold pipeline (batch vs stream)
 
-**Purpose:** analytics-ready, per-subscriber tables for ML and serving.
+**Purpose:** analytics-ready, per-subscriber tables for ML and serving. The stage
+is `pipeline.to_gold()`: it **reads Silver** (`s3://idp-silver`), builds the
+feature tables (`features/`), and **writes Gold** (`s3://idp-gold`).
 
-- **Batch** (`pipeline.run`): builds feature tables **and trains + scores** models,
-  writing `credit_scores` / `fraud_scores` to `data/lake/gold/`.
-- **Stream** (`pipeline.process_bronze`): builds the **feature tables** and, if
-  trained models exist in `ml/artifacts`, appends scores — but does **not train**
-  (Kafka carries no labels). Writes to `s3://idp-gold/`.
+- **On-demand / orchestrated** (`idp gold` job, or the Airflow `gold` task, or the
+  Spark `gold_job.py`): builds the feature tables. If trained models are available
+  it also emits `credit_scores` / `fraud_scores`; otherwise Gold = feature tables
+  only (the streaming lake has **no labels** to train from).
+- **Local** (`idp run`): the same `to_gold`, but it receives the just-trained
+  models in-process so scores are always produced.
 
 **Features** (`features/`, aggregated per `(tenant_id, service_id)` over 7/30/90-day
 windows in `features/base.py`):
