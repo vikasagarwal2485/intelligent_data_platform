@@ -1,0 +1,32 @@
+# Airflow Helm values to load the IDP DAGs from git and install the k8s provider.
+#
+# Apply on install/upgrade:
+#   helm upgrade --install airflow apache-airflow/airflow -n idp-platform -f deploy/airflow/values.yaml
+#
+# This uses git-sync to pull DAGs straight from the repo — no custom image needed.
+# The DAGs use KubernetesPodOperator, so Airflow needs the cncf.kubernetes
+# provider (bundled in the official image) and the RBAC in deploy/airflow/rbac.yaml.
+
+executor: KubernetesExecutor
+
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/vikasagarwal2485/intelligent_data_platform.git
+    branch: main
+    subPath: pipelines/airflow/dags
+    # For a private repo, configure a credentials secret here.
+
+# Keep the demo light on a small node.
+workers:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: 1, memory: 1Gi }
+scheduler:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: 1, memory: 1Gi }
+webserver:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: 1, memory: 1Gi }

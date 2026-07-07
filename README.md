@@ -315,14 +315,20 @@ make minio-ls                                   # objects in idp-bronze / idp-si
 make minio-reset                                # empty the lake buckets for a clean re-run
 ```
 
-**Production (AWS EKS):**
-- **Silver** — orchestrated by **Airflow** (`pipelines/airflow/dags/idp_medallion_dag.py`,
-  `idp_silver_gold` DAG: `silver >> gold`, hourly). On EKS the tasks become
-  `SparkSubmitOperator`/`KubernetesPodOperator`.
-- **Gold** — a **Spark** job (`pipelines/spark/gold_job.py`) reading Silver and
-  writing Gold on S3 (Iceberg via Nessie in the target).
-- Deploy with `deploy/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD.
-  See the plan §2B.
+**Production (orchestrated Silver/Gold):**
+- **Airflow** DAG (`idp_silver_gold`: `silver >> gold`, hourly) — tasks launch
+  the `idp` image via `KubernetesPodOperator`. Wire + trigger:
+  ```bash
+  make airflow-wire       # git-sync DAGs + RBAC to launch pods in idp-app
+  make airflow-trigger    # or: make airflow-ui  then Trigger in the UI
+  ```
+- **Spark** Gold job (`pipelines/spark/gold_job.py`), reading Silver → writing Gold:
+  ```bash
+  make spark-gold         # spark-submit as a one-off Spark pod (S3A -> MinIO)
+  ```
+- **Full step-by-step (both):** [`docs/triggering.md`](docs/triggering.md).
+- EKS: `deploy/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
+  Spark job targets Iceberg via Nessie. See plan §2B.
 
 ---
 

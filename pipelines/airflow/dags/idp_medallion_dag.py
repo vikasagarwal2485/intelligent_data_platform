@@ -1,71 +1,76 @@
-"""Airflow DAG orchestrating the medallion stages (production mode for Silver/Gold).
+"""Airflow DAGs that orchestrate the medallion stages (production mode).
 
-Each stage is an independent task that reads its input layer from S3 and writes
-its output layer — the same separation of concerns as the on-demand CLI
-(`idp silver`, `idp gold`). In a real deployment these tasks would submit Spark
-jobs (SparkSubmitOperator) or pods (KubernetesPodOperator); here they call the
-`idp` stage functions directly so the DAG is runnable in a lightweight setup too.
+Each task launches a POD running the `idp` image (`idp silver` / `idp gold` /
+`idp train`) via KubernetesPodOperator. This is the correct decoupling: Airflow
+only needs permission to launch pods — it does NOT need the `idp` package
+installed. The pods carry the code + deps and write to MinIO/S3.
 
-Schedule: Silver/Gold refresh hourly off the Bronze that the streaming consumer
-lands continuously. Model retraining runs daily.
+Prerequisites:
+  * the `idp/scoring-api:dev` image is on the node (`make image`)
+  * the Airflow service account may create pods in `idp-app`
+    (apply deploy/airflow/rbac.yaml; see docs/triggering.md)
 
-Deploy: mount this file into the Airflow `dags/` folder.
+DAGs:
+  * idp_silver_gold : silver >> gold   (hourly)
+  * idp_train       : train            (daily)
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-try:
-    from airflow import DAG
-    from airflow.operators.python import PythonOperator
-except ImportError:  # allow import/lint without Airflow installed
-    DAG = None
-    PythonOperator = None
+from airflow import DAG
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from kubernetes.client import models as k8s
+
+IMAGE = "idp/scoring-api:dev"
+APP_NS = "idp-app"
+
+# S3/MinIO env every stage pod needs (platform services are in idp-platform).
+S3_ENV = [
+    k8s.V1EnvVar(name="IDP_S3_ENDPOINT", value="http://minio.idp-platform.svc:9000"),
+    k8s.V1EnvVar(name="IDP_S3_ACCESS_KEY", value="minioadmin"),
+    k8s.V1EnvVar(name="IDP_S3_SECRET_KEY", value="minioadmin123"),
+    k8s.V1EnvVar(name="IDP_S3_BUCKET_PREFIX", value="idp"),
+]
+
+default_args = {"owner": "idp", "retries": 1, "retry_delay": timedelta(minutes=3)}
 
 
-def _silver(**_):
-    from idp.common.config import load_config
-    from idp.pipeline import to_silver
-    to_silver(load_config(), persist=True)          # Bronze (S3) -> Silver (S3)
+def _stage(task_id: str, arg: str) -> KubernetesPodOperator:
+    return KubernetesPodOperator(
+        task_id=task_id,
+        name=f"idp-{arg}",
+        namespace=APP_NS,
+        image=IMAGE,
+        image_pull_policy="Never",          # local image built into minikube
+        cmds=["idp"],
+        arguments=[arg],
+        env_vars=S3_ENV,
+        get_logs=True,
+        is_delete_operator_pod=True,
+        in_cluster=True,
+    )
 
 
-def _gold(**_):
-    from idp.common.config import load_config
-    from idp.pipeline import to_gold
-    to_gold(load_config(), persist=True)            # Silver (S3) -> Gold (S3)
+with DAG(
+    dag_id="idp_silver_gold",
+    description="Medallion refresh: Bronze -> Silver -> Gold (pods run the idp image)",
+    schedule="0 * * * *",                   # hourly
+    start_date=datetime(2026, 1, 1),
+    catchup=False,
+    default_args=default_args,
+    tags=["idp", "medallion"],
+) as dag_refresh:
+    _stage("silver", "silver") >> _stage("gold", "gold")
 
 
-def _train(**_):
-    from idp.common.config import load_config
-    from idp.pipeline import train
-    train(load_config(), persist=True)              # labelled data -> models
-
-
-default_args = {"owner": "idp", "retries": 2, "retry_delay": timedelta(minutes=5)}
-
-if DAG is not None:
-    # Hourly Silver -> Gold refresh.
-    with DAG(
-        dag_id="idp_silver_gold",
-        description="Medallion refresh: Bronze -> Silver -> Gold (reads/writes S3)",
-        schedule="0 * * * *",
-        start_date=datetime(2026, 1, 1),
-        catchup=False,
-        default_args=default_args,
-        tags=["idp", "medallion"],
-    ) as dag_refresh:
-        silver = PythonOperator(task_id="silver", python_callable=_silver)
-        gold = PythonOperator(task_id="gold", python_callable=_gold)
-        silver >> gold
-
-    # Daily model retraining (separate concern from the ELT).
-    with DAG(
-        dag_id="idp_train_models",
-        description="Offline ML training on labelled data",
-        schedule="0 2 * * *",
-        start_date=datetime(2026, 1, 1),
-        catchup=False,
-        default_args=default_args,
-        tags=["idp", "ml"],
-    ) as dag_train:
-        PythonOperator(task_id="train", python_callable=_train)
+with DAG(
+    dag_id="idp_train",
+    description="Offline ML training on labelled data",
+    schedule="0 2 * * *",                   # daily 02:00
+    start_date=datetime(2026, 1, 1),
+    catchup=False,
+    default_args=default_args,
+    tags=["idp", "ml"],
+) as dag_train:
+    _stage("train", "train")
