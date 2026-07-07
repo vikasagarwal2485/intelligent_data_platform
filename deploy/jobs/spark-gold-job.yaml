@@ -1,0 +1,58 @@
+# Production Gold stage as a Spark job (spark-submit), run as a one-off K8s Job.
+#
+# Runs pipelines/spark/gold_job.py in local[*] mode inside a single Spark pod,
+# reading Silver and writing Gold on MinIO via the S3A connector. The script is
+# mounted from a ConfigMap (created by `make spark-gold`).
+#
+# Needs egress to fetch the hadoop-aws jars (via --packages) the first time.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-spark-gold
+  namespace: idp-app
+  labels: { app: idp-medallion, stage: gold, engine: spark }
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-medallion, stage: gold, engine: spark }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: spark-gold
+          image: apache/spark:3.5.3          # bundles Spark + PySpark + Hadoop 3.3.4
+          env:
+            - name: HOME
+              value: /tmp                    # writable home for the Ivy cache
+          command: ["/opt/spark/bin/spark-submit"]
+          args:
+            - "--master"
+            - "local[*]"
+            - "--packages"
+            - "org.apache.hadoop:hadoop-aws:3.3.4"
+            - "--conf"
+            - "spark.jars.ivy=/tmp/.ivy2"
+            - "--conf"
+            - "spark.hadoop.fs.s3a.endpoint=http://minio.idp-platform.svc:9000"
+            - "--conf"
+            - "spark.hadoop.fs.s3a.access.key=minioadmin"
+            - "--conf"
+            - "spark.hadoop.fs.s3a.secret.key=minioadmin123"
+            - "--conf"
+            - "spark.hadoop.fs.s3a.path.style.access=true"
+            - "--conf"
+            - "spark.hadoop.fs.s3a.connection.ssl.enabled=false"
+            - "/opt/idp/gold_job.py"
+            - "--prefix"
+            - "idp"
+          volumeMounts:
+            - name: job-script
+              mountPath: /opt/idp
+          resources:
+            requests: { cpu: "500m", memory: 1500Mi }
+            limits: { cpu: "2", memory: 2500Mi }
+      volumes:
+        - name: job-script
+          configMap:
+            name: idp-gold-spark      # created from pipelines/spark/gold_job.py

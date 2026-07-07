@@ -84,6 +84,22 @@ class PlatformConfig:
         return k
 
     @property
+    def timescale(self) -> dict[str, Any]:
+        t = dict(self.raw.get("timescale", {}))
+        env = os.environ
+        if "IDP_TS_HOST" in env:
+            t["enabled"] = True
+            t["host"] = env["IDP_TS_HOST"]
+        t["port"] = int(env.get("IDP_TS_PORT", t.get("port", 5432)))
+        t["database"] = env.get("IDP_TS_DB", t.get("database", "idp"))
+        t["user"] = env.get("IDP_TS_USER", t.get("user", "postgres"))
+        t["password"] = env.get("IDP_TS_PASSWORD", t.get("password", ""))
+        t.setdefault("host", "timescaledb.idp-platform.svc")
+        t.setdefault("schema", "gold")
+        t.setdefault("enabled", False)
+        return t
+
+    @property
     def s3(self) -> dict[str, Any]:
         s = dict(self.raw.get("s3", {}))
         env = os.environ

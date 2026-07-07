@@ -73,6 +73,23 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         result = _fraud().score(frame).iloc[0].to_dict()
         return result
 
+    @app.get("/serving/{table}/{tenant_id}/{service_id}")
+    def serving_lookup(table: str, tenant_id: str, service_id: str) -> dict[str, Any]:
+        """Low-latency lookup of a PRECOMPUTED Gold row from TimescaleDB.
+
+        e.g. GET /serving/credit_scores/tenant_a/tok_abc — returns the score the
+        Gold+publish stages materialized, without recomputing from features.
+        """
+        if not cfg.timescale.get("enabled"):
+            raise HTTPException(503, "serving DB (TimescaleDB) not enabled")
+        if table not in ("credit_scores", "fraud_scores", "credit_features", "fraud_features"):
+            raise HTTPException(404, f"unknown serving table {table!r}")
+        from idp.serving import timescale
+        row = timescale.read_score(cfg, table, tenant_id, service_id)
+        if row is None:
+            raise HTTPException(404, "no serving row for that tenant/service_id")
+        return row
+
     return app
 
 
