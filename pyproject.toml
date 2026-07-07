@@ -20,6 +20,8 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "kafka-python>=2.0",
     "s3fs>=2023.12",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
 ]
 
 [project.optional-dependencies]

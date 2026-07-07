@@ -67,7 +67,7 @@ Shared infrastructure, deployed by `make infra` (+ `make kafka`) into the
 | **Apicurio Schema Registry** | Avro schema management, Confluent-compatible API | **Active** (schemas registered) |
 | **Nessie** | Git-like Iceberg catalog | Provisioned (Iceberg is the prod target; prototype writes plain Parquet) |
 | **Trino** | Distributed SQL over the lake for ad-hoc queries | **Active** (query Silver/Gold) |
-| **TimescaleDB** | Time-series DB for low-latency Gold serving | Provisioned (serving target) |
+| **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
 | **Keycloak** | OIDC identity for multi-tenant RBAC | Provisioned (RBAC design, §1.5) |
 | **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | Provisioned (DAG in `pipelines/airflow`) |
 | **MLflow** | Experiment tracking + model registry | Provisioned (registry target) |
@@ -295,6 +295,7 @@ Health checks & fixes if a component is unhappy:
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
 make gold          # 3) Gold stage:   Silver (S3) -> feature tables (+scores) (S3)
+make publish       # 4) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
 ```
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
@@ -343,6 +344,7 @@ distinct CLI command / job:
 | Bronze | `to_bronze` | `idp consume` | Kafka | `s3://idp-bronze` |
 | Silver | `to_silver` | `idp silver` | `s3://idp-bronze` | `s3://idp-silver` |
 | Gold | `to_gold` | `idp gold` | `s3://idp-silver` | `s3://idp-gold` |
+| Serving | `publish_serving` | `idp publish` | `s3://idp-gold` | **TimescaleDB** (`gold.*` tables) |
 | ML train | `train` | `idp train` | labelled data | `ml/artifacts` (MLflow target) |
 
 `idp run` is the **local dev orchestrator** — it composes the same stage functions
@@ -435,18 +437,29 @@ Models are persisted with joblib to `ml/artifacts/` (MLflow registry is the prod
 
 ### 4.5 Serving layer
 
-`serving/api.py` — a **FastAPI** service (`scoring-api`, namespace `idp-app`):
+Two serving paths:
+
+**1. On-demand scoring** — `serving/api.py`, a **FastAPI** service (`scoring-api`,
+namespace `idp-app`) that computes a score from features using the loaded models:
 
 | Endpoint | Returns |
 |---|---|
 | `GET /health` | liveness |
-| `POST /credit-limit` | `{pd, affordability_base, recommended_limit}` for a subscriber's features |
+| `POST /credit-limit` | `{pd, affordability_base, recommended_limit}` computed from features |
 | `POST /fraud-score` | `{fraud_proba, anomaly_score, rule_score, fraud_score}` |
+| `GET /serving/{table}/{tenant_id}/{service_id}` | a **precomputed** Gold row from TimescaleDB |
+
+**2. Precomputed serving (TimescaleDB)** — `pipeline.publish_serving()`
+(`idp publish`, stage 4) mirrors the Gold tables into **TimescaleDB**
+(`serving/timescale.py`), replacing each table and indexing it by
+`(tenant_id, service_id)`. Dashboards/APIs then read a ready-made score with a
+single indexed lookup instead of recomputing — the plan's Gold serving layer
+(Q4/Q6). The `GET /serving/...` endpoint above reads from it.
 
 Every request carries a `tenant_id` (from the validated OIDC token in production,
 via Keycloak) and is served only within that tenant's scope — tenant isolation at
-the edge. Models are loaded lazily from the artifact store; endpoints return `503`
-until models are trained.
+the edge. Models are loaded lazily; scoring endpoints return `503` until models
+are trained, and the serving endpoint returns `503` until TimescaleDB is enabled.
 
 Run locally: `make serve` then:
 ```bash
@@ -454,6 +467,7 @@ curl -s localhost:8000/health
 curl -s -X POST localhost:8000/credit-limit -H 'content-type: application/json' \
   -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"recharge_avg_amount":40,"account_tenure_days":500,"recharge_success_rate":0.95}}'
 ```
+Inspect the TimescaleDB serving tables: `make timescale-psql`.
 
 ---
 

@@ -135,6 +135,26 @@ def to_gold(
     }
 
 
+# --- Stage 4: Serving (Gold -> TimescaleDB) ---------------------------------
+GOLD_SERVING_TABLES = ("credit_scores", "fraud_scores", "credit_features", "fraud_features")
+
+
+def publish_serving(cfg: PlatformConfig, gold: dict | None = None) -> dict:
+    """Publish Gold tables to the TimescaleDB serving layer (plan Q4/Q6).
+
+    Reads the Gold tables from storage if not given, then upserts them into
+    TimescaleDB indexed by (tenant_id, service_id) for low-latency serving.
+    """
+    from idp.serving import timescale
+
+    if gold is None:
+        gold = _read_layer(cfg, "gold", GOLD_SERVING_TABLES)
+    if not gold:
+        raise RuntimeError("No Gold tables found to publish. Run the Gold stage ('idp gold') first.")
+    published = timescale.publish_gold(cfg, gold)
+    return {"published": published, "target": cfg.timescale.get("host")}
+
+
 # --- Offline ML training (separate concern; needs labels) -------------------
 def _tokenize_labels(labels: pd.DataFrame, salts: dict[str, str]) -> pd.DataFrame:
     parts = []

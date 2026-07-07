@@ -5,6 +5,7 @@ Usage (separated medallion stages):
     idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
     idp silver     # Bronze (S3) -> Silver (S3)    [Silver stage]
     idp gold       # Silver (S3) -> Gold (S3)      [Gold stage: features + scores]
+    idp publish    # Gold (S3) -> TimescaleDB      [serving stage]
     idp train      # labelled data -> saved models [offline ML]
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
@@ -117,6 +118,15 @@ def _cmd_gold(args: argparse.Namespace) -> None:
                      indent=2, default=str))
 
 
+def _cmd_publish(args: argparse.Namespace) -> None:
+    """Serving stage: Gold (S3) -> TimescaleDB (indexed by tenant_id, service_id)."""
+    from idp.pipeline import publish_serving
+
+    cfg = load_config(args.config)
+    result = publish_serving(cfg)
+    print(json.dumps(result, indent=2, default=str))
+
+
 def _cmd_train(args: argparse.Namespace) -> None:
     """Offline ML training on a labelled dataset -> saved models."""
     from idp.pipeline import train
@@ -156,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("silver", help="Silver stage: Bronze (S3) -> canonical Silver (S3)").set_defaults(func=_cmd_silver)
     sub.add_parser("gold", help="Gold stage: Silver (S3) -> feature tables + scores (S3)").set_defaults(func=_cmd_gold)
+    sub.add_parser("publish", help="Serving stage: Gold (S3) -> TimescaleDB").set_defaults(func=_cmd_publish)
     sub.add_parser("train", help="Offline ML training on labelled data -> saved models").set_defaults(func=_cmd_train)
 
     p_serve = sub.add_parser("serve", help="Start the scoring API")

@@ -4,9 +4,14 @@ The medallion stages can be triggered three ways. Pick per situation:
 
 | Trigger | Command | When |
 |---|---|---|
-| **On-demand job** | `make silver` / `make gold` | quickest; runs the `idp` image as a one-off K8s Job |
-| **Airflow DAG** | `make airflow-trigger` (or the UI) | scheduled/orchestrated Silver → Gold |
+| **On-demand job** | `make silver` / `make gold` / `make publish` | quickest; runs the `idp` image as a one-off K8s Job |
+| **Airflow DAG** | `make airflow-trigger` (or the UI) | scheduled/orchestrated Silver → Gold → publish |
 | **Spark job** | `make spark-gold` | the distributed Gold engine (spark-submit) |
+
+The `idp_silver_gold` DAG runs `silver >> gold >> publish` — the last task
+(`idp publish`) mirrors Gold into **TimescaleDB** for serving. On-demand, run
+`make publish` after `make gold`. Inspect the serving tables with
+`make timescale-psql`.
 
 Prereqs for all: platform deployed (`make infra`), the app image built
 (`make image`), and Bronze already populated (`make stream`) so Silver has input.

@@ -128,6 +128,18 @@ gold: ## Gold stage (idp-app): Silver (S3) -> feature tables (+scores) (S3)
 	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
 	kubectl -n idp-app logs job/idp-gold
 
+.PHONY: publish
+publish: ## Serving stage (idp-app): Gold (S3) -> TimescaleDB (indexed serving copy)
+	kubectl -n idp-app delete job idp-publish --ignore-not-found
+	kubectl -n idp-app apply -f deploy/jobs/publish-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-publish --timeout=600s
+	kubectl -n idp-app logs job/idp-publish
+
+.PHONY: timescale-psql
+timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving tables)
+	kubectl -n idp-platform exec -it deploy/timescaledb -- psql -U postgres -d idp \
+	  -c "\dt gold.*" -c "SELECT count(*) FROM gold.credit_scores;"
+
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire
 airflow-wire: ## Load DAGs (git-sync) + RBAC so Airflow can launch stage pods in idp-app

@@ -44,6 +44,18 @@ s3:
   secret_key: "minioadmin123"
   bucket_prefix: "idp"                                  # -> idp-bronze / idp-silver / idp-gold
 
+# TimescaleDB (Gold serving layer). When enabled, the publish stage mirrors Gold
+# tables here for low-latency serving. Overridable via env: IDP_TS_HOST,
+# IDP_TS_PORT, IDP_TS_DB, IDP_TS_USER, IDP_TS_PASSWORD.
+timescale:
+  enabled: false
+  host: "timescaledb.idp-platform.svc"
+  port: 5432
+  database: "idp"
+  user: "postgres"
+  password: "idp-dev-password"     # matches deploy/infra/timescaledb.yaml (dev only)
+  schema: "gold"
+
 # Synthetic data generation (Phase 0 - reviewer requirement)
 synthetic:
   seed: 42
