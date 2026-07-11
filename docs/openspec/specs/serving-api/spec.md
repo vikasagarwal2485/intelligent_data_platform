@@ -2,9 +2,25 @@
 
 ## Purpose
 
-Expose on-demand credit-limit and fraud scoring over HTTP, tenant-scoped.
+Serve Gold to consumers: a low-latency serving store (TimescaleDB) materialized
+from Gold, and an on-demand HTTP scoring API — both tenant-scoped.
 
 ## Requirements
+
+### Requirement: Gold serving materialization (TimescaleDB)
+The system SHALL provide a `publish` stage that reads Gold from object storage and
+writes it to TimescaleDB `gold.*` tables indexed by `(tenant_id, service_id)` for
+low-latency serving (ADR-0002). It SHALL be an independent stage (`idp publish`)
+run on demand or on a schedule.
+
+#### Scenario: Publish Gold to TimescaleDB
+- **WHEN** `idp publish` runs against a populated Gold layer
+- **THEN** the Gold score/feature tables are upserted into TimescaleDB `gold.*`
+  keyed by `(tenant_id, service_id)` and are queryable by that key
+
+#### Scenario: Independent of the API
+- **WHEN** the publish stage runs
+- **THEN** it performs no HTTP serving and does not require the scoring API
 
 ### Requirement: Scoring endpoints
 The system SHALL expose a FastAPI service with `GET /health`,

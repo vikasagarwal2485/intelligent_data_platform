@@ -58,8 +58,11 @@ schemas derive from these.
 make install      # venv + editable install + dev deps
 make test         # pytest (must stay green after every phase)
 make run          # local compose: generate -> bronze -> silver -> train -> gold
-idp produce|consume|silver|gold|train|serve   # individual stages
+idp produce|consume|silver|gold|publish|train|serve   # individual stages
 ```
+
+`idp publish` materializes Gold into TimescaleDB (`gold.*`, indexed by
+`(tenant_id, service_id)`) for low-latency serving.
 
 Deployment: `make mk-up`, `make image`, `kubectl apply -k deploy/overlays/local`,
 `make infra`, `make kafka`, then `make stream|silver|gold`. See root README §3.

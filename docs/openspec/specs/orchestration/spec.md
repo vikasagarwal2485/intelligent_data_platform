@@ -9,9 +9,9 @@ independent (ADR-0009).
 
 ### Requirement: On-demand stage jobs
 The system SHALL provide independent, runnable jobs for each stage —
-`idp consume` (Bronze), `idp silver`, `idp gold`, `idp train` — each reading its
-input layer from storage and writing its output layer, exposed as CLI commands
-and as Kubernetes Jobs in `idp-app`.
+`idp consume` (Bronze), `idp silver`, `idp gold`, `idp publish` (Gold →
+TimescaleDB serving), `idp train` — each reading its input layer and writing its
+output, exposed as CLI commands and as Kubernetes Jobs in `idp-app`.
 
 #### Scenario: Independent Silver run
 - **WHEN** `idp silver` runs against a populated Bronze

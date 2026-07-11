@@ -22,11 +22,13 @@
       `register-schemas.sh`; `kafka-ui.yaml`
 
 ## 4. Jobs & orchestration
-- [ ] 4.1 `deploy/kafka/{produce,consume}-job.yaml`, `deploy/jobs/{silver,gold}-job.yaml`
-      (idp-app, cross-ns DNS, S3 env, `IDP_S3_BUCKET_PREFIX`)
-- [ ] 4.2 `pipelines/airflow/dags/idp_medallion_dag.py`: `silver >> gold` (hourly)
-      + daily training DAG
-- [ ] 4.3 `pipelines/spark/gold_job.py`: PySpark Silver→Gold on S3A
+- [ ] 4.1 `deploy/kafka/{produce,consume}-job.yaml`, `deploy/jobs/{silver,gold,publish}-job.yaml`
+      (idp-app, cross-ns DNS, S3 env, `IDP_S3_BUCKET_PREFIX`; publish → TimescaleDB)
+- [ ] 4.2 Airflow: `deploy/airflow/{values.yaml,rbac.yaml}` (git-sync DAGs + RBAC to
+      launch stage pods) and `pipelines/airflow/dags/idp_medallion_dag.py`
+      (`silver >> gold` hourly + daily training DAG)
+- [ ] 4.3 `pipelines/spark/gold_job.py` + `deploy/jobs/spark-gold-job.yaml`
+      (production Gold via spark-submit)
 - [ ] 4.4 `pipeline.run` composes stages locally (dev/test + training)
 
 ## 5. Make targets & docs

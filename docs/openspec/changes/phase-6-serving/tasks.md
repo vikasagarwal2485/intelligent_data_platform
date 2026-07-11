@@ -6,13 +6,17 @@
 - [ ] 1.3 `POST /fraud-score` → `{fraud_proba, anomaly_score, rule_score, fraud_score}`
 - [ ] 1.4 Lazy-load models; return HTTP 503 when absent; echo/scope `tenant_id`
 
-## 2. Packaging
-- [ ] 2.1 `idp serve` CLI (uvicorn)
-- [ ] 2.2 `Dockerfile` building the `idp` package and running `idp serve` (non-root)
+## 2. Gold serving materialization
+- [ ] 2.1 `pipeline.publish_serving(cfg)`: read Gold, upsert into TimescaleDB
+      `gold.*` indexed by `(tenant_id, service_id)`; expose as `idp publish`
 
-## 3. Tests
-- [ ] 3.1 health; endpoints return expected keys after training; 503 without models
-- [ ] 3.2 `make test` green
+## 3. Packaging
+- [ ] 3.1 `idp serve` CLI (uvicorn)
+- [ ] 3.2 `Dockerfile` building the `idp` package and running `idp serve` (non-root)
+
+## 4. Tests
+- [ ] 4.1 health; endpoints return expected keys after training; 503 without models
+- [ ] 4.2 `make test` green
 
 ## Done when
 `specs/serving-api` scenarios pass.

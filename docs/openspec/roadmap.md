@@ -12,7 +12,7 @@ change under `changes/`. Do not start a phase until the previous one's
 | 3 | [`phase-3-gold`](changes/phase-3-gold/proposal.md) | Gold stage: per-subscriber credit & fraud feature tables | `gold-features` |
 | 4 | [`phase-4-credit-ml`](changes/phase-4-credit-ml/proposal.md) | Credit-limit model (PD + affordability sizing) + training | `ml-models` |
 | 5 | [`phase-5-fraud-ml`](changes/phase-5-fraud-ml/proposal.md) | Fraud model (rules + gradient boosting + anomaly) + scoring | `ml-models` |
-| 6 | [`phase-6-serving`](changes/phase-6-serving/proposal.md) | FastAPI scoring service; tenant-scoped endpoints | `serving-api` |
+| 6 | [`phase-6-serving`](changes/phase-6-serving/proposal.md) | FastAPI scoring service + Gold→TimescaleDB publish; tenant-scoped | `serving-api` |
 | 7 | [`phase-7-streaming`](changes/phase-7-streaming/proposal.md) | Kafka producer/consumer bridge; Bronze from topics | `streaming-kafka` |
 | 8 | [`phase-8-platform`](changes/phase-8-platform/proposal.md) | K8s deployment (minikube/EKS), Helm services, Kafka cluster, namespaces, on-demand + orchestrated stages | `platform-deployment`, `orchestration` |
 
