@@ -5,14 +5,15 @@ Every capability depends on configuration, tenant isolation, GDPR PII handling,
 lake storage, a synthetic data source, and a test/CI harness. Build these first.
 
 ## What Changes
-- Create the `idp` package skeleton (`src/idp`, `pyproject.toml`, editable install).
-- Implement `common/config.py` (typed config + `IDP_*` env overrides),
-  `common/tenancy.py` (stamp/scope/guards), `common/pii.py` (per-tenant tokenize +
-  consent), `common/storage.py` (local/S3 Parquet, per-layer bucket URIs).
-- Implement `synthetic/generator.py` (deterministic, multi-tenant, labelled).
-- Add `config/platform.yaml` (tenants, storage, kafka, s3, synthetic, features,
-  credit, fraud) and `config/avro/*.avsc` contracts.
-- Add `tests/` and a CI workflow running `make test`.
+Each item references the spec Requirement id(s) it satisfies (traceability).
+- Create the `idp` package skeleton (`src/idp`, `pyproject.toml`, editable install) — enables `REQ-FND-01`…`REQ-FND-04`.
+- Implement `common/config.py` (typed config + `IDP_*` env overrides) — `REQ-FND-01`.
+- Implement `common/tenancy.py` (stamp/scope/guards) — `REQ-FND-02`.
+- Implement `common/pii.py` (per-tenant tokenize + consent) — `REQ-FND-03`.
+- Implement `common/storage.py` (local/S3 Parquet, per-layer bucket URIs) — `REQ-FND-04`.
+- Implement `synthetic/generator.py` (deterministic, multi-tenant, labelled) — `REQ-SYN-01`, `REQ-SYN-02`, `REQ-SYN-03`.
+- Add `config/platform.yaml` and `config/avro/*.avsc` contracts — `REQ-FND-01` (config).
+- Add `tests/` and a CI workflow running `make test` — verifies `REQ-FND-*`, `REQ-SYN-*`.
 
 ## Impact
 - Spec deltas: `foundation` (ADDED all requirements), `synthetic-data` (ADDED all).

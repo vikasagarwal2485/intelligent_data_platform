@@ -43,4 +43,29 @@ docs/openspec/
 
 - **Requirements** use `SHALL` and are testable.
 - Every requirement has ≥1 **Scenario** in `WHEN`/`THEN` (Given/When/Then) form.
-- Requirement headings are stable ids; a change's *Spec Deltas* reference them.
+
+### Traceability IDs
+
+Every requirement and scenario carries a **globally unique id** for traceability
+from specs → changes → code → tests.
+
+- **Requirement id:** `REQ-<CAP>-NN` (e.g. `REQ-SLV-02`).
+- **Scenario id:** `SCN-<CAP>-NN.M` (e.g. `SCN-SLV-02.1`), where `NN` is the
+  owning requirement and `M` the scenario index.
+
+Headings embed the id: `### Requirement: REQ-SLV-02 — <title>` /
+`#### Scenario: SCN-SLV-02.1 — <title>`.
+
+Capability codes (`<CAP>`):
+
+| Code | Capability | Code | Capability |
+|---|---|---|---|
+| `FND` | foundation | `ML` | ml-models |
+| `SYN` | synthetic-data | `SRV` | serving-api |
+| `BRZ` | bronze-ingestion | `STR` | streaming-kafka |
+| `SLV` | silver-curation | `PLT` | platform-deployment |
+| `GLD` | gold-features | `ORC` | orchestration |
+
+Each `changes/phase-N/proposal.md` **What Changes** item cites the `REQ-*` id(s)
+it implements, so every implementation task traces back to a spec requirement and
+its scenarios.

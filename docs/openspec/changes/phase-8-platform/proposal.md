@@ -6,17 +6,21 @@ platform services, and orchestrate the (separated) medallion stages on demand an
 on a schedule.
 
 ## What Changes
+Each item references the spec Requirement id(s) it satisfies (traceability).
 - Kustomize `base` (namespaces `idp-platform`/`idp-app`/`idp-tenant-*`, RBAC,
-  ResourceQuota, default-deny NetworkPolicy, scoring-api) + `overlays/local`
-  (minikube, `imagePullPolicy: Never`) and `overlays/aws` (EKS/ECR/IRSA) + Argo CD app.
-- `deploy/install-infra.sh` (Helm repos + non-Bitnami services; per-layer buckets)
-  with tuned values (Trino/Nessie) and self-healing reinstalls.
+  ResourceQuota, default-deny NetworkPolicy, scoring-api) + `overlays/local` and
+  `overlays/aws` + Argo CD app — `REQ-PLT-01`, `REQ-PLT-04`.
+- `deploy/install-infra.sh` (Helm repos + non-Bitnami services; per-layer buckets;
+  tuned Trino/Nessie; self-healing reinstalls) — `REQ-PLT-02`.
 - Kafka cluster (Strimzi KRaft) with API/version auto-detection; topics; Avro
-  registration; Kafka UI.
-- On-demand stage Jobs (`deploy/jobs/{silver,gold}-job.yaml`, produce/consume jobs);
-  Airflow DAG (`silver >> gold` + daily training); PySpark `gold_job.py`.
+  registration; Kafka UI — `REQ-PLT-03`.
+- On-demand stage Jobs (`deploy/jobs/{silver,gold,publish}-job.yaml`,
+  produce/consume jobs) — `REQ-ORC-01`.
+- Airflow DAG (`silver >> gold` + daily training) and PySpark `gold_job.py`
+  (+ `spark-gold-job.yaml`) — `REQ-ORC-02`.
+- Local `pipeline.run` composition retained — `REQ-ORC-03`.
 - Makefile targets: `mk-up`, `image`, `infra`, `kafka`, `stream`, `silver`, `gold`,
-  `*-fix`, `minio-*`.
+  `publish`, `*-fix`, `minio-*`, `airflow-*`, `spark-gold` — support `REQ-ORC-01/02`.
 
 ## Impact
 - Spec deltas: `platform-deployment` (ADDED all), `orchestration` (ADDED all).
