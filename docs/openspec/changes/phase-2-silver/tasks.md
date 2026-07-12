@@ -1,25 +1,25 @@
 # Tasks — Phase 2: Silver Curation
 
 ## 1. JSON:API unwrap
-- [ ] 1.1 `curation/jsonapi.py`: `strip_uuid_wrapper`, `normalize_money`
+- [x] 1.1 `curation/jsonapi.py`: `strip_uuid_wrapper`, `normalize_money`
       (net+tax→gross), `unwrap_usage_event`, `unwrap_recharge_event`
-- [ ] 1.2 Verify against real `data_samples/*.json`
+- [x] 1.2 Verify against real `data_samples/*.json`
 
 ## 2. Canonical tables
-- [ ] 2.1 `build_subscriber_dim`: join party/account/agreement + product counts,
+- [x] 2.1 `build_subscriber_dim`: join party/account/agreement + product counts,
       tenure days, one row per `(tenant_id, service_id)`, dedup
-- [ ] 2.2 `build_fact_usage`: union voice+data, `gross_amount = net+tax`, UTC ts, dedup
-- [ ] 2.3 `build_fact_recharge`: normalize ts/amount, dedup
-- [ ] 2.4 Tokenize PII per tenant in all three (consistent tokens for joins)
-- [ ] 2.5 `curate(bronze, salts)` returns the three tables
+- [x] 2.2 `build_fact_usage`: union voice+data, `gross_amount = net+tax`, UTC ts, dedup
+- [x] 2.3 `build_fact_recharge`: normalize ts/amount, dedup
+- [x] 2.4 Tokenize PII per tenant in all three (consistent tokens for joins)
+- [x] 2.5 `curate(bronze, salts)` returns the three tables
 
 ## 3. Stage function
-- [ ] 3.1 `pipeline.to_silver(cfg, bronze=None, persist=True)`: read Bronze if
+- [x] 3.1 `pipeline.to_silver(cfg, bronze=None, persist=True)`: read Bronze if
       `None`, guard required entities, write Silver partitioned by `tenant_id`
 
 ## 4. Tests
-- [ ] 4.1 Unwrap vs `data_samples`; money/UUID; token join integrity; grain; isolation
-- [ ] 4.2 `make test` green
+- [x] 4.1 Unwrap vs `data_samples`; money/UUID; token join integrity; grain; isolation
+- [x] 4.2 `make test` green
 
 ## Done when
 `specs/silver-curation` scenarios pass.
