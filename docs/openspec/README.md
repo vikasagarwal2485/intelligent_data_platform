@@ -69,3 +69,13 @@ Capability codes (`<CAP>`):
 Each `changes/phase-N/proposal.md` **What Changes** item cites the `REQ-*` id(s)
 it implements, so every implementation task traces back to a spec requirement and
 its scenarios.
+
+### Traceability matrix
+
+[`traceability.md`](traceability.md) is a generated, at-a-glance view mapping
+**Requirement → Scenarios → Phase → Code**. Regenerate it after editing any spec
+or proposal:
+
+```bash
+python docs/openspec/gen_traceability.py
+```
