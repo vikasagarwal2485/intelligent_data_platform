@@ -82,12 +82,12 @@ kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schema
 .PHONY: minio-ls
 minio-ls: ## List the lake objects in MinIO (idp-bronze / idp-silver / idp-gold)
 	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
-	  "mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo \"== $$b ==\"; mc ls -r m/$$b/; done"
+	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo "== $$b =="; mc ls -r m/$$b/; done'
 
 .PHONY: minio-reset
 minio-reset: ## Empty the lake buckets (idp-bronze/silver/gold) for a clean re-run
 	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
-	  "mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo \"clearing $$b\"; mc rm -r --force m/$$b/ 2>/dev/null || true; done; echo done"
+	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo "clearing $$b"; mc rm -r --force m/$$b/ 2>/dev/null || true; done; echo done'
 
 .PHONY: minio-console
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
