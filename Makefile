@@ -142,7 +142,9 @@ timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving 
 
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire
-airflow-wire: ## Load DAGs (git-sync) + RBAC so Airflow can launch stage pods in idp-app
+airflow-wire: ## Build DAG image into minikube + install Airflow (external metadata DB) + RBAC
+	@echo ">> Building the Airflow DAG image into minikube (idp/airflow:dev)..."
+	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/airflow/Dockerfile .
 	@echo ">> Ensuring the 'airflow' metadata database exists in TimescaleDB..."
 	kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -tc \
 	  "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 || \
