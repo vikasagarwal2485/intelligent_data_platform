@@ -3,7 +3,13 @@
 # Apply on install/upgrade (see `make airflow-wire`, which also creates the
 # `airflow` metadata database in TimescaleDB first):
 #   helm upgrade --install airflow apache-airflow/airflow -n idp-platform \
-#     -f deploy/airflow/values.yaml --timeout 15m
+#     --version 1.15.0 -f deploy/airflow/values.yaml --timeout 15m
+#
+# Pin to chart 1.15.0 (Airflow 2.9.3). Newer charts ship Airflow 3.x, which
+# renames the UI component `webserver` -> `api-server` (service becomes
+# airflow-api-server, not airflow-webserver) and changes these value keys — so
+# `make airflow-ui`/`airflow-trigger` would break. The 2.x line keeps the
+# `webserver`, `triggerer` and `dagProcessor` keys below valid.
 #
 # This uses git-sync to pull DAGs straight from the repo — no custom image needed.
 # The DAGs use KubernetesPodOperator, so Airflow needs the cncf.kubernetes
