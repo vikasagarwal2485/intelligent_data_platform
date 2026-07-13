@@ -149,7 +149,7 @@ airflow-wire: ## Load DAGs (git-sync) + RBAC so Airflow can launch stage pods in
 	  kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -c "CREATE DATABASE airflow"
 	helm repo add apache-airflow https://airflow.apache.org >/dev/null 2>&1 || true
 	helm repo update apache-airflow >/dev/null 2>&1 || true
-	helm upgrade --install airflow apache-airflow/airflow -n idp-platform \
+	helm upgrade --install airflow apache-airflow/airflow -n idp-platform --version 1.15.0 \
 	  -f deploy/airflow/values.yaml --timeout 15m
 	kubectl apply -f deploy/airflow/rbac.yaml
 
