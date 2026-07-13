@@ -57,8 +57,15 @@ done
 hi() { helm upgrade --install "$@" --namespace "${NS}"; }
 
 echo ">> object store (MinIO, official chart, image quay.io/minio/minio)"
+# Pin to the last release with a fully functional community Console. MinIO
+# stripped bucket/object/admin management out of the community web console in
+# RELEASE.2025-05-24 onward (object-browser-only, effectively read-only), so the
+# `latest` image gives an unusable "can't click anything" console. See
+# https://github.com/minio/minio/discussions/21326
+MINIO_TAG="RELEASE.2025-04-22T22-12-26Z"
 hi minio minio/minio \
   --set mode=standalone \
+  --set image.repository=quay.io/minio/minio --set image.tag="${MINIO_TAG}" \
   --set rootUser=minioadmin --set rootPassword=minioadmin123 \
   --set 'buckets[0].name=idp-bronze,buckets[0].policy=none' \
   --set 'buckets[1].name=idp-silver,buckets[1].policy=none' \
