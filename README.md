@@ -320,16 +320,20 @@ make minio-reset                                # empty the lake buckets for a c
 - **Airflow** DAG (`idp_silver_gold`: `silver >> gold`, hourly) — tasks launch
   the `idp` image via `KubernetesPodOperator`. Wire + trigger:
   ```bash
-  make airflow-wire       # git-sync DAGs + RBAC to launch pods in idp-app
+  make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
   make airflow-trigger    # or: make airflow-ui  then Trigger in the UI
   ```
-  `airflow-wire` pins the chart to `1.15.0` (Airflow 2.9.3 — so the UI service is
-  `airflow-webserver`; Airflow 3.x charts rename it to `airflow-api-server`) and
-  reuses the in-cluster **TimescaleDB** as Airflow's metadata store (a dedicated
-  `airflow` database it creates on first run), disabling the chart's bundled
-  PostgreSQL/Redis — the retired Bitnami images no longer pull, which otherwise
-  leaves `run-airflow-migrations` hanging and the init containers in
-  `CrashLoopBackOff`.
+  `airflow-wire` (see [`deploy/airflow/`](deploy/airflow)):
+  - **Bakes the DAGs into a local image** (`deploy/airflow/Dockerfile`, built into
+    minikube) instead of git-sync — the repo is private, so git-sync-init can't
+    clone it without credentials and crashloops with an auth error.
+  - Pins the chart to `1.15.0` (Airflow 2.9.3 — so the UI service is
+    `airflow-webserver`; Airflow 3.x charts rename it to `airflow-api-server`).
+  - Reuses the in-cluster **TimescaleDB** as Airflow's metadata store (a dedicated
+    `airflow` database it creates on first run), disabling the chart's bundled
+    PostgreSQL/Redis — the retired Bitnami images no longer pull, which otherwise
+    leaves `run-airflow-migrations` hanging and the init containers in
+    `CrashLoopBackOff`.
 - **Spark** Gold job (`pipelines/spark/gold_job.py`), reading Silver → writing Gold:
   ```bash
   make spark-gold         # spark-submit as a one-off Spark pod (S3A -> MinIO)
