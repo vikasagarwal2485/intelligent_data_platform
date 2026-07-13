@@ -143,7 +143,14 @@ timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving 
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire
 airflow-wire: ## Load DAGs (git-sync) + RBAC so Airflow can launch stage pods in idp-app
-	helm upgrade --install airflow apache-airflow/airflow -n idp-platform -f deploy/airflow/values.yaml
+	@echo ">> Ensuring the 'airflow' metadata database exists in TimescaleDB..."
+	kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -tc \
+	  "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 || \
+	  kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -c "CREATE DATABASE airflow"
+	helm repo add apache-airflow https://airflow.apache.org >/dev/null 2>&1 || true
+	helm repo update apache-airflow >/dev/null 2>&1 || true
+	helm upgrade --install airflow apache-airflow/airflow -n idp-platform \
+	  -f deploy/airflow/values.yaml --timeout 15m
 	kubectl apply -f deploy/airflow/rbac.yaml
 
 .PHONY: airflow-ui

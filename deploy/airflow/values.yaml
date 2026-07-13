@@ -1,13 +1,51 @@
 # Airflow Helm values to load the IDP DAGs from git and install the k8s provider.
 #
-# Apply on install/upgrade:
-#   helm upgrade --install airflow apache-airflow/airflow -n idp-platform -f deploy/airflow/values.yaml
+# Apply on install/upgrade (see `make airflow-wire`, which also creates the
+# `airflow` metadata database in TimescaleDB first):
+#   helm upgrade --install airflow apache-airflow/airflow -n idp-platform \
+#     -f deploy/airflow/values.yaml --timeout 15m
 #
 # This uses git-sync to pull DAGs straight from the repo — no custom image needed.
 # The DAGs use KubernetesPodOperator, so Airflow needs the cncf.kubernetes
 # provider (bundled in the official image) and the RBAC in deploy/airflow/rbac.yaml.
 
 executor: KubernetesExecutor
+
+# --- Metadata database ------------------------------------------------------
+# The Airflow chart bundles a Bitnami PostgreSQL subchart by default. Bitnami's
+# free image catalogue was retired, so that subchart's image no longer pulls and
+# the DB (and therefore the `run-airflow-migrations` job) hangs forever. We
+# disable it and reuse the TimescaleDB already deployed in idp-platform as the
+# metadata store (a dedicated `airflow` database — created by `make airflow-wire`
+# before the Helm install; separate from the `idp` serving database).
+postgresql:
+  enabled: false
+
+# KubernetesExecutor does not need Celery/Redis; disable the bundled Redis so it
+# doesn't try to pull a Bitnami image either.
+redis:
+  enabled: false
+
+data:
+  metadataConnection:
+    user: postgres
+    pass: idp-dev-password
+    protocol: postgresql
+    host: timescaledb.idp-platform.svc
+    port: 5432
+    db: airflow
+    sslmode: disable
+
+# Trim optional components the demo doesn't use — fewer pods to schedule and no
+# extra init containers to wait on migrations.
+triggerer:
+  enabled: false
+dagProcessor:
+  enabled: false
+statsd:
+  enabled: false
+flower:
+  enabled: false
 
 dags:
   gitSync:

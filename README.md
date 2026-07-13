@@ -323,6 +323,11 @@ make minio-reset                                # empty the lake buckets for a c
   make airflow-wire       # git-sync DAGs + RBAC to launch pods in idp-app
   make airflow-trigger    # or: make airflow-ui  then Trigger in the UI
   ```
+  `airflow-wire` reuses the in-cluster **TimescaleDB** as Airflow's metadata
+  store (a dedicated `airflow` database it creates on first run) and disables the
+  chart's bundled PostgreSQL/Redis — the retired Bitnami images no longer pull,
+  which otherwise leaves `run-airflow-migrations` hanging and the init containers
+  in `CrashLoopBackOff`.
 - **Spark** Gold job (`pipelines/spark/gold_job.py`), reading Silver → writing Gold:
   ```bash
   make spark-gold         # spark-submit as a one-off Spark pod (S3A -> MinIO)
