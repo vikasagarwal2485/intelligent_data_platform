@@ -2,7 +2,7 @@
 
 Step-by-step for standing up the streaming layer (plan section 3): an Apache
 Kafka cluster (Strimzi), per-tenant topics, and an Apicurio Schema Registry with
-the Avro contracts from [`config/avro/`](../../config/avro).
+the Avro contracts from [`config/avro/`](../../../config/avro).
 
 ```
 deploy/kafka/

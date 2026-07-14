@@ -8,7 +8,7 @@ set -euo pipefail
 
 NS="${1:-idp-platform}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AVRO_DIR="$(cd "${HERE}/../../config/avro" && pwd)"
+AVRO_DIR="$(cd "${HERE}/../../../config/avro" && pwd)"   # deploy/platform/kafka -> repo root
 TENANTS=("tenant_a" "tenant_b")
 
 # Map each streaming topic suffix -> the Avro schema file that defines its value.
