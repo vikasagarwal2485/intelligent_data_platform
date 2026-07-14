@@ -146,3 +146,16 @@ Consequences. Status: `Accepted` unless noted.
   MinIO chart, `timescale/timescaledb`, `quay.io/keycloak`, Strimzi, Trino,
   Nessie, Airflow, MLflow, kube-prometheus-stack).
 - **Consequences:** `install-infra.sh` pins these; tuned values for Trino/Nessie.
+
+### ADR-0018 — Deploy layout split by owning team: `platform/` vs `app/`
+- **Status:** Accepted
+- **Context:** A flat `deploy/` mixed shared infrastructure with application
+  workloads; different engineering teams own those, so the flat layout blurred
+  ownership, review boundaries, and access control.
+- **Decision:** Reorganize into `deploy/platform/**` (platform team: base/overlays,
+  argocd, kafka, keycloak, timescaledb, trino, nessie, airflow, install/tune
+  scripts) and `deploy/app/**` (application team: `deployment/scoring-api`,
+  `jobs/*`). scoring-api moves out of the Kustomize base into `app/deployment`;
+  the overlays compose `../../base` + `../../../app/deployment`.
+- **Consequences:** Pure move-and-rewire (`git mv` + path updates); no chart,
+  image, or runtime behavior change, so no cluster re-install is required.

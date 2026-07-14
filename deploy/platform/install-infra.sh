@@ -74,10 +74,10 @@ hi minio minio/minio \
   --set resources.requests.memory=512Mi --set persistence.size=5Gi
 
 echo ">> serving DB (TimescaleDB, upstream image, plain manifest)"
-kubectl apply -n "${NS}" -f "${HERE}/infra/timescaledb.yaml"
+kubectl apply -n "${NS}" -f "${HERE}/timescaledb/timescaledb.yaml"
 
 echo ">> identity (Keycloak, upstream image, plain manifest)"
-kubectl apply -n "${NS}" -f "${HERE}/infra/keycloak.yaml"
+kubectl apply -n "${NS}" -f "${HERE}/keycloak/keycloak.yaml"
 
 echo ">> streaming (Apache Kafka via Strimzi operator)"
 # Tune resources + probe delays via Helm values (single field owner = Helm).
@@ -93,10 +93,10 @@ kubectl get crd 2>/dev/null | grep -i strimzi || echo "  WARN: no Strimzi CRDs f
 # After the operator is Ready, run: make kafka  (creates the Kafka cluster CR).
 
 echo ">> Iceberg catalog (Nessie, in-memory store, tuned)"
-hi nessie nessie/nessie -f "${HERE}/nessie-values.yaml"
+hi nessie nessie/nessie -f "${HERE}/nessie/nessie-values.yaml"
 
 echo ">> query engine (Trino, tuned small for local)"
-hi trino trino/trino -f "${HERE}/trino-values.yaml"
+hi trino trino/trino -f "${HERE}/trino/trino-values.yaml"
 
 echo ">> orchestration (Airflow)"
 hi airflow apache-airflow/airflow

@@ -61,23 +61,23 @@ image: ## Build the scoring-api image INTO minikube's docker daemon (local, no r
 
 .PHONY: infra
 infra: ## Add Helm repos and install platform infrastructure into idp-platform
-	bash deploy/install-infra.sh idp-platform
+	bash deploy/platform/install-infra.sh idp-platform
 
 .PHONY: strimzi-fix
 strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failures)
-	bash deploy/strimzi-tune.sh idp-platform
+	bash deploy/platform/strimzi-tune.sh idp-platform
 
 .PHONY: trino-fix
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
-	bash deploy/trino-tune.sh idp-platform
+	bash deploy/platform/trino-tune.sh idp-platform
 
 .PHONY: nessie-fix
 nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
-	bash deploy/nessie-tune.sh idp-platform
+	bash deploy/platform/nessie-tune.sh idp-platform
 
 .PHONY: kafka
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
-	bash deploy/kafka/setup-kafka.sh idp-platform
+	bash deploy/platform/kafka/setup-kafka.sh idp-platform
 
 .PHONY: minio-ls
 minio-ls: ## List the lake objects in MinIO (idp-bronze / idp-silver / idp-gold)
@@ -96,7 +96,7 @@ minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (m
 
 .PHONY: kafka-ui
 kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
-	kubectl apply -n idp-platform -f deploy/kafka/kafka-ui.yaml
+	kubectl apply -n idp-platform -f deploy/platform/kafka/kafka-ui.yaml
 	kubectl -n idp-platform rollout status deploy/kafka-ui --timeout=300s
 	@echo ""
 	@echo "Kafka UI deployed. Access it with:"
@@ -106,10 +106,10 @@ kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 .PHONY: stream
 stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). Bronze stage only.
 	kubectl -n idp-app delete job idp-produce idp-consume --ignore-not-found
-	kubectl -n idp-app apply -f deploy/kafka/produce-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/produce-job.yaml
 	@echo ">> Producing... (follow: kubectl -n idp-app logs -f job/idp-produce)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-produce --timeout=900s
-	kubectl -n idp-app apply -f deploy/kafka/consume-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
 	@echo ">> Consuming -> Bronze... (follow: kubectl -n idp-app logs -f job/idp-consume)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
 	@echo ">> Bronze ready. Next: make silver, then make gold."
@@ -117,21 +117,21 @@ stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). B
 .PHONY: silver
 silver: ## Silver stage (idp-app): Bronze (S3) -> canonical Silver (S3)
 	kubectl -n idp-app delete job idp-silver --ignore-not-found
-	kubectl -n idp-app apply -f deploy/jobs/silver-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/silver-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=600s
 	kubectl -n idp-app logs job/idp-silver
 
 .PHONY: gold
 gold: ## Gold stage (idp-app): Silver (S3) -> feature tables (+scores) (S3)
 	kubectl -n idp-app delete job idp-gold --ignore-not-found
-	kubectl -n idp-app apply -f deploy/jobs/gold-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/gold-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
 	kubectl -n idp-app logs job/idp-gold
 
 .PHONY: publish
 publish: ## Serving stage (idp-app): Gold (S3) -> TimescaleDB (indexed serving copy)
 	kubectl -n idp-app delete job idp-publish --ignore-not-found
-	kubectl -n idp-app apply -f deploy/jobs/publish-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/publish-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-publish --timeout=600s
 	kubectl -n idp-app logs job/idp-publish
 
@@ -144,7 +144,7 @@ timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving 
 .PHONY: airflow-wire
 airflow-wire: ## Build DAG image into minikube + install Airflow (external metadata DB) + RBAC
 	@echo ">> Building the Airflow DAG image into minikube (idp/airflow:dev)..."
-	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/airflow/Dockerfile pipelines/airflow/dags
+	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile pipelines/airflow/dags
 	@echo ">> Ensuring the 'airflow' metadata database exists in TimescaleDB..."
 	kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -tc \
 	  "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 || \
@@ -152,8 +152,8 @@ airflow-wire: ## Build DAG image into minikube + install Airflow (external metad
 	helm repo add apache-airflow https://airflow.apache.org >/dev/null 2>&1 || true
 	helm repo update apache-airflow >/dev/null 2>&1 || true
 	helm upgrade --install airflow apache-airflow/airflow -n idp-platform --version 1.15.0 \
-	  -f deploy/airflow/values.yaml --timeout 15m
-	kubectl apply -f deploy/airflow/rbac.yaml
+	  -f deploy/platform/airflow/values.yaml --timeout 15m
+	kubectl apply -f deploy/platform/airflow/rbac.yaml
 
 .PHONY: airflow-ui
 airflow-ui: ## Port-forward the Airflow web UI to http://localhost:8080 (admin/admin)
@@ -171,21 +171,21 @@ spark-gold: ## Run the Gold stage as a Spark job (spark-submit, reads Silver -> 
 	kubectl -n idp-app delete configmap idp-gold-spark --ignore-not-found
 	kubectl -n idp-app create configmap idp-gold-spark --from-file=gold_job.py=pipelines/spark/gold_job.py
 	kubectl -n idp-app delete job idp-spark-gold --ignore-not-found
-	kubectl -n idp-app apply -f deploy/jobs/spark-gold-job.yaml
+	kubectl -n idp-app apply -f deploy/app/jobs/spark-gold-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-spark-gold --timeout=900s
 	kubectl -n idp-app logs job/idp-spark-gold
 
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)
-	bash deploy/kafka/create-topics.sh idp-platform
+	bash deploy/platform/kafka/create-topics.sh idp-platform
 
 .PHONY: schemas
 schemas: ## Register Avro schemas only (config/avro/*.avsc)
-	bash deploy/kafka/register-schemas.sh idp-platform
+	bash deploy/platform/kafka/register-schemas.sh idp-platform
 
 .PHONY: deploy
 deploy: ## Apply the local overlay (namespaces, RBAC, isolation, scoring API)
-	kubectl apply -k deploy/overlays/local
+	kubectl apply -k deploy/platform/overlays/local
 
 .PHONY: namespaces
 namespaces: deploy ## Alias for `deploy` (kept for backwards compatibility)

@@ -22,6 +22,6 @@ if helm list -n "${NS}" --pending -q 2>/dev/null | grep -qx nessie; then
 fi
 
 echo ">> Installing/upgrading Nessie with tuned values (in-memory store)"
-helm upgrade --install nessie nessie/nessie -n "${NS}" -f "${HERE}/nessie-values.yaml"
+helm upgrade --install nessie nessie/nessie -n "${NS}" -f "${HERE}/nessie/nessie-values.yaml"
 kubectl -n "${NS}" rollout status deploy/nessie --timeout=300s
 echo ">> Nessie is Ready."

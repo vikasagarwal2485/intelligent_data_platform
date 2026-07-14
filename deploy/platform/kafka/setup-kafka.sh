@@ -77,7 +77,7 @@ if ! kubectl -n "${NS}" wait kafka/idp-kafka --for=condition=Ready --timeout=600
   kubectl -n "${NS}" describe pod -l strimzi.io/cluster=idp-kafka 2>/dev/null | grep -A20 -i "events:" | tail -20 >&2 || true
   cat >&2 <<EOF
 Common causes:
-  * Unsupported spec.kafka.version: edit deploy/kafka/kafka-cluster.yaml to a
+  * Unsupported spec.kafka.version: edit deploy/platform/kafka/kafka-cluster.yaml to a
     version your operator supports (the status message above names it), e.g. 3.8.0.
   * Pod Pending / OOM: node is out of resources — give minikube more headroom
     (minikube stop && minikube start --cpus=8 --memory=16384) or free other pods.

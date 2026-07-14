@@ -7,7 +7,7 @@ multi-tenant, GDPR-aware, batch-first, and Kubernetes-native (local **minikube**
 production **AWS EKS**).
 
 - Full design: [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
-- Deployment details: [`deploy/README.md`](deploy/README.md) · Kafka setup: [`deploy/kafka/README.md`](deploy/kafka/README.md)
+- Deployment details: [`deploy/README.md`](deploy/README.md) · Kafka setup: [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md)
 
 > **Prototype scope.** The pipeline *logic* (`src/idp`) is implemented in Python
 > (pandas + scikit-learn) so the whole flow is unit-testable and runnable without
@@ -157,11 +157,11 @@ flowchart TB
 - **Namespace split** (per your recommendation): platform services in
   `idp-platform`, application workloads in `idp-app`; apps reach services via
   cross-namespace DNS (`idp-kafka-kafka-bootstrap.idp-platform.svc`).
-- **Tenant isolation** (`deploy/base/`): per-tenant namespaces with
+- **Tenant isolation** (`deploy/platform/base/`): per-tenant namespaces with
   `ResourceQuota`, `NetworkPolicy` (default-deny cross-tenant), and RBAC roles.
-- **Overlays**: `deploy/overlays/local` (minikube, `imagePullPolicy: Never`) and
-  `deploy/overlays/aws` (EKS, ECR image, IRSA) — same Kustomize base; Argo CD app
-  in `deploy/argocd`.
+- **Overlays**: `deploy/platform/overlays/local` (minikube, `imagePullPolicy: Never`) and
+  `deploy/platform/overlays/aws` (EKS, ECR image, IRSA) — same Kustomize base; Argo CD app
+  in `deploy/platform/argocd`.
 
 ---
 
@@ -181,11 +181,16 @@ src/idp/                     # the platform package
   cli.py                     #   `idp` entrypoint
 config/                      # platform.yaml + Avro schema contracts (config/avro)
 data_samples/                # reference TM Forum JSON:API documents
-deploy/                      # Kustomize base + overlays, Helm values, Kafka setup, tuning scripts
-  base/ overlays/ argocd/    #   namespaces, RBAC, isolation, scoring-api; local/aws overlays
-  kafka/                     #   Kafka cluster, schema registry, topics, streaming Jobs, UI
-  install-infra.sh           #   installs all platform services (Helm)
-  *-values.yaml *-tune.sh    #   Trino/Nessie tuning + self-healing reinstalls
+deploy/                      # split by owning team (ADR-0018)
+  platform/                  #   PLATFORM TEAM — shared infrastructure
+    base/ overlays/ argocd/  #     namespaces, RBAC, isolation; local/aws overlays; GitOps
+    kafka/                   #     Kafka cluster, schema registry, topics, admin UI
+    keycloak/ timescaledb/   #     per-service manifests
+    trino/ nessie/ airflow/  #     per-service Helm values / DAG image
+    install-infra.sh *-tune.sh #   install all services (Helm) + self-healing reinstalls
+  app/                       #   APPLICATION TEAM — workloads on the platform
+    deployment/              #     scoring-api Deployment/Service
+    jobs/                    #     produce/consume/silver/gold/publish/spark-gold Jobs
 pipelines/airflow/dags/      # Airflow DAG for the batch pipeline
 tests/                       # 63 pytest tests across every layer
 docs/                        # architecture & implementation plan
@@ -282,7 +287,7 @@ Streaming = synthetic data flows through **Kafka** into the lake on **MinIO**.
 ```bash
 make mk-up                              # start minikube (ingress, metrics-server, storage)
 make image                              # build the idp/scoring-api:dev image into minikube
-kubectl apply -k deploy/overlays/local  # namespaces (idp-platform, idp-app, tenants), RBAC, scoring-api
+kubectl apply -k deploy/platform/overlays/local  # namespaces (idp-platform, idp-app, tenants), RBAC, scoring-api
 make infra                              # install platform services (MinIO, Kafka operator, Trino, ...)
 make nessie-fix                         # ensure Nessie is healthy (in-memory store)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
@@ -300,8 +305,8 @@ make publish       # 4) Serving stage: Gold (S3) -> TimescaleDB (indexed by serv
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
-- `idp-silver` (`deploy/jobs/silver-job.yaml`) reads Bronze → writes Silver.
-- `idp-gold` (`deploy/jobs/gold-job.yaml`) reads Silver → writes Gold.
+- `idp-silver` (`deploy/app/jobs/silver-job.yaml`) reads Bronze → writes Silver.
+- `idp-gold` (`deploy/app/jobs/gold-job.yaml`) reads Silver → writes Gold.
 - Models: run `idp train` (offline) to populate `ml/artifacts`; then Gold also
   emits `credit_scores` / `fraud_scores`. Without models, Gold = feature tables only.
 
@@ -323,8 +328,8 @@ make minio-reset                                # empty the lake buckets for a c
   make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
   make airflow-trigger    # or: make airflow-ui  then Trigger in the UI
   ```
-  `airflow-wire` (see [`deploy/airflow/`](deploy/airflow)):
-  - **Bakes the DAGs into a local image** (`deploy/airflow/Dockerfile`, built into
+  `airflow-wire` (see [`deploy/platform/airflow/`](deploy/platform/airflow)):
+  - **Bakes the DAGs into a local image** (`deploy/platform/airflow/Dockerfile`, built into
     minikube) instead of git-sync — the repo is private, so git-sync-init can't
     clone it without credentials and crashloops with an auth error.
   - Pins the chart to `1.15.0` (Airflow 2.9.3 — so the UI service is
@@ -339,7 +344,7 @@ make minio-reset                                # empty the lake buckets for a c
   make spark-gold         # spark-submit as a one-off Spark pod (S3A -> MinIO)
   ```
 - **Full step-by-step (both):** [`docs/triggering.md`](docs/triggering.md).
-- EKS: `deploy/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
+- EKS: `deploy/platform/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
   Spark job targets Iceberg via Nessie. See plan §2B.
 
 ---
@@ -495,4 +500,4 @@ Silver curation, feature engineering, both ML models, the streaming
 ## Further reading
 - [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md) — full architecture, ML design, phased plan
 - [`deploy/README.md`](deploy/README.md) — deployment, overlays, troubleshooting
-- [`deploy/kafka/README.md`](deploy/kafka/README.md) — Kafka cluster, topics, schema registration
+- [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md) — Kafka cluster, topics, schema registration

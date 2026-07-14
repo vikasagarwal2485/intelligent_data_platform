@@ -53,7 +53,7 @@ timescale:
   port: 5432
   database: "idp"
   user: "postgres"
-  password: "idp-dev-password"     # matches deploy/infra/timescaledb.yaml (dev only)
+  password: "idp-dev-password"     # matches deploy/platform/timescaledb/timescaledb.yaml (dev only)
   schema: "gold"
 
 # Synthetic data generation (Phase 0 - reviewer requirement)

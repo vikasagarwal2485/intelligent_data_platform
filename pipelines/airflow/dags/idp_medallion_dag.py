@@ -8,7 +8,7 @@ installed. The pods carry the code + deps and write to MinIO/S3.
 Prerequisites:
   * the `idp/scoring-api:dev` image is on the node (`make image`)
   * the Airflow service account may create pods in `idp-app`
-    (apply deploy/airflow/rbac.yaml; see docs/triggering.md)
+    (apply deploy/platform/airflow/rbac.yaml; see docs/triggering.md)
 
 DAGs:
   * idp_silver_gold : silver >> gold   (hourly)

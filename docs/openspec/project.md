@@ -64,7 +64,7 @@ idp produce|consume|silver|gold|publish|train|serve   # individual stages
 `idp publish` materializes Gold into TimescaleDB (`gold.*`, indexed by
 `(tenant_id, service_id)`) for low-latency serving.
 
-Deployment: `make mk-up`, `make image`, `kubectl apply -k deploy/overlays/local`,
+Deployment: `make mk-up`, `make image`, `kubectl apply -k deploy/platform/overlays/local`,
 `make infra`, `make kafka`, then `make stream|silver|gold`. See root README §3.
 
 ## Definition of done (per phase)

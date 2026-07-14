@@ -3,26 +3,42 @@
 Kubernetes-native on both tiers (per the reviewed plan): **local = minikube**,
 **production = AWS EKS**. The same Kustomize base is used by both overlays.
 
+The directory is split by **owning team** (separation of concerns, ADR-0018):
+`platform/` holds the shared infrastructure the **platform team** maintains;
+`app/` holds the workloads the **application team** deploys onto it.
+
 ```
 deploy/
-  base/             # namespaces, RBAC, per-tenant isolation, scoring API
-  overlays/local/   # minikube (1 replica, dev image)
-  overlays/aws/     # EKS (3 replicas, ECR image, IRSA)
-  argocd/           # GitOps Application for EKS
+  platform/                 # PLATFORM TEAM — shared infrastructure
+    base/                   #   namespaces, RBAC, per-tenant isolation (Kustomize base)
+    overlays/local/         #   minikube overlay (1 replica, dev image)
+    overlays/aws/           #   EKS overlay (3 replicas, ECR image, IRSA)
+    argocd/                 #   GitOps Application for EKS
+    kafka/                  #   Strimzi Kafka cluster, schema registry, topics, admin UI
+    keycloak/  timescaledb/ #   per-service plain manifests
+    trino/  nessie/         #   per-service tuned Helm values
+    airflow/                #   Airflow values, RBAC, DAG image Dockerfile
+    install-infra.sh        #   one-shot platform install (Helm repos + services)
+    strimzi-tune.sh  trino-tune.sh  nessie-tune.sh   # self-healing repair scripts
+  app/                      # APPLICATION TEAM — workloads on the platform
+    deployment/             #   scoring-api Deployment/Service (+ kustomization)
+    jobs/                   #   produce/consume/silver/gold/publish/spark-gold Jobs
 ```
 
-## What the base provides
-- **Multi-tenancy & isolation** (`isolation.yaml`): per-tenant `ResourceQuota`
-  and a default-deny `NetworkPolicy` that blocks cross-tenant pod traffic.
-- **RBAC** (`rbac.yaml`): namespace-scoped roles (`ds-credit`, `ds-fraud`,
-  `analyst`) bound to Keycloak OIDC group claims.
-- **Scoring API** (`scoring-api.yaml`): the FastAPI credit/fraud service.
+## What the platform base provides
+- **Multi-tenancy & isolation** (`platform/base/isolation.yaml`): per-tenant
+  `ResourceQuota` and a default-deny `NetworkPolicy` that blocks cross-tenant traffic.
+- **RBAC** (`platform/base/rbac.yaml`): namespace-scoped roles (`ds-credit`,
+  `ds-fraud`, `analyst`) bound to Keycloak OIDC group claims.
+- **Scoring API** (`app/deployment/scoring-api.yaml`): the FastAPI credit/fraud
+  service — owned by the app team, pulled into the overlays and patched per
+  environment (image/replicas/pull-policy).
 
 ## Local (minikube)
 ```bash
 make mk-up          # start minikube with ingress/metrics addons
 make image          # build idp/scoring-api:dev INTO minikube's docker daemon
-make deploy         # kubectl apply -k deploy/overlays/local
+make deploy         # kubectl apply -k deploy/platform/overlays/local
 ```
 
 > **Why `make image` first?** The scoring API runs a project image that is not
@@ -30,14 +46,14 @@ make deploy         # kubectl apply -k deploy/overlays/local
 > Docker daemon (`eval $(minikube docker-env) && docker build ...`) and the local
 > overlay sets `imagePullPolicy: Never`. Skipping this causes the pod to try to
 > pull `idp/scoring-api:dev` from Docker Hub and fail with `ImagePullBackOff`.
-> On EKS the image instead comes from ECR (`overlays/aws`).
+> On EKS the image instead comes from ECR (`platform/overlays/aws`).
 
 Platform infrastructure (Apache Kafka via Strimzi, Nessie + Iceberg, MinIO,
 Trino, TimescaleDB, Keycloak, OPA, Airflow, MLflow, Prometheus/Grafana) is
-installed by [`install-infra.sh`](install-infra.sh):
+installed by [`platform/install-infra.sh`](platform/install-infra.sh):
 
 ```bash
-make infra        # or: bash deploy/install-infra.sh idp-platform
+make infra        # or: bash deploy/platform/install-infra.sh idp-platform
 ```
 
 The script adds the required Helm repos before installing — omitting
@@ -48,8 +64,8 @@ The script adds the required Helm repos before installing — omitting
 | Component | Source | Image |
 |-----------|--------|-------|
 | MinIO | `https://charts.min.io/` (official) | `quay.io/minio/minio` |
-| TimescaleDB | plain manifest `infra/timescaledb.yaml` | `timescale/timescaledb` |
-| Keycloak | plain manifest `infra/keycloak.yaml` | `quay.io/keycloak/keycloak` |
+| TimescaleDB | plain manifest `platform/timescaledb/timescaledb.yaml` | `timescale/timescaledb` |
+| Keycloak | plain manifest `platform/keycloak/keycloak.yaml` | `quay.io/keycloak/keycloak` |
 | Apache Kafka (Strimzi) | `https://strimzi.io/charts/` | `quay.io/strimzi/*` |
 | Nessie | `https://charts.projectnessie.org` | `ghcr.io/projectnessie/*` |
 | Trino | `https://trinodb.github.io/charts` | `trinodb/trino` |
@@ -62,8 +78,8 @@ idempotent and first removes any earlier broken Bitnami releases.
 
 ## Production (AWS EKS)
 ```bash
-kubectl apply -k deploy/overlays/aws        # or let Argo CD sync it
-kubectl apply -f deploy/argocd/application.yaml
+kubectl apply -k deploy/platform/overlays/aws        # or let Argo CD sync it
+kubectl apply -f deploy/platform/argocd/application.yaml
 ```
 EKS specifics: S3 (per-tenant prefixes + KMS), IRSA for pod S3 access, External
 Secrets for credentials, ECR for images, ALB ingress.
