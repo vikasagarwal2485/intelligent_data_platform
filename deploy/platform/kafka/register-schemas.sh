@@ -25,19 +25,31 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 
-# Port-forward to the registry (ClusterIP) and clean up on exit.
-echo ">> Port-forwarding apicurio-registry 8080..."
-kubectl -n "${NS}" port-forward svc/apicurio-registry 8080:8080 >/dev/null 2>&1 &
+# Port-forward to the registry (ClusterIP) and clean up on exit. Use an uncommon
+# LOCAL port: 8080 is frequently already bound on dev machines (Trino, Airflow
+# UI, Kafka UI all use it), which makes port-forward fail to bind and every
+# readiness probe miss. Override with REGISTRY_LOCAL_PORT if 18080 is taken too.
+LPORT="${REGISTRY_LOCAL_PORT:-18080}"
+echo ">> Port-forwarding apicurio-registry ${LPORT}->8080..."
+PF_ERR="$(mktemp)"
+kubectl -n "${NS}" port-forward svc/apicurio-registry "${LPORT}:8080" >/dev/null 2>"${PF_ERR}" &
 PF=$!
-trap 'kill ${PF} 2>/dev/null || true' EXIT
+trap 'kill ${PF} 2>/dev/null || true; rm -f "${PF_ERR}"' EXIT
 
+ready=""
 for i in $(seq 1 30); do
-  curl -sf http://localhost:8080/health/ready >/dev/null 2>&1 && break
+  if ! kill -0 "${PF}" 2>/dev/null; then
+    echo "ERROR: port-forward exited early:" >&2; cat "${PF_ERR}" >&2
+    echo "Hint: local port ${LPORT} may be in use — free it, close other" >&2
+    echo "      port-forwards, or re-run with REGISTRY_LOCAL_PORT=<free-port>." >&2
+    exit 1
+  fi
+  curl -sf "http://localhost:${LPORT}/health/ready" >/dev/null 2>&1 && { ready=1; break; }
   sleep 1
-  [[ $i -eq 30 ]] && { echo "registry not reachable" >&2; exit 1; }
 done
+[[ -n "${ready}" ]] || { echo "registry not reachable on localhost:${LPORT}" >&2; cat "${PF_ERR}" >&2; exit 1; }
 
-REG="http://localhost:8080/apis/ccompat/v7"
+REG="http://localhost:${LPORT}/apis/ccompat/v7"
 
 for t in "${TENANTS[@]}"; do
   for pair in "${MAP[@]}"; do
