@@ -63,15 +63,22 @@ echo ">> object store (MinIO, official chart, image quay.io/minio/minio)"
 # `latest` image gives an unusable "can't click anything" console. See
 # https://github.com/minio/minio/discussions/21326
 MINIO_TAG="RELEASE.2025-04-22T22-12-26Z"
-hi minio minio/minio \
+# NOTE: we do NOT use the chart's `buckets=` provisioning. That triggers a
+# post-install hook Job (minio-post-job) which waits for MinIO to come up; on a
+# slow minikube it exceeds Helm's hook timeout and fails the whole release with
+# "resource Job/minio-post-job not ready ... context deadline exceeded". Instead
+# we install MinIO alone, then create the buckets ourselves (below) once it's up.
+hi minio minio/minio --timeout 10m \
   --set mode=standalone \
   --set image.repository=quay.io/minio/minio --set image.tag="${MINIO_TAG}" \
   --set rootUser=minioadmin --set rootPassword=minioadmin123 \
-  --set 'buckets[0].name=idp-bronze,buckets[0].policy=none' \
-  --set 'buckets[1].name=idp-silver,buckets[1].policy=none' \
-  --set 'buckets[2].name=idp-gold,buckets[2].policy=none' \
-  --set 'buckets[3].name=idp-ml,buckets[3].policy=none' \
   --set resources.requests.memory=512Mi --set persistence.size=5Gi
+
+echo ">> creating lake buckets (idp-bronze/silver/gold/ml) once MinIO is ready"
+kubectl -n "${NS}" rollout status deploy/minio --timeout=300s || true
+kubectl -n "${NS}" delete pod mc-mkbuckets --ignore-not-found >/dev/null 2>&1 || true
+kubectl -n "${NS}" run mc-mkbuckets --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+  'until mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null 2>&1 && mc ls m >/dev/null 2>&1; do echo "waiting for minio..."; sleep 3; done; for b in idp-bronze idp-silver idp-gold idp-ml; do mc mb --ignore-existing m/$b && echo "bucket $b ready"; done'
 
 echo ">> serving DB (TimescaleDB, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/timescaledb/timescaledb.yaml"
