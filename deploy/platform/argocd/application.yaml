@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: https://github.com/vikasagarwal2485/intelligent_data_platform.git
     targetRevision: main
-    path: deploy/overlays/aws
+    path: deploy/platform/overlays/aws
   destination:
     server: https://kubernetes.default.svc
   syncPolicy:

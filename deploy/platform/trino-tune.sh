@@ -32,6 +32,6 @@ if helm list -n "${NS}" --pending -q 2>/dev/null | grep -qx trino; then
 fi
 
 echo ">> Installing/upgrading Trino with tuned values"
-helm upgrade --install trino trino/trino -n "${NS}" -f "${HERE}/trino-values.yaml"
+helm upgrade --install trino trino/trino -n "${NS}" -f "${HERE}/trino/trino-values.yaml"
 kubectl -n "${NS}" rollout status deploy/trino-coordinator --timeout=300s
 echo ">> Trino coordinator is Ready."

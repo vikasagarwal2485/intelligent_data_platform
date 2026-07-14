@@ -29,15 +29,16 @@ only permission to create pods in `idp-app`.
 make airflow-wire
 ```
 This does two things:
-- `helm upgrade ... -f deploy/airflow/values.yaml` — enables **git-sync** so the
-  scheduler loads DAGs from `pipelines/airflow/dags/` in the repo.
-- `kubectl apply -f deploy/airflow/rbac.yaml` — grants the Airflow service
+- `helm upgrade ... -f deploy/platform/airflow/values.yaml` — installs Airflow with
+  the DAGs **baked into a local image** (`deploy/platform/airflow/Dockerfile`; the
+  source repo is private, so git-sync can't clone it).
+- `kubectl apply -f deploy/platform/airflow/rbac.yaml` — grants the Airflow service
   account rights to launch pods in `idp-app`.
 
-> Adjust the ServiceAccount names in `deploy/airflow/rbac.yaml` if your chart
-> differs: `kubectl -n idp-platform get sa | grep airflow`.
+> Adjust the ServiceAccount names in `deploy/platform/airflow/rbac.yaml` if your
+> chart differs: `kubectl -n idp-platform get sa | grep airflow`.
 
-Wait for git-sync to pick up the DAG (up to ~1 min), then confirm it's loaded:
+Confirm the DAGs are loaded:
 ```bash
 kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags list | grep idp
 ```
@@ -75,7 +76,7 @@ make spark-gold
 ```
 This:
 1. packages `gold_job.py` into a ConfigMap,
-2. runs a Job (`deploy/jobs/spark-gold-job.yaml`) on the `apache/spark:3.5.3`
+2. runs a Job (`deploy/app/jobs/spark-gold-job.yaml`) on the `apache/spark:3.5.3`
    image in `local[*]` mode with the S3A config pointed at MinIO,
 3. waits and prints the driver logs.
 

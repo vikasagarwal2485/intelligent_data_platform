@@ -15,6 +15,7 @@ change under `changes/`. Do not start a phase until the previous one's
 | 6 | [`phase-6-serving`](changes/phase-6-serving/proposal.md) | FastAPI scoring service + Gold→TimescaleDB publish; tenant-scoped | `serving-api` |
 | 7 | [`phase-7-streaming`](changes/phase-7-streaming/proposal.md) | Kafka producer/consumer bridge; Bronze from topics | `streaming-kafka` |
 | 8 | [`phase-8-platform`](changes/phase-8-platform/proposal.md) | K8s deployment (minikube/EKS), Helm services, Kafka cluster, namespaces, on-demand + orchestrated stages | `platform-deployment`, `orchestration` |
+| 9 | [`phase-9-deploy-restructure`](changes/phase-9-deploy-restructure/proposal.md) | Reorganize `deploy/` into `platform/` (infra) and `app/` (workloads) for team ownership; pure move-and-rewire | `platform-deployment`, `orchestration` |
 
 **Ordering rationale:** phases 0–6 build the runnable, testable core in pure
 Python (no cluster). Phase 7 attaches Kafka ingestion. Phase 8 deploys and

@@ -31,7 +31,7 @@ def lake_uri(cfg: PlatformConfig, layer: str) -> str:
 
     On S3 each layer maps to its own bucket ``<prefix>-<layer>`` (e.g.
     ``idp-bronze``, ``idp-silver``, ``idp-gold``) — matching the buckets created
-    by deploy/install-infra.sh.
+    by deploy/platform/install-infra.sh.
     """
     s3 = cfg.s3
     if s3.get("enabled"):

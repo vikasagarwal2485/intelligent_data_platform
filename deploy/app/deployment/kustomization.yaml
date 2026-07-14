@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Application deployment: the scoring-api service (idp-app namespace). The
+# environment-specific image/replicas/pull-policy are patched by the overlays
+# in deploy/platform/overlays.
+resources:
+  - scoring-api.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: intelligent-data-platform
