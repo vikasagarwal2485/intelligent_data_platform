@@ -98,8 +98,12 @@ hi nessie nessie/nessie -f "${HERE}/nessie/nessie-values.yaml"
 echo ">> query engine (Trino, tuned small for local)"
 hi trino trino/trino -f "${HERE}/trino/trino-values.yaml"
 
-echo ">> orchestration (Airflow)"
-hi airflow apache-airflow/airflow
+echo ">> orchestration (Airflow) — installed separately via 'make airflow-wire'"
+# Airflow is NOT installed here: it needs a metadata DB in TimescaleDB and the
+# DAG image baked into minikube, which the generic chart install can't provide.
+# The latest apache-airflow chart also rejects Airflow < 2.11.0, so a bare
+# `helm upgrade --install airflow apache-airflow/airflow` fails outright. Run
+# `make airflow-wire` (pins chart 1.15.0 + our values) after the platform is up.
 
 echo ">> experiment tracking (MLflow)"
 hi mlflow community-charts/mlflow
@@ -114,7 +118,10 @@ cat <<EONOTE
 
 >> Done. Watch rollout with:  kubectl get pods -n ${NS} -w
 
+Next: 'make kafka' (Kafka cluster + topics) and 'make airflow-wire' (Airflow,
+installed separately — it needs a metadata DB + the DAG image).
+
 All components use freely-pullable upstream images (quay.io/minio,
 timescale/timescaledb, quay.io/keycloak, trinodb/trino, projectnessie,
-apache/airflow, quay.io prometheus) - no Bitnami images required.
+quay.io prometheus) - no Bitnami images required.
 EONOTE
