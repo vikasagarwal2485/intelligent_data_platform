@@ -59,6 +59,19 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
+    # Expose broker JMX as Prometheus metrics on the "tcp-prometheus" port (9404)
+    # for the Kafka produce/consume dashboard (REQ-PLT-08). Rules live in the
+    # kafka-metrics ConfigMap, applied by setup-kafka.sh before this CR.
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+  # Kafka Exporter adds consumer-group lag / offset metrics (the "consume" side).
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
   entityOperator:
     topicOperator: {}
     userOperator: {}

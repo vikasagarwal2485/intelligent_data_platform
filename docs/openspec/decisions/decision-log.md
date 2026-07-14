@@ -159,3 +159,17 @@ Consequences. Status: `Accepted` unless noted.
   the overlays compose `../../base` + `../../../app/deployment`.
 - **Consequences:** Pure move-and-rewire (`git mv` + path updates); no chart,
   image, or runtime behavior change, so no cluster re-install is required.
+
+### ADR-0019 — Observability via kube-prometheus-stack + Strimzi metrics
+- **Status:** Accepted (2026-07-14)
+- **Context:** REQ-PLT-05…08 require node/cluster metrics, Grafana, a Kubernetes
+  cluster dashboard, and a Kafka produce/consume dashboard.
+- **Decision:** Use the kube-prometheus-stack (Prometheus Operator, Prometheus,
+  Grafana, node-exporter, kube-state-metrics) for cluster observability, with the
+  Grafana dashboard sidecar loading dashboards from labelled ConfigMaps. Expose
+  Kafka via the Strimzi JMX Prometheus exporter (`metricsConfig`) + Kafka Exporter
+  (`kafkaExporter`), scraped by a `PodMonitor`. Ship two dashboards (cluster
+  overview, Kafka produce/consume) as sidecar ConfigMaps.
+- **Consequences:** No bespoke Prometheus/Grafana wiring; dashboards are
+  version-controlled ConfigMaps. Kafka metrics require re-applying the Kafka CR
+  (`make kafka`) so the broker exposes the JMX port.

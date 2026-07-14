@@ -39,6 +39,18 @@
 ## 6. Team-oriented deploy layout (see phase-9-deploy-restructure)
 - [x] 6.1 `deploy/platform/**` (infra) vs `deploy/app/**` (workloads) separation of concerns
 
+## 7. Observability (amendment 2026-07-14) — REQ-PLT-05…08
+- [x] 7.1 `deploy/platform/monitoring/kube-prometheus-values.yaml`: node-exporter +
+      kube-state-metrics, Grafana + dashboard sidecar, Prometheus selects all
+      PodMonitors — `REQ-PLT-05`, `REQ-PLT-06`, `REQ-PLT-07`
+- [x] 7.2 Grafana dashboards (sidecar ConfigMaps): `dashboards/k8s-cluster-dashboard-configmap.yaml`
+      (`REQ-PLT-07`), `dashboards/kafka-dashboard-configmap.yaml` (`REQ-PLT-08`)
+- [x] 7.3 Kafka metrics: `metricsConfig` (JMX) + `kafkaExporter` on the Kafka CR,
+      `kafka-metrics-configmap.yaml`, `kafka-podmonitor.yaml` — `REQ-PLT-08`
+- [x] 7.4 Wiring: `install-infra.sh` applies values + dashboards; `setup-kafka.sh`
+      applies the metrics ConfigMap before the CR; `make monitoring` + `make grafana-ui`
+- [x] 7.5 Docs: `deploy/platform/monitoring/README.md`; ADR-0019
+
 ## Done when
 `specs/platform-deployment` and `specs/orchestration` scenarios pass and the
 minikube bring-up (`infra` → `kafka` → `stream` → `silver` → `gold`) works.

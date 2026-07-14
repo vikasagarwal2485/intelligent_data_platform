@@ -1,0 +1,230 @@
+# Grafana dashboard (auto-loaded by the kube-prometheus-stack Grafana sidecar,
+# which watches ConfigMaps labelled grafana_dashboard=1 in all namespaces).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idp-grafana-dashboard-kafka
+  labels:
+    grafana_dashboard: "1"
+data:
+  idp-kafka.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "refresh": "30s",
+      "templating": {
+        "list": []
+      },
+      "tags": [
+        "idp",
+        "kafka"
+      ],
+      "title": "IDP \u2014 Kafka Produce/Consume",
+      "uid": "idp-kafka-produce-consume",
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Messages In /s (produce)",
+          "datasource": "Prometheus",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "mps",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": "Prometheus",
+              "expr": "sum(rate(kafka_server_brokertopicmetrics_messagesin_total[5m]))",
+              "legendFormat": "messages/s"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Bytes In /s (produce)",
+          "datasource": "Prometheus",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": "Prometheus",
+              "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesin_total[5m]))",
+              "legendFormat": "bytes in/s"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Bytes Out /s (consume)",
+          "datasource": "Prometheus",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": "Prometheus",
+              "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesout_total[5m]))",
+              "legendFormat": "bytes out/s"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Consumer group lag",
+          "datasource": "Prometheus",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": "Prometheus",
+              "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)",
+              "legendFormat": "{{consumergroup}}/{{topic}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Request rate by type (Produce vs Fetch)",
+          "datasource": "Prometheus",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 16
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": "Prometheus",
+              "expr": "sum by (request) (rate(kafka_network_requestmetrics_requests_total[5m]))",
+              "legendFormat": "{{request}}"
+            }
+          ]
+        }
+      ]
+    }

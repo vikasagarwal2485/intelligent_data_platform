@@ -1,0 +1,52 @@
+# Helm values for the kube-prometheus-stack (Prometheus Operator + Prometheus +
+# Grafana + node-exporter + kube-state-metrics). Tuned small for minikube.
+#
+# Install:  helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+#             -n idp-platform -f deploy/platform/monitoring/kube-prometheus-values.yaml
+# (`make infra` and `make monitoring` do this for you.)
+#
+# Satisfies REQ-PLT-05 (node-exporter + kube-state-metrics), REQ-PLT-06 (Grafana),
+# REQ-PLT-07 (default Kubernetes dashboards + sidecar), REQ-PLT-08 (Prometheus
+# discovers the Kafka PodMonitor).
+
+fullnameOverride: kube-prom
+
+# --- Prometheus -------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    retention: 3d
+    # Discover ALL PodMonitors/ServiceMonitors (incl. our Kafka one), not only
+    # those carrying this release's Helm label.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+# --- Grafana (REQ-PLT-06) ---------------------------------------------------
+grafana:
+  adminPassword: idp-admin
+  defaultDashboardsEnabled: true          # ships the standard Kubernetes dashboards
+  service:
+    type: ClusterIP
+  sidecar:
+    dashboards:
+      enabled: true                       # auto-load dashboards from labelled ConfigMaps
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# --- Exporters (REQ-PLT-05) -------------------------------------------------
+nodeExporter:
+  enabled: true
+kube-state-metrics:
+  enabled: true
+
+# Trim components not needed for the prototype (keeps the footprint minikube-sized).
+alertmanager:
+  enabled: false

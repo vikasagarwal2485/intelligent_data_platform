@@ -1,0 +1,39 @@
+# JMX Prometheus exporter rules for the Strimzi Kafka broker (REQ-PLT-08).
+# Referenced by kafka-cluster.yaml via spec.kafka.metricsConfig. Applied by
+# setup-kafka.sh BEFORE the Kafka CR (the CR is NotReady until this exists).
+#
+# The rules surface produce/consume throughput (messages/bytes in & out) and a
+# few health gauges — enough to drive the Kafka Grafana dashboard.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  labels:
+    app: strimzi
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+    # Produce = messages/bytes IN; consume = bytes OUT (cluster-wide, no topic label)
+    - pattern: kafka.server<type=BrokerTopicMetrics, name=(MessagesInPerSec|BytesInPerSec|BytesOutPerSec)><>Count
+      name: kafka_server_brokertopicmetrics_$1_total
+      type: COUNTER
+    # Same, broken down per topic
+    - pattern: kafka.server<type=BrokerTopicMetrics, name=(MessagesInPerSec|BytesInPerSec|BytesOutPerSec), topic=(.+)><>Count
+      name: kafka_server_brokertopicmetrics_$1_total
+      type: COUNTER
+      labels:
+        topic: "$2"
+    # Request rates (Produce / Fetch) to separate producer vs consumer traffic
+    - pattern: kafka.network<type=RequestMetrics, name=RequestsPerSec, request=(Produce|Fetch|FetchConsumer|FetchFollower)><>Count
+      name: kafka_network_requestmetrics_requests_total
+      type: COUNTER
+      labels:
+        request: "$1"
+    # Health gauges
+    - pattern: kafka.server<type=ReplicaManager, name=(UnderReplicatedPartitions|PartitionCount)><>Value
+      name: kafka_server_replicamanager_$1
+      type: GAUGE
+    - pattern: kafka.controller<type=KafkaController, name=(ActiveControllerCount|OfflinePartitionsCount)><>Value
+      name: kafka_controller_kafkacontroller_$1
+      type: GAUGE
