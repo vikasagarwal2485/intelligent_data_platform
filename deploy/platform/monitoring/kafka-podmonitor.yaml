@@ -1,0 +1,38 @@
+# Prometheus PodMonitors so the kube-prometheus-stack scrapes Kafka (REQ-PLT-08).
+# Uses the monitoring.coreos.com CRDs installed by the stack, so apply this AFTER
+# `make infra`/`make monitoring`. Prometheus is configured to select all
+# PodMonitors (podMonitorSelectorNilUsesHelmValues: false).
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-kafka
+  labels:
+    app: strimzi
+    release: kube-prom
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: idp-kafka
+  podMetricsEndpoints:
+    # Strimzi exposes the JMX Prometheus exporter on the container port named
+    # "tcp-prometheus" (9404) once metricsConfig is set on the Kafka CR.
+    - port: tcp-prometheus
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-kafka-exporter
+  labels:
+    app: strimzi
+    release: kube-prom
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/name: idp-kafka-kafka-exporter
+  podMetricsEndpoints:
+    # The Strimzi Kafka Exporter (consumer-group lag, offsets) listens on 9404
+    # named "tcp-prometheus" as well.
+    - port: tcp-prometheus
+      path: /metrics

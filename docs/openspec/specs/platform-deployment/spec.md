@@ -51,3 +51,54 @@ IRSA), plus an Argo CD application for GitOps.
 #### Scenario: SCN-PLT-04.1 — Local image without registry
 - **WHEN** the local overlay is applied after `make image`
 - **THEN** the scoring API runs from the locally-built image without pulling a registry
+
+### Requirement: REQ-PLT-05 — Cluster metrics exporters
+_Added: 2026-07-14._
+The system SHALL deploy the Prometheus node exporter and kube-state-metrics (via
+the kube-prometheus-stack) so that node/host metrics and Kubernetes object state
+are scraped by Prometheus and available for dashboards.
+
+#### Scenario: SCN-PLT-05.1 — Exporters scraped by Prometheus
+- **WHEN** the monitoring stack is installed on minikube
+- **THEN** Prometheus has `up` targets for the node exporter and kube-state-metrics
+  and exposes `node_*` and `kube_*` series
+
+### Requirement: REQ-PLT-06 — Grafana service
+_Added: 2026-07-14._
+The system SHALL deploy Grafana (via the kube-prometheus-stack) with the in-cluster
+Prometheus pre-provisioned as the default datasource and a dashboard sidecar that
+auto-loads dashboards from labelled ConfigMaps. Grafana SHALL be reachable for the
+operator (port-forward in local, ingress in prod).
+
+#### Scenario: SCN-PLT-06.1 — Grafana reachable with Prometheus datasource
+- **WHEN** the operator runs `make grafana-ui` and logs in
+- **THEN** Grafana is served on the forwarded port and its default Prometheus
+  datasource returns data
+
+### Requirement: REQ-PLT-07 — Kubernetes cluster dashboard in Grafana
+_Added: 2026-07-14._
+The system SHALL present Kubernetes/minikube cluster metrics (node CPU, memory,
+running pods) as a Grafana dashboard — the stack's default Kubernetes dashboards
+plus an "IDP — Kubernetes Cluster Overview" dashboard provisioned via a labelled
+ConfigMap.
+
+#### Scenario: SCN-PLT-07.1 — Cluster dashboard renders
+- **WHEN** Grafana is open with the exporters scraping
+- **THEN** the cluster dashboard shows node CPU%/memory% and a running-pods count
+
+### Requirement: REQ-PLT-08 — Kafka produce/consume dashboard in Grafana
+_Added: 2026-07-14._
+The system SHALL expose Kafka broker JMX metrics (via the Strimzi JMX Prometheus
+exporter) and consumer-group lag (via the Strimzi Kafka Exporter), scrape them
+with a `PodMonitor`, and present a Grafana dashboard showing produce throughput
+(messages/bytes in), consume throughput (bytes out), and per-group/topic lag.
+
+#### Scenario: SCN-PLT-08.1 — Produce/consume visible after streaming
+- **WHEN** `make stream` produces and consumes records
+- **THEN** the Kafka dashboard shows non-zero messages-in and bytes-in/out rates
+  and consumer-group lag drains toward zero as the consumer catches up
+
+## Change history
+| Date | Requirements | Note |
+|------|--------------|------|
+| 2026-07-14 | REQ-PLT-05, REQ-PLT-06, REQ-PLT-07, REQ-PLT-08 | Add observability: node/cluster exporters, Grafana, Kubernetes cluster dashboard, and Kafka produce/consume dashboard (phase-8 amendment). |

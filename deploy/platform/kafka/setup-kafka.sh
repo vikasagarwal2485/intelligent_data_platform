@@ -57,6 +57,9 @@ KAFKAVER="$(kubectl -n "${NS}" get deploy strimzi-cluster-operator \
 echo ">> Using API kafka.strimzi.io/${KVER}; Kafka version ${KAFKAVER:-<manifest default>}"
 
 echo "==> 1/5 Deploy Kafka cluster + Schema Registry"
+# The Kafka CR references the kafka-metrics ConfigMap (JMX exporter rules for the
+# produce/consume dashboard). Apply it first so the cluster is Ready (REQ-PLT-08).
+kubectl apply -n "${NS}" -f "${HERE}/../monitoring/kafka-metrics-configmap.yaml"
 # Render the manifest: substitute the served API version, and the detected Kafka
 # version if we found one (otherwise keep the manifest's default).
 sed -E "s#(kafka\.strimzi\.io/)v[0-9a-z]+#\1${KVER}#g" "${HERE}/kafka-cluster.yaml" \

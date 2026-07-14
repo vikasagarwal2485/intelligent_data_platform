@@ -71,7 +71,7 @@ Shared infrastructure, deployed by `make infra` (+ `make kafka`) into the
 | **Keycloak** | OIDC identity for multi-tenant RBAC | Provisioned (RBAC design, §1.5) |
 | **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | Provisioned (DAG in `pipelines/airflow`) |
 | **MLflow** | Experiment tracking + model registry | Provisioned (registry target) |
-| **Prometheus + Grafana** | Metrics & dashboards | Provisioned (observability) |
+| **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
 | **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | Optional (`make kafka-ui`) |
 
 > "Provisioned" = installed and part of the target architecture, but not yet
@@ -187,6 +187,7 @@ deploy/                      # split by owning team (ADR-0018)
     kafka/                   #     Kafka cluster, schema registry, topics, admin UI
     keycloak/ timescaledb/   #     per-service manifests
     trino/ nessie/ airflow/  #     per-service Helm values / DAG image
+    monitoring/              #     Prometheus/Grafana values, dashboards, Kafka PodMonitor
     install-infra.sh *-tune.sh #   install all services (Helm) + self-healing reinstalls
   app/                       #   APPLICATION TEAM — workloads on the platform
     deployment/              #     scoring-api Deployment/Service

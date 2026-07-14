@@ -75,6 +75,23 @@ trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
 	bash deploy/platform/nessie-tune.sh idp-platform
 
+.PHONY: monitoring
+monitoring: ## Install Prometheus+Grafana+exporters and load cluster/Kafka dashboards
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo update prometheus-community >/dev/null 2>&1 || true
+	helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack -n idp-platform \
+	  -f deploy/platform/monitoring/kube-prometheus-values.yaml --timeout 10m
+	kubectl apply -n idp-platform -f deploy/platform/monitoring/kafka-metrics-configmap.yaml
+	kubectl apply -n idp-platform -f deploy/platform/monitoring/kafka-podmonitor.yaml
+	kubectl apply -n idp-platform -f deploy/platform/monitoring/dashboards/
+	@echo ">> Re-run 'make kafka' so the Kafka cluster exposes JMX metrics + kafka-exporter."
+
+.PHONY: grafana-ui
+grafana-ui: ## Port-forward Grafana to http://localhost:3000 (admin/idp-admin)
+	@echo "Open http://localhost:3000  (user: admin  pass: idp-admin)"
+	@echo "Dashboards: 'IDP — Kubernetes Cluster Overview' and 'IDP — Kafka Produce/Consume'"
+	kubectl -n idp-platform port-forward svc/kube-prom-grafana 3000:80
+
 .PHONY: kafka
 kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schemas
 	bash deploy/platform/kafka/setup-kafka.sh idp-platform

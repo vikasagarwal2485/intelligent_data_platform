@@ -18,6 +18,7 @@ deploy/
     keycloak/  timescaledb/ #   per-service plain manifests
     trino/  nessie/         #   per-service tuned Helm values
     airflow/                #   Airflow values, RBAC, DAG image Dockerfile
+    monitoring/             #   Prometheus/Grafana values, dashboards, Kafka PodMonitor
     install-infra.sh        #   one-shot platform install (Helm repos + services)
     strimzi-tune.sh  trino-tune.sh  nessie-tune.sh   # self-healing repair scripts
   app/                      # APPLICATION TEAM — workloads on the platform

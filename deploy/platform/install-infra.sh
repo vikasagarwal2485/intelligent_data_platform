@@ -104,8 +104,11 @@ hi airflow apache-airflow/airflow
 echo ">> experiment tracking (MLflow)"
 hi mlflow community-charts/mlflow
 
-echo ">> observability (Prometheus + Grafana)"
-hi kube-prom prometheus-community/kube-prometheus-stack
+echo ">> observability (Prometheus + Grafana + node-exporter + kube-state-metrics)"
+hi kube-prom prometheus-community/kube-prometheus-stack \
+  -f "${HERE}/monitoring/kube-prometheus-values.yaml"
+echo ">> Grafana dashboards (Kubernetes cluster + Kafka produce/consume)"
+kubectl apply -n "${NS}" -f "${HERE}/monitoring/dashboards/"
 
 cat <<EONOTE
 
