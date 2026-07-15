@@ -288,8 +288,8 @@ Streaming = synthetic data flows through **Kafka** into the lake on **MinIO**.
 ```bash
 make mk-up                              # start minikube (ingress, metrics-server, storage)
 make image                              # build the idp/scoring-api:dev image into minikube
-kubectl apply -k deploy/platform/overlays/local  # namespaces (idp-platform, idp-app, tenants), RBAC, scoring-api
-make platform-services                              # install platform services (MinIO, Kafka operator, Trino, ...)
+make platform-base                      # namespaces (idp-platform, idp-app, tenants), RBAC, isolation, scoring-api
+make platform-services                  # install platform services (MinIO, Kafka operator, Trino, ...)
 make nessie-fix                         # ensure Nessie is healthy (in-memory store)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
 ```
