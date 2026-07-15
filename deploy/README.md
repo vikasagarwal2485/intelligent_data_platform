@@ -39,7 +39,7 @@ deploy/
 ```bash
 make mk-up          # start minikube with ingress/metrics addons
 make image          # build idp/scoring-api:dev INTO minikube's docker daemon
-make deploy         # kubectl apply -k deploy/platform/overlays/local
+make platform-base         # kubectl apply -k deploy/platform/overlays/local
 ```
 
 > **Why `make image` first?** The scoring API runs a project image that is not
@@ -54,7 +54,7 @@ Trino, TimescaleDB, Keycloak, OPA, Airflow, MLflow, Prometheus/Grafana) is
 installed by [`platform/install-infra.sh`](platform/install-infra.sh):
 
 ```bash
-make infra        # or: bash deploy/platform/install-infra.sh idp-platform
+make platform-services        # or: bash deploy/platform/install-infra.sh idp-platform
 ```
 
 The script adds the required Helm repos before installing — omitting
@@ -120,4 +120,4 @@ make nessie-fix       # in-memory store + more memory; check logs first:
 kubectl -n idp-platform logs deploy/nessie --previous --tail=40
 ```
 
-`make infra` already applies the tuned Trino/Nessie values for fresh installs.
+`make platform-services` already applies the tuned Trino/Nessie values for fresh installs.

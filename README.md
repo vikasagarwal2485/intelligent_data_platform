@@ -57,7 +57,7 @@ layers: a **batch** path (local pandas) and a **streaming** path (Kafka → in-c
 
 ### 1.2 Platform services
 
-Shared infrastructure, deployed by `make infra` (+ `make kafka`) into the
+Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) into the
 **`idp-platform`** namespace.
 
 | Service | Purpose | Status in prototype |
@@ -201,7 +201,7 @@ Dockerfile                   # scoring-api / jobs image (idp package)
 
 Run `make help` to list every target with a description.
 ### Path B — streaming through your deployed Kafka
-0. **Prereqs**: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
+0. **Prereqs**: platform deployed (`make platform-services`), Kafka up with topics (`make kafka`).
 
 1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
    load it into minikube:
@@ -289,7 +289,7 @@ Streaming = synthetic data flows through **Kafka** into the lake on **MinIO**.
 make mk-up                              # start minikube (ingress, metrics-server, storage)
 make image                              # build the idp/scoring-api:dev image into minikube
 kubectl apply -k deploy/platform/overlays/local  # namespaces (idp-platform, idp-app, tenants), RBAC, scoring-api
-make infra                              # install platform services (MinIO, Kafka operator, Trino, ...)
+make platform-services                              # install platform services (MinIO, Kafka operator, Trino, ...)
 make nessie-fix                         # ensure Nessie is healthy (in-memory store)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
 ```

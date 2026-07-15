@@ -31,7 +31,7 @@ This is a cluster/kubeconfig problem, not a chart problem (you saw a
   kubectl cluster-info       # should print the control-plane URL
 
 If you use Docker Desktop, make sure it is running and not paused.
-Then re-run:  make infra
+Then re-run:  make platform-services
 EOF
   exit 1
 fi

@@ -15,13 +15,13 @@ node-exporter, kube-state-metrics) plus Strimzi Kafka metrics.
 ## Install
 
 ```bash
-make infra          # installs the stack with these values (part of platform bring-up)
+make platform-services          # installs the stack with these values (part of platform bring-up)
 # or, to (re)apply just monitoring:
 make monitoring     # helm upgrade kube-prom + apply metrics ConfigMap, PodMonitors, dashboards
 make kafka          # (re-)apply the Kafka CR so it exposes JMX metrics + kafka-exporter
 ```
 
-`make infra` already applies these values and the dashboards; `make monitoring`
+`make platform-services` already applies these values and the dashboards; `make monitoring`
 is the standalone/repair path. Because the Kafka CR references the `kafka-metrics`
 ConfigMap, `setup-kafka.sh` applies that ConfigMap before creating the cluster.
 

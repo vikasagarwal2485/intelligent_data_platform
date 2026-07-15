@@ -247,9 +247,9 @@ tests/ , Makefile
 
 **Bring-up order (each a `make` target wrapping helm/kubectl):**
 1. `make mk-up` — `minikube start` with addons (ingress, metrics-server, storage-provisioner).
-2. `make namespaces` — create platform + per-tenant namespaces with **ResourceQuota +
+2. `make platform-base` — create platform + per-tenant namespaces with **ResourceQuota +
    NetworkPolicy + RBAC** (multi-tenancy guardrails, §1.5).
-3. `make infra` — MinIO (S3), **Strimzi → Apache Kafka** + Apicurio Schema Registry,
+3. `make platform-services` — MinIO (S3), **Strimzi → Apache Kafka** + Apicurio Schema Registry,
    **Nessie** + Iceberg, TimescaleDB, Redis, **Keycloak**, **OPA**.
 4. `make topics` — create per-tenant Kafka topics/ACLs + register Avro schemas.
 5. `make catalog` — init Nessie namespaces (`silver`, `gold`) via Spark/Trino.
