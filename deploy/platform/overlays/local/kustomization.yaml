@@ -1,26 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Local (minikube) overlay: small footprint, single scoring-api replica.
-# Combines the platform base (namespaces/RBAC/isolation) with the app
-# deployment (scoring-api), then patches the app for local dev.
+# Platform base overlay (minikube). Platform team scope: namespaces, RBAC, and
+# tenant isolation only. The scoring-api application is deployed separately by
+# the app team (deploy/app/overlays/local, `make app-deploy`).
 resources:
   - ../../base
-  - ../../../app/deployment
-
-patches:
-  - target:
-      kind: Deployment
-      name: scoring-api
-    patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-      - op: replace
-        path: /spec/template/spec/containers/0/image
-        value: idp/scoring-api:dev
-      # Use the image built into minikube's docker daemon; never pull from a
-      # registry (the dev image is local-only). Build it first with `make image`.
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Never

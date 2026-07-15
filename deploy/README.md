@@ -11,9 +11,9 @@ The directory is split by **owning team** (separation of concerns, ADR-0018):
 deploy/
   platform/                 # PLATFORM TEAM — shared infrastructure
     base/                   #   namespaces, RBAC, per-tenant isolation (Kustomize base)
-    overlays/local/         #   minikube overlay (1 replica, dev image)
-    overlays/aws/           #   EKS overlay (3 replicas, ECR image, IRSA)
-    argocd/                 #   GitOps Application for EKS
+    overlays/local/         #   minikube base overlay (namespaces/RBAC/isolation)
+    overlays/aws/           #   EKS base overlay (namespaces/RBAC/isolation)
+    argocd/                 #   GitOps Applications for EKS (platform base + app)
     kafka/                  #   Strimzi Kafka cluster, schema registry, topics, admin UI
     keycloak/  timescaledb/ #   per-service plain manifests
     trino/  nessie/         #   per-service tuned Helm values
@@ -22,7 +22,9 @@ deploy/
     install-infra.sh        #   one-shot platform install (Helm repos + services)
     strimzi-tune.sh  trino-tune.sh  nessie-tune.sh   # self-healing repair scripts
   app/                      # APPLICATION TEAM — workloads on the platform
-    deployment/             #   scoring-api Deployment/Service (+ kustomization)
+    deployment/             #   scoring-api base (Deployment/Service + kustomization)
+    overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
+    overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
     jobs/                   #   produce/consume/silver/gold/publish/spark-gold Jobs
 ```
 
@@ -31,15 +33,20 @@ deploy/
   `ResourceQuota` and a default-deny `NetworkPolicy` that blocks cross-tenant traffic.
 - **RBAC** (`platform/base/rbac.yaml`): namespace-scoped roles (`ds-credit`,
   `ds-fraud`, `analyst`) bound to Keycloak OIDC group claims.
+
+## What the app provides
 - **Scoring API** (`app/deployment/scoring-api.yaml`): the FastAPI credit/fraud
-  service — owned by the app team, pulled into the overlays and patched per
-  environment (image/replicas/pull-policy).
+  service — owned by the app team. The base is environment-agnostic; the
+  `app/overlays/{local,aws}` patch the image/replicas/pull-policy. Deployed
+  separately from the platform base (`make app-deploy`), so the two teams own
+  and roll out their pieces independently.
 
 ## Local (minikube)
 ```bash
 make mk-up          # start minikube with ingress/metrics addons
 make image          # build idp/scoring-api:dev INTO minikube's docker daemon
-make platform-base         # kubectl apply -k deploy/platform/overlays/local
+make platform-base  # kubectl apply -k deploy/platform/overlays/local  (namespaces/RBAC/isolation)
+make app-deploy     # kubectl apply -k deploy/app/overlays/local       (scoring-api)
 ```
 
 > **Why `make image` first?** The scoring API runs a project image that is not
@@ -47,7 +54,7 @@ make platform-base         # kubectl apply -k deploy/platform/overlays/local
 > Docker daemon (`eval $(minikube docker-env) && docker build ...`) and the local
 > overlay sets `imagePullPolicy: Never`. Skipping this causes the pod to try to
 > pull `idp/scoring-api:dev` from Docker Hub and fail with `ImagePullBackOff`.
-> On EKS the image instead comes from ECR (`platform/overlays/aws`).
+> On EKS the image instead comes from ECR (`app/overlays/aws`).
 
 Platform infrastructure (Apache Kafka via Strimzi, Nessie + Iceberg, MinIO,
 Trino, TimescaleDB, Keycloak, OPA, Airflow, MLflow, Prometheus/Grafana) is
@@ -79,7 +86,9 @@ idempotent and first removes any earlier broken Bitnami releases.
 
 ## Production (AWS EKS)
 ```bash
-kubectl apply -k deploy/platform/overlays/aws        # or let Argo CD sync it
+kubectl apply -k deploy/platform/overlays/aws        # platform base (namespaces/RBAC)
+kubectl apply -k deploy/app/overlays/aws             # scoring-api app
+# or let Argo CD sync both (platform base then app, via sync-waves):
 kubectl apply -f deploy/platform/argocd/application.yaml
 ```
 EKS specifics: S3 (per-tenant prefixes + KMS), IRSA for pod S3 access, External

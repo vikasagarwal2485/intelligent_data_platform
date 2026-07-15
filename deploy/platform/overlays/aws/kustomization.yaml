@@ -1,24 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# AWS (EKS) overlay: production image from ECR, IRSA service account for S3.
-# Combines the platform base (namespaces/RBAC/isolation) with the app
-# deployment (scoring-api), then patches the app for production.
+# Platform base overlay (EKS). Platform team scope: namespaces, RBAC, and tenant
+# isolation only. The scoring-api application is deployed separately by the app
+# team (deploy/app/overlays/aws, synced by the Argo CD application).
 resources:
   - ../../base
-  - ../../../app/deployment
-
-patches:
-  - target:
-      kind: Deployment
-      name: scoring-api
-    patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 3
-      - op: replace
-        path: /spec/template/spec/containers/0/image
-        value: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/idp/scoring-api:latest
-      - op: add
-        path: /spec/template/spec/serviceAccountName
-        value: scoring-api-irsa
