@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot: deploy the Kafka cluster + Schema Registry, then create topics and
-# register Avro schemas (plan section 3). Run AFTER `make infra` (which installs
+# register Avro schemas (plan section 3). Run AFTER `make platform-services` (which installs
 # the Strimzi operator).
 #
 # Usage:  bash deploy/kafka/setup-kafka.sh [namespace]

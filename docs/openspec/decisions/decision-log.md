@@ -173,3 +173,18 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** No bespoke Prometheus/Grafana wiring; dashboards are
   version-controlled ConfigMaps. Kafka metrics require re-applying the Kafka CR
   (`make kafka`) so the broker exposes the JMX port.
+
+### ADR-0020 — Deploy the app separately from the platform base (own overlays)
+- **Status:** Accepted (2026-07-15)
+- **Context:** After the platform/app split (ADR-0018) the scoring-api app and its
+  env-specific patch still lived inside the *platform* overlays, so `make
+  platform-base` deployed a platform concern (namespaces/RBAC) and an app concern
+  (scoring-api) together — muddying ownership.
+- **Decision:** Platform overlays (`platform/overlays/{local,aws}`) carry only the
+  base (namespaces/RBAC/isolation). The scoring-api gets its own overlays
+  (`app/overlays/{local,aws}`) that reference the app base and hold the
+  env-specific image/replicas/pull-policy patch. New `make app-deploy` applies the
+  app; two Argo CD Applications (sync-waves) apply platform base then app.
+- **Consequences:** Bring-up gains a step (`… platform-base → platform-services →
+  app-deploy → …`). Each team applies and rolls back its own kustomization. The
+  patch lives in app *overlays* (not the app base) so local vs AWS stay distinct.

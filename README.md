@@ -57,7 +57,7 @@ layers: a **batch** path (local pandas) and a **streaming** path (Kafka → in-c
 
 ### 1.2 Platform services
 
-Shared infrastructure, deployed by `make infra` (+ `make kafka`) into the
+Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) into the
 **`idp-platform`** namespace.
 
 | Service | Purpose | Status in prototype |
@@ -159,9 +159,10 @@ flowchart TB
   cross-namespace DNS (`idp-kafka-kafka-bootstrap.idp-platform.svc`).
 - **Tenant isolation** (`deploy/platform/base/`): per-tenant namespaces with
   `ResourceQuota`, `NetworkPolicy` (default-deny cross-tenant), and RBAC roles.
-- **Overlays**: `deploy/platform/overlays/local` (minikube, `imagePullPolicy: Never`) and
-  `deploy/platform/overlays/aws` (EKS, ECR image, IRSA) — same Kustomize base; Argo CD app
-  in `deploy/platform/argocd`.
+- **Overlays, split by team**: platform base in `deploy/platform/overlays/{local,aws}`
+  (namespaces/RBAC/isolation); the scoring-api app in `deploy/app/overlays/{local,aws}`
+  (`imagePullPolicy: Never` dev image locally; ECR image + IRSA on EKS). Two Argo CD
+  apps in `deploy/platform/argocd` sync the platform base then the app.
 
 ---
 
@@ -183,14 +184,15 @@ config/                      # platform.yaml + Avro schema contracts (config/avr
 data_samples/                # reference TM Forum JSON:API documents
 deploy/                      # split by owning team (ADR-0018)
   platform/                  #   PLATFORM TEAM — shared infrastructure
-    base/ overlays/ argocd/  #     namespaces, RBAC, isolation; local/aws overlays; GitOps
+    base/ overlays/ argocd/  #     namespaces, RBAC, isolation; base local/aws overlays; GitOps
     kafka/                   #     Kafka cluster, schema registry, topics, admin UI
     keycloak/ timescaledb/   #     per-service manifests
     trino/ nessie/ airflow/  #     per-service Helm values / DAG image
     monitoring/              #     Prometheus/Grafana values, dashboards, Kafka PodMonitor
     install-infra.sh *-tune.sh #   install all services (Helm) + self-healing reinstalls
   app/                       #   APPLICATION TEAM — workloads on the platform
-    deployment/              #     scoring-api Deployment/Service
+    deployment/              #     scoring-api base (Deployment/Service)
+    overlays/local|aws/      #     env patches for scoring-api (dev image / ECR+IRSA)
     jobs/                    #     produce/consume/silver/gold/publish/spark-gold Jobs
 pipelines/airflow/dags/      # Airflow DAG for the batch pipeline
 tests/                       # 63 pytest tests across every layer
@@ -201,7 +203,7 @@ Dockerfile                   # scoring-api / jobs image (idp package)
 
 Run `make help` to list every target with a description.
 ### Path B — streaming through your deployed Kafka
-0. **Prereqs**: platform deployed (`make infra`), Kafka up with topics (`make kafka`).
+0. **Prereqs**: platform deployed (`make platform-services`), Kafka up with topics (`make kafka`).
 
 1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
    load it into minikube:
@@ -288,8 +290,9 @@ Streaming = synthetic data flows through **Kafka** into the lake on **MinIO**.
 ```bash
 make mk-up                              # start minikube (ingress, metrics-server, storage)
 make image                              # build the idp/scoring-api:dev image into minikube
-kubectl apply -k deploy/platform/overlays/local  # namespaces (idp-platform, idp-app, tenants), RBAC, scoring-api
-make infra                              # install platform services (MinIO, Kafka operator, Trino, ...)
+make platform-base                      # namespaces (idp-platform, idp-app, tenants), RBAC, isolation
+make platform-services                  # install platform services (MinIO, Kafka operator, Trino, ...)
+make app-deploy                         # deploy the scoring-api app into idp-app
 make nessie-fix                         # ensure Nessie is healthy (in-memory store)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
 ```

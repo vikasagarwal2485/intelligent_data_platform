@@ -15,7 +15,7 @@ deploy/kafka/
 
 ## Prerequisites
 1. A running cluster (`minikube status` → Running).
-2. The Strimzi **operator** installed and Ready — this is done by `make infra`
+2. The Strimzi **operator** installed and Ready — this is done by `make platform-services`
    (`deploy/install-infra.sh` installs `strimzi/strimzi-kafka-operator`).
    The operator is what installs the `Kafka`/`KafkaNodePool` **CRDs**; without
    them `make kafka` fails with `no matches for kind "Kafka" in version

@@ -13,7 +13,7 @@ The `idp_silver_gold` DAG runs `silver >> gold >> publish` — the last task
 `make publish` after `make gold`. Inspect the serving tables with
 `make timescale-psql`.
 
-Prereqs for all: platform deployed (`make infra`), the app image built
+Prereqs for all: platform deployed (`make platform-services`), the app image built
 (`make image`), and Bronze already populated (`make stream`) so Silver has input.
 
 ---

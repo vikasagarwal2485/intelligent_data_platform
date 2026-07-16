@@ -57,10 +57,10 @@ mk-up: ## Start minikube with required addons
 .PHONY: image
 image: ## Build the scoring-api image INTO minikube's docker daemon (local, no registry)
 	@eval $$(minikube docker-env) && docker build -t idp/scoring-api:dev .
-	@echo "Built idp/scoring-api:dev inside minikube. Now run: make deploy"
+	@echo "Built idp/scoring-api:dev inside minikube. Now run: make platform-base && make app-deploy"
 
-.PHONY: infra
-infra: ## Add Helm repos and install platform infrastructure into idp-platform
+.PHONY: platform-services
+platform-services: ## Add Helm repos and install platform infrastructure into idp-platform
 	bash deploy/platform/install-infra.sh idp-platform
 
 .PHONY: strimzi-fix
@@ -200,12 +200,13 @@ topics: ## Create Kafka topics only (KafkaTopic CRs)
 schemas: ## Register Avro schemas only (config/avro/*.avsc)
 	bash deploy/platform/kafka/register-schemas.sh idp-platform
 
-.PHONY: deploy
-deploy: ## Apply the local overlay (namespaces, RBAC, isolation, scoring API)
+.PHONY: platform-base
+platform-base: ## Apply the platform base overlay (namespaces, RBAC, tenant isolation)
 	kubectl apply -k deploy/platform/overlays/local
 
-.PHONY: namespaces
-namespaces: deploy ## Alias for `deploy` (kept for backwards compatibility)
+.PHONY: app-deploy
+app-deploy: ## Deploy the scoring-api app (idp-app); needs `make image` + `make platform-base`
+	kubectl apply -k deploy/app/overlays/local
 
 .PHONY: mk-down
 mk-down: ## Stop minikube

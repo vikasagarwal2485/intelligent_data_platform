@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# App overlay (minikube): single replica, the image built into minikube's docker
+# daemon, never pulled from a registry. Apply with `make app-deploy` AFTER
+# `make image` (builds idp/scoring-api:dev) and `make platform-base` (namespaces).
+resources:
+  - ../../deployment
+
+patches:
+  - target:
+      kind: Deployment
+      name: scoring-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: idp/scoring-api:dev
+      # Use the image built into minikube's docker daemon; never pull from a
+      # registry (the dev image is local-only). Build it first with `make image`.
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never

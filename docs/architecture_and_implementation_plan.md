@@ -222,14 +222,15 @@ Docker Compose.
 deploy/
   platform/        # PLATFORM team: shared infrastructure services
     base/          # Kustomize base (namespaces, RBAC, quotas, NetworkPolicy)
-    overlays/local/  # minikube overlay (small resources, MinIO, NodePort)
-    overlays/aws/    # EKS overlay (S3, IRSA, ALB ingress, External Secrets)
-    argocd/        # Argo CD Application manifests (GitOps)
+    overlays/local/  # minikube base overlay (namespaces/RBAC/isolation)
+    overlays/aws/    # EKS base overlay (namespaces/RBAC/isolation)
+    argocd/        # Argo CD Applications (platform base + app, GitOps)
     kafka/         # Strimzi Kafka cluster, schema registry, topics, admin UI
     keycloak/  timescaledb/  trino/  nessie/  airflow/   # per-service manifests/values
     install-infra.sh  *-tune.sh                          # platform install/repair scripts
   app/             # APPLICATION team: workloads that run ON the platform
-    deployment/    # scoring-api Deployment/Service
+    deployment/    # scoring-api base (Deployment/Service)
+    overlays/local|aws/  # scoring-api env patch (dev image / ECR+IRSA), `make app-deploy`
     jobs/          # produce/consume/silver/gold/publish/spark-gold Jobs
 config/   (kafka topics, nifi flow, nessie, trino+OPA, airflow, keycloak realms)
 schemas/avro/*.avsc
@@ -247,9 +248,9 @@ tests/ , Makefile
 
 **Bring-up order (each a `make` target wrapping helm/kubectl):**
 1. `make mk-up` — `minikube start` with addons (ingress, metrics-server, storage-provisioner).
-2. `make namespaces` — create platform + per-tenant namespaces with **ResourceQuota +
+2. `make platform-base` — create platform + per-tenant namespaces with **ResourceQuota +
    NetworkPolicy + RBAC** (multi-tenancy guardrails, §1.5).
-3. `make infra` — MinIO (S3), **Strimzi → Apache Kafka** + Apicurio Schema Registry,
+3. `make platform-services` — MinIO (S3), **Strimzi → Apache Kafka** + Apicurio Schema Registry,
    **Nessie** + Iceberg, TimescaleDB, Redis, **Keycloak**, **OPA**.
 4. `make topics` — create per-tenant Kafka topics/ACLs + register Avro schemas.
 5. `make catalog` — init Nessie namespaces (`silver`, `gold`) via Spark/Trino.
