@@ -129,4 +129,19 @@ make nessie-fix       # in-memory store + more memory; check logs first:
 kubectl -n idp-platform logs deploy/nessie --previous --tail=40
 ```
 
+**Keycloak `OOMKilled` (exit 137), CrashLoopBackOff**: the Quarkus JVM sized its
+heap from the cgroup limit and total RSS exceeded the memory limit. The manifest
+caps it with `JAVA_OPTS_APPEND=-XX:MaxRAMPercentage=50.0 -XX:MaxMetaspaceSize=256m`;
+re-apply it (`kubectl apply -f deploy/platform/keycloak/keycloak.yaml`). Keycloak
+is **optional** for the runnable prototype (RBAC design only) — on a memory-tight
+node, `kubectl -n idp-platform scale deploy/keycloak --replicas=0` frees ~1.5Gi.
+
+**Postgres/TimescaleDB `PANIC: could not locate a valid checkpoint record`**: WAL
+corruption from an ungraceful kill (usually a node OOM). The DB holds only
+regenerable data here (Airflow metadata + `gold.*` serving copies), so the clean
+fix is to reset its volume: `kubectl -n idp-platform delete deploy timescaledb &&
+kubectl -n idp-platform delete pvc timescaledb-data && kubectl apply -n idp-platform
+-f deploy/platform/timescaledb/timescaledb.yaml`. Give the node more memory to
+avoid repeat OOMs (`minikube start --memory=20480`).
+
 `make platform-services` already applies the tuned Trino/Nessie values for fresh installs.

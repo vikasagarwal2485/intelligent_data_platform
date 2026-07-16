@@ -26,6 +26,13 @@ spec:
               value: "admin"               # dev only; use External Secrets on EKS
             - name: KC_HEALTH_ENABLED
               value: "true"
+            # Cap the JVM so total RSS (heap + metaspace + code cache + direct
+            # buffers) stays under the memory limit. Without this the Quarkus JVM
+            # sizes its heap at ~70% of the cgroup limit and the rest pushes the
+            # container past the limit -> OOMKilled (exit 137). ~50% heap leaves
+            # room for everything else on a small node.
+            - name: JAVA_OPTS_APPEND
+              value: "-XX:MaxRAMPercentage=50.0 -XX:MaxMetaspaceSize=256m"
           ports:
             - containerPort: 8080
             - containerPort: 9000   # management/health port
