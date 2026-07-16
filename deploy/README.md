@@ -129,6 +129,12 @@ make nessie-fix       # in-memory store + more memory; check logs first:
 kubectl -n idp-platform logs deploy/nessie --previous --tail=40
 ```
 
+**Strimzi entity-operator `OOMKilled` (exit 137)** (the `*-entity-operator` pod's
+topic-operator/user-operator containers): the Kafka CR now gives the topic
+operator explicit memory and drops the unused user operator — re-apply with
+`make kafka`. This doesn't block anything: topics already exist and produce/consume
+work while it restarts; the entity operator only reconciles `KafkaTopic` CRs.
+
 **Keycloak `OOMKilled` (exit 137), CrashLoopBackOff**: the Quarkus JVM sized its
 heap from the cgroup limit and total RSS exceeded the memory limit. The manifest
 caps it with `JAVA_OPTS_APPEND=-XX:MaxRAMPercentage=50.0 -XX:MaxMetaspaceSize=256m`;
