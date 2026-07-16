@@ -73,5 +73,11 @@ spec:
     topicRegex: ".*"
     groupRegex: ".*"
   entityOperator:
-    topicOperator: {}
-    userOperator: {}
+    # Only the topic operator (we manage topics via KafkaTopic CRs). The user
+    # operator is omitted — we deploy no KafkaUser CRs, so running it just adds a
+    # second JVM that OOMKills on a small node. Give the topic operator enough
+    # memory so it doesn't OOMKill (137) at the Strimzi default limit.
+    topicOperator:
+      resources:
+        requests: { cpu: "100m", memory: 384Mi }
+        limits: { cpu: "500m", memory: 512Mi }
