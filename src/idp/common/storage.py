@@ -45,15 +45,24 @@ def _ensure_s3_bucket(uri: str, opts: dict[str, Any]) -> None:
     Writing to a non-existent bucket otherwise persists nothing while the write
     still "succeeds" (silent data loss) — e.g. if bucket provisioning only created
     some of idp-bronze/silver/gold/ml. This makes the write self-healing.
+
+    IMPORTANT: use a THROWAWAY s3fs instance (``skip_instance_cache=True``). The
+    write that follows (``df.to_parquet(storage_options=opts)``) builds its own
+    fsspec-cached s3fs instance; if we touched that shared instance's directory
+    cache here (e.g. via ``makedirs``), the subsequent *partitioned* write would
+    read a stale listing and silently write zero files. Keeping this instance
+    separate leaves the write's filesystem cache clean.
     """
     import s3fs
 
     bucket = uri.split("/", 3)[2]  # s3://<bucket>/<key...>
     fs = s3fs.S3FileSystem(
-        key=opts["key"], secret=opts["secret"], client_kwargs=opts["client_kwargs"]
+        key=opts["key"], secret=opts["secret"], client_kwargs=opts["client_kwargs"],
+        skip_instance_cache=True,
     )
     try:
-        fs.makedirs(bucket, exist_ok=True)  # bucket-level makedirs = create bucket
+        if not fs.exists(bucket):
+            fs.mkdir(bucket)
     except Exception:  # noqa: BLE001 - already exists / race; the write will surface real errors
         pass
 
