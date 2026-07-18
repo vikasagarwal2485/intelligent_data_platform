@@ -39,6 +39,25 @@ def lake_uri(cfg: PlatformConfig, layer: str) -> str:
     return getattr(cfg.storage, layer)
 
 
+def _ensure_s3_bucket(uri: str, opts: dict[str, Any]) -> None:
+    """Create the target S3/MinIO bucket if it doesn't exist.
+
+    Writing to a non-existent bucket otherwise persists nothing while the write
+    still "succeeds" (silent data loss) — e.g. if bucket provisioning only created
+    some of idp-bronze/silver/gold/ml. This makes the write self-healing.
+    """
+    import s3fs
+
+    bucket = uri.split("/", 3)[2]  # s3://<bucket>/<key...>
+    fs = s3fs.S3FileSystem(
+        key=opts["key"], secret=opts["secret"], client_kwargs=opts["client_kwargs"]
+    )
+    try:
+        fs.makedirs(bucket, exist_ok=True)  # bucket-level makedirs = create bucket
+    except Exception:  # noqa: BLE001 - already exists / race; the write will surface real errors
+        pass
+
+
 def write_parquet(
     df: pd.DataFrame, uri: str, cfg: PlatformConfig, *, partition_cols: list[str] | None = None
 ) -> None:
@@ -46,6 +65,8 @@ def write_parquet(
     opts = storage_options(cfg)
     if opts is None and not uri.startswith("s3://"):
         Path(uri).mkdir(parents=True, exist_ok=True)
+    elif opts is not None and uri.startswith("s3://"):
+        _ensure_s3_bucket(uri, opts)
     df.to_parquet(uri, index=False, partition_cols=partition_cols, storage_options=opts)
 
 
