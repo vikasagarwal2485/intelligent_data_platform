@@ -93,7 +93,7 @@ def _stage(task_id: str, arg: str, *, extra_env=None) -> KubernetesPodOperator:
         arguments=[arg],
         env_vars=S3_ENV + (extra_env or []),
         get_logs=True,
-        is_delete_operator_pod=True,
+        on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
         in_cluster=True,
     )
 
@@ -132,7 +132,7 @@ def _spark_stage(task_id: str, name: str, script: str, configmap: str,
             limits={"cpu": "2", "memory": "2500Mi"},
         ),
         get_logs=True,
-        is_delete_operator_pod=True,
+        on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
         in_cluster=True,
     )
 
