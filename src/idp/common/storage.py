@@ -39,43 +39,20 @@ def lake_uri(cfg: PlatformConfig, layer: str) -> str:
     return getattr(cfg.storage, layer)
 
 
-def _ensure_s3_bucket(uri: str, opts: dict[str, Any]) -> None:
-    """Create the target S3/MinIO bucket if it doesn't exist.
-
-    Writing to a non-existent bucket otherwise persists nothing while the write
-    still "succeeds" (silent data loss) — e.g. if bucket provisioning only created
-    some of idp-bronze/silver/gold/ml. This makes the write self-healing.
-
-    IMPORTANT: use a THROWAWAY s3fs instance (``skip_instance_cache=True``). The
-    write that follows (``df.to_parquet(storage_options=opts)``) builds its own
-    fsspec-cached s3fs instance; if we touched that shared instance's directory
-    cache here (e.g. via ``makedirs``), the subsequent *partitioned* write would
-    read a stale listing and silently write zero files. Keeping this instance
-    separate leaves the write's filesystem cache clean.
-    """
-    import s3fs
-
-    bucket = uri.split("/", 3)[2]  # s3://<bucket>/<key...>
-    fs = s3fs.S3FileSystem(
-        key=opts["key"], secret=opts["secret"], client_kwargs=opts["client_kwargs"],
-        skip_instance_cache=True,
-    )
-    try:
-        if not fs.exists(bucket):
-            fs.mkdir(bucket)
-    except Exception:  # noqa: BLE001 - already exists / race; the write will surface real errors
-        pass
-
-
 def write_parquet(
     df: pd.DataFrame, uri: str, cfg: PlatformConfig, *, partition_cols: list[str] | None = None
 ) -> None:
-    """Write a DataFrame to Parquet at ``uri`` (local or s3://)."""
+    """Write a DataFrame to Parquet at ``uri`` (local or s3://).
+
+    NOTE: no S3 bucket "ensure" step here. An earlier attempt to create the bucket
+    first (via s3fs) shared/poisoned the fsspec filesystem cache that this write
+    reuses, which made partitioned S3 writes silently produce zero files. The
+    buckets are provisioned separately (install-infra.sh / `make minio-mkbuckets`),
+    so this stays a plain, cache-clean ``to_parquet``.
+    """
     opts = storage_options(cfg)
     if opts is None and not uri.startswith("s3://"):
         Path(uri).mkdir(parents=True, exist_ok=True)
-    elif opts is not None and uri.startswith("s3://"):
-        _ensure_s3_bucket(uri, opts)
     df.to_parquet(uri, index=False, partition_cols=partition_cols, storage_options=opts)
 
 
