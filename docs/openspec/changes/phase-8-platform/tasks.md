@@ -30,6 +30,11 @@
 - [x] 4.3 `pipelines/spark/gold_job.py` + `deploy/app/jobs/spark-gold-job.yaml`
       (production Gold via spark-submit)
 - [x] 4.4 `pipeline.run` composes stages locally (dev/test + training)
+- [x] 4.5 Per-stage execution-engine switch in the DAG (`idp_silver_engine` /
+      `idp_gold_engine` = pandas|spark): Airflow orchestrates; each task launches the
+      pandas `idp` pod or a `spark-submit` pod, same DAG shape. `pipelines/spark/silver_job.py`
+      (token-parity with pandas) + `spark-silver-job.yaml`; `publish` stays a separate
+      task. Targets `make spark-configmap`, `spark-silver`, `silver-engine`, `gold-engine`.
 
 ## 5. Make targets & docs
 - [x] 5.1 `mk-up`, `image`, `deploy`, `infra`, `kafka`, `stream`, `silver`, `gold`,

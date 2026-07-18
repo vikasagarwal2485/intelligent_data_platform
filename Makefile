@@ -182,15 +182,38 @@ airflow-trigger: ## Trigger the Silver->Gold DAG now (unpause + trigger) via the
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_silver_gold
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_silver_gold
 
-# --- Spark (production Gold) ------------------------------------------------
-.PHONY: spark-gold
-spark-gold: ## Run the Gold stage as a Spark job (spark-submit, reads Silver -> writes Gold)
-	kubectl -n idp-app delete configmap idp-gold-spark --ignore-not-found
+# --- Spark (production Silver / Gold) ---------------------------------------
+.PHONY: spark-configmap
+spark-configmap: ## (Re)create the idp-silver-spark + idp-gold-spark ConfigMaps (Spark job scripts)
+	kubectl -n idp-app delete configmap idp-silver-spark idp-gold-spark --ignore-not-found
+	kubectl -n idp-app create configmap idp-silver-spark --from-file=silver_job.py=pipelines/spark/silver_job.py
 	kubectl -n idp-app create configmap idp-gold-spark --from-file=gold_job.py=pipelines/spark/gold_job.py
+
+.PHONY: spark-silver
+spark-silver: spark-configmap ## Run the Silver stage as a Spark job (spark-submit, reads Bronze -> writes Silver)
+	kubectl -n idp-app delete job idp-spark-silver --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/spark-silver-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-spark-silver --timeout=900s
+	kubectl -n idp-app logs job/idp-spark-silver
+
+.PHONY: spark-gold
+spark-gold: spark-configmap ## Run the Gold stage as a Spark job (spark-submit, reads Silver -> writes Gold)
 	kubectl -n idp-app delete job idp-spark-gold --ignore-not-found
 	kubectl -n idp-app apply -f deploy/app/jobs/spark-gold-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-spark-gold --timeout=900s
 	kubectl -n idp-app logs job/idp-spark-gold
+
+.PHONY: silver-engine
+silver-engine: ## Set the Airflow Silver engine: make silver-engine ENGINE=spark|pandas
+	@test -n "$(ENGINE)" || { echo "usage: make silver-engine ENGINE=spark|pandas"; exit 1; }
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables set idp_silver_engine "$(ENGINE)"
+	@echo ">> idp_silver_engine=$(ENGINE). For spark, ensure the script CM exists: make spark-configmap"
+
+.PHONY: gold-engine
+gold-engine: ## Set the Airflow Gold engine: make gold-engine ENGINE=spark|pandas
+	@test -n "$(ENGINE)" || { echo "usage: make gold-engine ENGINE=spark|pandas"; exit 1; }
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables set idp_gold_engine "$(ENGINE)"
+	@echo ">> idp_gold_engine=$(ENGINE). For spark, ensure the script CM exists: make spark-configmap"
 
 .PHONY: topics
 topics: ## Create Kafka topics only (KafkaTopic CRs)
