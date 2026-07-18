@@ -6,7 +6,7 @@ The medallion stages can be triggered three ways. Pick per situation:
 |---|---|---|
 | **On-demand job** | `make silver` / `make gold` / `make publish` | quickest; runs the `idp` image as a one-off K8s Job |
 | **Airflow DAG** | `make airflow-trigger` (or the UI) | scheduled/orchestrated Silver → Gold → publish |
-| **Spark job** | `make spark-gold` | the distributed Gold engine (spark-submit) |
+| **Spark jobs** | `make spark-silver` / `make spark-gold` | the distributed Silver/Gold engines (spark-submit) |
 
 The `idp_silver_gold` DAG runs `silver >> gold >> publish` — the last task
 (`idp publish`) mirrors Gold into **TimescaleDB** for serving. On-demand, run
@@ -64,35 +64,49 @@ DAGs provided (`pipelines/airflow/dags/idp_medallion_dag.py`):
 - **`idp_silver_gold`** — `silver >> gold >> publish`, hourly.
 - **`idp_train`** — offline model training, daily.
 
-### Choosing the Gold execution engine (pandas vs Spark)
+### Choosing the execution engine per stage (pandas vs Spark)
 
-Airflow **orchestrates**; the Gold task's **execution engine** is a switch — the
-DAG shape (`silver >> gold >> publish`) is identical either way:
+Airflow **orchestrates**; **Silver and Gold each have an independent execution
+engine** — the DAG shape (`silver >> gold >> publish`) is identical either way:
 
-- **`pandas`** (default) — the `gold` task launches `idp gold` in the scoring-api
-  image (single node).
-- **`spark`** — the `gold` task launches `spark-submit pipelines/spark/gold_job.py`
-  in an `apache/spark` pod (distributed; for large data / backfills). It mounts the
-  script from the `idp-gold-spark` ConfigMap.
+- **`pandas`** (default) — the task launches `idp silver` / `idp gold` in the
+  scoring-api image (single node).
+- **`spark`** — the task launches `spark-submit` of `pipelines/spark/{silver,gold}_job.py`
+  in an `apache/spark` pod (distributed). The Spark Silver job reproduces the
+  **same per-tenant salted-SHA-256 tokenization**, so `service_id` tokens are
+  identical whether Silver ran on pandas or Spark.
 
-Select it with the Airflow Variable `idp_gold_engine` (or env `IDP_GOLD_ENGINE`):
+Select each independently with `idp_silver_engine` / `idp_gold_engine` (Airflow
+Variables, or env `IDP_SILVER_ENGINE` / `IDP_GOLD_ENGINE`):
 
 ```bash
-make spark-configmap                 # once: provide the Spark job script (idp-app)
-make gold-engine ENGINE=spark        # sets the Airflow variable idp_gold_engine=spark
-make airflow-trigger                 # gold now runs on Spark
-make gold-engine ENGINE=pandas       # switch back to the single-node pandas engine
+make spark-configmap                  # once: provide the Spark job scripts (idp-app)
+make silver-engine ENGINE=spark       # Bronze->Silver on Spark
+make gold-engine   ENGINE=spark       # Silver->Gold on Spark
+make airflow-trigger
+make silver-engine ENGINE=pandas      # switch either back independently
 ```
 
-You can also flip `idp_gold_engine` in the Airflow UI (Admin → Variables). The
-change takes effect on the next DAG parse; no redeploy.
+`publish` (Gold -> TimescaleDB) is always a **separate, independent task** — it is
+never folded into Gold. (Next step: migrate its target to Iceberg via Nessie.)
+Flip the variables in the Airflow UI (Admin -> Variables) too; effective on the
+next DAG parse, no redeploy.
 
 ---
 
-## B. Spark pipeline (production Gold)
+## B. Spark pipeline (production Silver / Gold)
 
-`pipelines/spark/gold_job.py` reads Silver and writes Gold on MinIO via the S3A
-connector. `make spark-gold` runs it with `spark-submit` in a one-off Spark pod.
+`pipelines/spark/silver_job.py` reads Bronze and writes canonical Silver (with the
+same PII tokenization as the pandas path); `pipelines/spark/gold_job.py` reads
+Silver and writes Gold. Both use the S3A connector to MinIO. Run either as a
+one-off Spark pod:
+
+```bash
+make spark-silver     # Bronze -> Silver on Spark
+make spark-gold       # Silver -> Gold on Spark
+```
+
+Original one-liner (Gold shown; Silver is the same with `silver_job.py --salts ...`):
 
 ```bash
 make spark-gold

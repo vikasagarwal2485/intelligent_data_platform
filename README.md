@@ -327,11 +327,14 @@ make minio-reset                                # empty the lake buckets for a c
 
 **Production (orchestrated Silver/Gold):**
 - **Airflow** DAG (`idp_silver_gold`: `silver >> gold >> publish`, hourly) — tasks
-  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; the Gold
-  task's execution engine is a switch** (`idp_gold_engine` = `pandas` | `spark`) —
-  same DAG shape either way (pandas `idp gold` pod, or a `spark-submit` pod):
+  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; Silver
+  and Gold each have an independent execution-engine switch** (`idp_silver_engine`
+  / `idp_gold_engine` = `pandas` | `spark`) — same DAG shape either way. The Spark
+  Silver job reproduces the same PII tokenization, so `service_id` tokens match.
+  `publish` (Gold→TimescaleDB) stays a **separate** task (next step: Iceberg via Nessie):
   ```bash
-  make gold-engine ENGINE=spark   # + `make spark-configmap` once; back: ENGINE=pandas
+  make spark-configmap            # once: Spark job scripts into idp-app
+  make silver-engine ENGINE=spark # and/or: make gold-engine ENGINE=spark  (back: ENGINE=pandas)
   ```
   Wire + trigger:
   ```bash
