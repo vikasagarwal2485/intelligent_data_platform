@@ -61,8 +61,31 @@ make minio-ls             # Silver in idp-silver, Gold in idp-gold
 ```
 
 DAGs provided (`pipelines/airflow/dags/idp_medallion_dag.py`):
-- **`idp_silver_gold`** — `silver >> gold`, hourly.
+- **`idp_silver_gold`** — `silver >> gold >> publish`, hourly.
 - **`idp_train`** — offline model training, daily.
+
+### Choosing the Gold execution engine (pandas vs Spark)
+
+Airflow **orchestrates**; the Gold task's **execution engine** is a switch — the
+DAG shape (`silver >> gold >> publish`) is identical either way:
+
+- **`pandas`** (default) — the `gold` task launches `idp gold` in the scoring-api
+  image (single node).
+- **`spark`** — the `gold` task launches `spark-submit pipelines/spark/gold_job.py`
+  in an `apache/spark` pod (distributed; for large data / backfills). It mounts the
+  script from the `idp-gold-spark` ConfigMap.
+
+Select it with the Airflow Variable `idp_gold_engine` (or env `IDP_GOLD_ENGINE`):
+
+```bash
+make spark-configmap                 # once: provide the Spark job script (idp-app)
+make gold-engine ENGINE=spark        # sets the Airflow variable idp_gold_engine=spark
+make airflow-trigger                 # gold now runs on Spark
+make gold-engine ENGINE=pandas       # switch back to the single-node pandas engine
+```
+
+You can also flip `idp_gold_engine` in the Airflow UI (Admin → Variables). The
+change takes effect on the next DAG parse; no redeploy.
 
 ---
 

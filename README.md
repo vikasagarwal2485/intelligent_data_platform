@@ -326,8 +326,14 @@ make minio-reset                                # empty the lake buckets for a c
 ```
 
 **Production (orchestrated Silver/Gold):**
-- **Airflow** DAG (`idp_silver_gold`: `silver >> gold`, hourly) — tasks launch
-  the `idp` image via `KubernetesPodOperator`. Wire + trigger:
+- **Airflow** DAG (`idp_silver_gold`: `silver >> gold >> publish`, hourly) — tasks
+  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; the Gold
+  task's execution engine is a switch** (`idp_gold_engine` = `pandas` | `spark`) —
+  same DAG shape either way (pandas `idp gold` pod, or a `spark-submit` pod):
+  ```bash
+  make gold-engine ENGINE=spark   # + `make spark-configmap` once; back: ENGINE=pandas
+  ```
+  Wire + trigger:
   ```bash
   make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
   make airflow-trigger    # or: make airflow-ui  then Trigger in the UI
