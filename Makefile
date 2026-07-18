@@ -216,8 +216,12 @@ gold-engine: ## Set the Airflow Gold engine: make gold-engine ENGINE=spark|panda
 	@echo ">> idp_gold_engine=$(ENGINE). For spark, ensure the script CM exists: make spark-configmap"
 
 .PHONY: topics
-topics: ## Create Kafka topics only (KafkaTopic CRs)
+topics: ## Create/update Kafka topics (KafkaTopic CRs; 7-day retention, RETENTION_DAYS=N to change)
 	bash deploy/platform/kafka/create-topics.sh idp-platform
+
+.PHONY: kafka-purge
+kafka-purge: ## Purge ALL messages from the t.* Kafka topics now (TOPIC=t.tenant_a.recharge for one)
+	bash deploy/platform/kafka/purge-topics.sh idp-platform "$(TOPIC)"
 
 .PHONY: schemas
 schemas: ## Register Avro schemas only (config/avro/*.avsc)

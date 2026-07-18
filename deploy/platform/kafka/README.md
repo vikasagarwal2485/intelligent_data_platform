@@ -177,3 +177,29 @@ partitions/configs, produce/consume test messages, and view registered schemas.
 A NiFi/Kafka producer serializes records with the Avro serializer pointed at the
 registry URL; the schema is resolved by the `<topic>-value` subject. The
 `BACKWARD` compatibility mode (plan section 3) lets schemas evolve safely.
+
+## Message retention & on-demand purge
+
+**Time-based retention (automatic).** Every topic is created with
+`retention.ms = 7 days` and `cleanup.policy = delete` (see `create-topics.sh`), so
+Kafka deletes messages older than 7 days on its own. Change the window and
+re-apply — the Strimzi Topic Operator reconciles it onto the existing topics:
+
+```bash
+RETENTION_DAYS=3 make topics      # e.g. switch to 3-day retention
+```
+
+**On-demand purge (immediate).** To empty the topics *now* without deleting them
+(e.g. before a clean re-run), use `purge-topics.sh` — it truncates every partition
+to the log end via `kafka-delete-records` (offset -1):
+
+```bash
+make kafka-purge                                  # purge all t.* topics
+make kafka-purge TOPIC=t.tenant_a.recharge        # purge a single topic
+# or directly:
+bash deploy/platform/kafka/purge-topics.sh idp-platform [topic]
+```
+
+The topics, partitions, configs and registered schemas are preserved — only the
+messages are removed. (This is the message-level counterpart to `make minio-reset`,
+which clears the lake buckets.)

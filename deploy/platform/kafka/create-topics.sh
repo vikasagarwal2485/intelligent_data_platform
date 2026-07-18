@@ -11,6 +11,13 @@ CLUSTER="idp-kafka"
 # Tenants (keep in sync with config/platform.yaml).
 TENANTS=("tenant_a" "tenant_b")
 
+# Message retention: Kafka deletes messages older than this automatically
+# (cleanup.policy=delete). Default 7 days; override with RETENTION_DAYS=N.
+# Re-run `make topics` after changing it — the Topic Operator reconciles the
+# new retention onto the existing topics.
+RETENTION_DAYS="${RETENTION_DAYS:-7}"
+RETENTION_MS=$(( RETENTION_DAYS * 24 * 60 * 60 * 1000 ))
+
 # Topic suffixes per the plan: entity (batch/CDC) + event (streaming) + DLQ.
 SUFFIXES=(
   parties accounts agreements products
@@ -46,7 +53,7 @@ spec:
   partitions: ${partitions}
   replicas: 1
   config:
-    retention.ms: "604800000"   # 7 days (plan section 2)
+    retention.ms: "${RETENTION_MS}"   # ${RETENTION_DAYS} days (plan section 2)
     cleanup.policy: delete
 EOF
   done
