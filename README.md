@@ -34,6 +34,7 @@ production **AWS EKS**).
    - [4.3 Gold pipeline](#43-gold-pipeline-batch-vs-stream)
    - [4.4 ML algorithms](#44-ml-algorithms)
    - [4.5 Serving layer](#45-serving-layer)
+   - [4.6 MCP analytics server](#46-mcp-analytics-server)
 
 ---
 
@@ -497,6 +498,82 @@ curl -s -X POST localhost:8000/credit-limit -H 'content-type: application/json' 
   -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"recharge_avg_amount":40,"account_tenure_days":500,"recharge_success_rate":0.95}}'
 ```
 Inspect the TimescaleDB serving tables: `make timescale-psql`.
+
+### 4.6 MCP analytics server
+
+A [Model Context Protocol](https://modelcontextprotocol.io) server exposes the
+curated lake to AI agents (e.g. Claude Desktop) as **five read-only, tenant-scoped
+analytics tools** over the Silver tables. Every tool takes a `tenant_id`, reads
+only that tenant's data, and returns compact aggregated JSON — never raw PII, never
+cross-tenant (`src/idp/mcp/`, ADR-0021).
+
+| Tool | Answers |
+|---|---|
+| `analyze_subscribers_tool` | subscription vs device counts, business-line mix, roamer/non-roamer split |
+| `analyze_usage_events_tool` | event counts, revenue & duration per event type, usage over time |
+| `analyze_recharges_tool` | total/avg/count top-ups, splits by recharge type / payment method / time |
+| `analyze_recharge_anomalies_tool` | amount & volume spikes, subscriber-day anomalies, weekly/monthly views |
+| `analyze_fee_charges_tool` | product fee revenue, revenue distribution, charge-type & product/category/month/quarter breakdowns |
+
+**Prerequisites.** The `mcp` package (installed by `make install`) and **Silver
+data in the lake** the server reads. The lake is chosen by config: a local
+directory (`data/lake/silver`) by default, or MinIO/S3 when `IDP_S3_ENDPOINT` is
+set. Populate the local lake with `make run` (or, in-cluster, `make silver`).
+
+**Step 1 — install deps and populate Silver (local):**
+```bash
+make install                 # includes the `mcp` runtime dependency
+make run                     # writes data/lake/silver/ (Bronze/Silver/Gold + models)
+```
+
+**Step 2 — verify the tools return data:**
+```bash
+make mcp-smoke               # runs the pipeline if the lake is empty, then calls two tools
+```
+Expected (abridged):
+```json
+{ "tenant_id": "tenant_a", "subscriber_count": 500,
+  "subscription_count": 351, "device_count": 149,
+  "business_line_mix": {"mobile": 74, "broadband": 71, "...": 0},
+  "roamers": 143, "non_roamers": 357 }
+```
+
+**Step 3 — start the server (stdio):**
+```bash
+make mcp                     # = idp mcp ; a stdio MCP server for a client to launch
+```
+The server speaks MCP over stdio, so it is normally **launched by a client**, not
+used standalone. Three ways to connect:
+
+- **Claude Desktop** — print a ready-made config and paste it in:
+  ```bash
+  make mcp-config            # prints the "mcpServers" block with absolute paths
+  ```
+  Add it to `claude_desktop_config.json` (macOS:
+  `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`) and restart
+  Claude Desktop. The generated command `cd`s into this repo so the local
+  `data/lake/silver` resolves. Then ask Claude, e.g. *"Using idp-analytics, what's
+  the roamer split and top products by fee revenue for tenant_a?"*
+- **MCP Inspector** (interactive UI, needs Node/npx):
+  ```bash
+  .venv/bin/mcp dev src/idp/mcp/server.py
+  ```
+- **Register into Claude Desktop automatically** (equivalent to Step-by-hand):
+  ```bash
+  .venv/bin/mcp install src/idp/mcp/server.py --name idp-analytics
+  ```
+
+**Pointing at MinIO instead of the local dir.** To serve Silver from the cluster's
+MinIO, set the S3 env before launching (also works inside the Claude Desktop
+`env` block); port-forward MinIO first (`make minio-console` forwards the console;
+for the API use `kubectl -n idp-platform port-forward svc/minio 9000:9000`):
+```bash
+IDP_S3_ENDPOINT=http://localhost:9000 IDP_S3_ACCESS_KEY=minioadmin \
+IDP_S3_SECRET_KEY=minioadmin123 IDP_S3_BUCKET_PREFIX=idp make mcp
+```
+
+Make targets: `make mcp` (start), `make mcp-smoke` (verify), `make mcp-config`
+(Claude Desktop config).
 
 ---
 

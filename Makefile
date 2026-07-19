@@ -42,6 +42,32 @@ serve: ## Start the FastAPI scoring service on :8000
 mcp: ## Start the MCP analytics server (stdio): 5 read-only, tenant-scoped Silver tools
 	$(PY) -m idp.cli mcp
 
+.PHONY: mcp-smoke
+mcp-smoke: ## Verify the MCP tools against local Silver (auto-runs the pipeline if the lake is empty)
+	@test -d data/lake/silver/dim_subscriber || (echo ">> Silver lake empty; running pipeline..." && $(PY) -m idp.cli run >/dev/null)
+	@echo ">> analyze_subscribers_tool(tenant_a):"
+	@$(PY) -c "import json,idp.mcp.tools as t; print(json.dumps(t.analyze_subscribers_tool('tenant_a'), indent=2))"
+	@echo ">> analyze_fee_charges_tool(tenant_a):"
+	@$(PY) -c "import json,idp.mcp.tools as t; print(json.dumps(t.analyze_fee_charges_tool('tenant_a'), indent=2)[:800])"
+
+.PHONY: mcp-config
+mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_desktop_config.json)
+	@printf '%s\n' \
+	  '{' \
+	  '  "mcpServers": {' \
+	  '    "idp-analytics": {' \
+	  '      "command": "/bin/sh",' \
+	  '      "args": ["-c", "cd $(CURDIR) && exec $(abspath $(PY)) -m idp.cli mcp"]' \
+	  '    }' \
+	  '  }' \
+	  '}'
+	@echo ""
+	@echo "# Paste the block above into your Claude Desktop config, then restart it:"
+	@echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
+	@echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
+	@echo "# The 'cd $(CURDIR)' makes the local Silver lake (data/lake/silver) resolve."
+	@echo "# Populate it first with 'make run' (or point at MinIO via IDP_S3_* env)."
+
 .PHONY: smoke
 smoke: ## End-to-end smoke test (pipeline + tenant isolation)
 	$(PY) -m idp.cli run --no-persist
