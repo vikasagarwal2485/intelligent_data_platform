@@ -43,17 +43,20 @@ learnable but not perfectly separable.
 
 ### Requirement: REQ-SYN-04 — Product fee charges & catalog enrichment
 The generator SHALL additionally emit a `fee_charges` fact (product/subscription
-fees) with `charge_type` ∈ {`recurring`,`one_time`,`overage`,`discount`} and a
-`category`, referentially tied to a subscriber's products; enrich `products` with
-`category` and `monthly_fee`; and draw `recharge_type` from a realistic mix rather
-than a constant. These additions SHALL be additive (no change to labels, features,
-or the existing entity columns) and deterministic under `(tenant_id, seed)`.
+fees) with `charge_type` ∈ {`recurring`,`one_time`,`overage`,`discount`}, associated
+with a **product only** (a `product_id` FK — name/category live on the product, the
+service on its agreement, so they are NOT denormalized onto the charge); enrich
+`products` with `category` and `monthly_fee`; and draw `recharge_type` from a
+realistic mix rather than a constant. These additions SHALL be additive (no change
+to labels, features, or the existing entity columns) and deterministic under
+`(tenant_id, seed)`.
 
 #### Scenario: SCN-SYN-04.1 — Fee charges are coherent and typed
 - **WHEN** a dataset is generated
-- **THEN** every `fee_charges` row carries a `tenant_id`, a `product_id`/
-  `agreement_id` that exist in the generated products/agreements, an `amount`, and
-  a `charge_type`; recurring charges use the product's `monthly_fee`
+- **THEN** every `fee_charges` row carries a `tenant_id`, a `product_id` that exists
+  in the generated products, an `amount`, and a `charge_type`, and carries no
+  denormalized `service_id`/`product_name`/`category`; recurring charges use the
+  product's `monthly_fee`
 
 #### Scenario: SCN-SYN-04.2 — Non-degenerate recharge types
 - **WHEN** recharges are generated for a sufficiently large dataset

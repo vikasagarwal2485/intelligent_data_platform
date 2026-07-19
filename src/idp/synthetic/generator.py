@@ -272,17 +272,19 @@ def generate(
                 })
 
         # ---- product fee charges ----------------------------------------------
-        # Recurring monthly product fees + occasional one-time/overage/discount
-        # charges. Analytics-only (not fed to the ML models); see ADR-0022.
+        # A fee charge is associated with a PRODUCT only (product_id FK); the
+        # product carries name/category and its agreement carries the service, so
+        # those are NOT denormalized onto the charge (they are re-derived in Silver
+        # by joining products). Recurring monthly fees + occasional one-time/
+        # overage/discount charges. Analytics-only (not fed to the ML models); see
+        # ADR-0022.
         fc_seq = 0
         for prod in sub_products:
             for m in month_starts:
                 fc_seq += 1
                 fee_rows.append({
                     "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
-                    "service_id": msisdn, "agreement_id": agreement_id,
-                    "product_id": prod["id"], "product_name": prod["name"],
-                    "category": prod["category"], "charge_type": "recurring",
+                    "product_id": prod["id"], "charge_type": "recurring",
                     "amount": round(prod["monthly_fee"], 2), "currency": "EUR",
                     "charged_at": _iso(m),
                 })
@@ -291,21 +293,17 @@ def generate(
                     fc_seq += 1
                     fee_rows.append({
                         "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
-                        "service_id": msisdn, "agreement_id": agreement_id,
-                        "product_id": prod["id"], "product_name": prod["name"],
-                        "category": prod["category"], "charge_type": "overage",
+                        "product_id": prod["id"], "charge_type": "overage",
                         "amount": round(float(2 + 18 * ability * aux_rng.random()), 2),
                         "currency": "EUR",
                         "charged_at": _iso(m + timedelta(days=int(aux_rng.integers(1, 27)))),
                     })
-        # one-time device/activation charge for device agreements
+        # one-time device/activation charge (on the subscriber's first product)
         if has_device and month_starts:
             fc_seq += 1
             fee_rows.append({
                 "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
-                "service_id": msisdn, "agreement_id": agreement_id,
-                "product_id": f"{product_id}-0", "product_name": "Device",
-                "category": "device", "charge_type": "one_time",
+                "product_id": f"{product_id}-0", "charge_type": "one_time",
                 "amount": round(float(29 + 170 * aux_rng.random()), 2), "currency": "EUR",
                 "charged_at": _iso(start_date),
             })
@@ -315,9 +313,7 @@ def generate(
             m = month_starts[aux_rng.integers(0, len(month_starts))]
             fee_rows.append({
                 "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
-                "service_id": msisdn, "agreement_id": agreement_id,
-                "product_id": f"{product_id}-0", "product_name": "Loyalty discount",
-                "category": "discount", "charge_type": "discount",
+                "product_id": f"{product_id}-0", "charge_type": "discount",
                 "amount": round(float(-(2 + 8 * aux_rng.random())), 2), "currency": "EUR",
                 "charged_at": _iso(m),
             })

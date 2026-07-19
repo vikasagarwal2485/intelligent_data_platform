@@ -115,20 +115,30 @@ def build_fact_recharge(frames: dict[str, pd.DataFrame], salts: dict[str, str]) 
 
 
 def build_fact_fee_charge(frames: dict[str, pd.DataFrame], salts: dict[str, str]) -> pd.DataFrame:
-    """Product fee-charge fact with tokenized PII and normalized timestamps.
+    """Product fee-charge fact (recurring/one_time/overage/discount).
 
-    Carries the product-fee event stream (recurring/one-time/overage/discount)
-    into Silver so analytics can compute product revenue, distribution and
-    charge-type breakdowns without touching raw identifiers.
+    The raw charge is normalized: it references a PRODUCT only (``product_id``).
+    Silver re-derives ``product_name`` and ``category`` by joining the products
+    table (the product owns those attributes), so downstream analytics can do
+    product/category breakdowns. The charge carries no PII (the service lives on
+    the product's agreement), so no tokenization is needed here.
     """
     fees = frames.get("fee_charges", pd.DataFrame())
     if fees.empty:
         return fees
     fees = fees.copy()
+    fees["product_id"] = fees["product_id"].map(strip_uuid_wrapper)
     fees["charged_at"] = pd.to_datetime(fees["charged_at"], utc=True, errors="coerce")
     fees["amount"] = fees["amount"].fillna(0.0)
     fees = fees.drop_duplicates(subset=["tenant_id", "id"])
-    fees = _tokenize_per_tenant(fees, salts, columns=("service_id",))
+
+    products = frames.get("products", pd.DataFrame())
+    if not products.empty:
+        prod = products.copy()
+        prod["id"] = prod["id"].map(strip_uuid_wrapper)
+        cols = ["tenant_id", "id", "name"] + (["category"] if "category" in prod.columns else [])
+        prod = prod[cols].rename(columns={"id": "product_id", "name": "product_name"})
+        fees = fees.merge(prod, on=["tenant_id", "product_id"], how="left")
     require_tenant_column(fees)
     return fees.reset_index(drop=True)
 

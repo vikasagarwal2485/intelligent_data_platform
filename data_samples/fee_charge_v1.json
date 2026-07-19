@@ -5,8 +5,6 @@
       "attributes": {
         "charged-at": "2026-02-01T00:00:00.000Z",
         "charge-type": ["recurring", "one_time", "overage", "discount"],
-        "category": ["subscription", "addon", "device", "roaming", "discount"],
-        "product-name": "Data 5 GB",
         "charge-amount": {
           "tax-free-amount": {"amount": 19.99, "currency": "EUR"},
           "tax-amounts": []
@@ -16,14 +14,10 @@
             "reference-id": "internal-ref-1234567890",
             "billing-cycle": "2026-02",
             "source": "billing"
-        },
-        "service-id": "595984920447"
+        }
       },
       "relationships": {
         "target": {
-          "data": { "type": "agreements", "id": "UUID(116100030984920447)" }
-        },
-        "product": {
           "data": { "type": "products", "id": "UUID(116100030984920447)" }
         },
         "charge-specification": {
