@@ -114,10 +114,30 @@ def build_fact_recharge(frames: dict[str, pd.DataFrame], salts: dict[str, str]) 
     return rech.reset_index(drop=True)
 
 
+def build_fact_fee_charge(frames: dict[str, pd.DataFrame], salts: dict[str, str]) -> pd.DataFrame:
+    """Product fee-charge fact with tokenized PII and normalized timestamps.
+
+    Carries the product-fee event stream (recurring/one-time/overage/discount)
+    into Silver so analytics can compute product revenue, distribution and
+    charge-type breakdowns without touching raw identifiers.
+    """
+    fees = frames.get("fee_charges", pd.DataFrame())
+    if fees.empty:
+        return fees
+    fees = fees.copy()
+    fees["charged_at"] = pd.to_datetime(fees["charged_at"], utc=True, errors="coerce")
+    fees["amount"] = fees["amount"].fillna(0.0)
+    fees = fees.drop_duplicates(subset=["tenant_id", "id"])
+    fees = _tokenize_per_tenant(fees, salts, columns=("service_id",))
+    require_tenant_column(fees)
+    return fees.reset_index(drop=True)
+
+
 def curate(frames: dict[str, pd.DataFrame], salts: dict[str, str]) -> dict[str, pd.DataFrame]:
     """Build all Silver tables from Bronze frames."""
     return {
         "dim_subscriber": build_subscriber_dim(frames, salts),
         "fact_usage": build_fact_usage(frames, salts),
         "fact_recharge": build_fact_recharge(frames, salts),
+        "fact_fee_charge": build_fact_fee_charge(frames, salts),
     }

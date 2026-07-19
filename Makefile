@@ -38,6 +38,10 @@ run: ## Run the end-to-end batch pipeline (Bronze->Silver->Features->ML->Gold)
 serve: ## Start the FastAPI scoring service on :8000
 	$(PY) -m idp.cli serve
 
+.PHONY: mcp
+mcp: ## Start the MCP analytics server (stdio): 5 read-only, tenant-scoped Silver tools
+	$(PY) -m idp.cli mcp
+
 .PHONY: smoke
 smoke: ## End-to-end smoke test (pipeline + tenant isolation)
 	$(PY) -m idp.cli run --no-persist

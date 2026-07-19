@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "FeeCharge",
+  "namespace": "com.idp",
+  "doc": "Canonical product fee-charge event (recurring/one-time/overage/discount). See ADR-0022.",
+  "fields": [
+    {"name": "tenant_id", "type": "string"},
+    {"name": "id", "type": "string"},
+    {"name": "service_id", "type": "string", "doc": "MSISDN"},
+    {"name": "agreement_id", "type": ["null", "string"], "default": null},
+    {"name": "product_id", "type": ["null", "string"], "default": null},
+    {"name": "product_name", "type": ["null", "string"], "default": null},
+    {"name": "category", "type": "string", "doc": "subscription/addon/device/roaming/discount"},
+    {"name": "charge_type", "type": {"type": "enum", "name": "ChargeType", "symbols": ["recurring", "one_time", "overage", "discount"]}},
+    {"name": "amount", "type": "double"},
+    {"name": "currency", "type": "string", "default": "EUR"},
+    {"name": "charged_at", "type": "long", "logicalType": "timestamp-millis"}
+  ]
+}

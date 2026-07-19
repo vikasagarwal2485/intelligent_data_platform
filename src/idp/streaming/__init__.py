@@ -13,5 +13,6 @@ TABLE_TO_SUFFIX = {
     "voice_events": "usage.voice",
     "data_events": "usage.data",
     "recharge_events": "recharge",
+    "fee_charges": "fees",
 }
 SUFFIX_TO_TABLE = {v: k for k, v in TABLE_TO_SUFFIX.items()}

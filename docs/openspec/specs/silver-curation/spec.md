@@ -12,10 +12,10 @@ The system SHALL produce three canonical tables from Bronze: `dim_subscriber`
 (one row per subscriber joining party/account/agreement/products), `fact_usage`
 (unified voice+data), and `fact_recharge`, each carrying `tenant_id`.
 
-#### Scenario: SCN-SLV-01.1 — Build all three tables
+#### Scenario: SCN-SLV-01.1 — Build the core tables
 - **WHEN** `to_silver` runs on valid Bronze
-- **THEN** it returns exactly `dim_subscriber`, `fact_usage`, `fact_recharge`,
-  each non-empty and tenant-stamped
+- **THEN** it returns `dim_subscriber`, `fact_usage`, `fact_recharge` (plus
+  `fact_fee_charge`, REQ-SLV-05), each non-empty and tenant-stamped
 
 #### Scenario: SCN-SLV-01.2 — Subscriber grain
 - **WHEN** `dim_subscriber` is built
@@ -52,3 +52,13 @@ entity tables are missing.
 #### Scenario: SCN-SLV-04.1 — Missing Bronze entities
 - **WHEN** `to_silver` runs but `parties`/`accounts`/`agreements` are absent/empty
 - **THEN** it raises a clear error instructing to populate Bronze first
+
+### Requirement: REQ-SLV-05 — Fee-charge fact
+The Silver stage SHALL build `fact_fee_charge` from the `fee_charges` Bronze
+entity — normalized `charged_at` (UTC), tenant-stamped, `service_id` tokenized per
+tenant — so product-fee analytics never see raw identifiers.
+
+#### Scenario: SCN-SLV-05.1 — Fee fact built and tokenized
+- **WHEN** Silver is built for a tenant with `fee_charges` in Bronze
+- **THEN** `fact_fee_charge` is produced with a tokenized `service_id` (no raw
+  MSISDN), a UTC `charged_at`, and its `amount`/`charge_type`/`category` columns

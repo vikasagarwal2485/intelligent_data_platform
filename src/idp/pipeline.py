@@ -31,9 +31,9 @@ from idp.synthetic.generator import SyntheticDataset, generate_for_tenants
 
 ENTITIES = (
     "parties", "accounts", "agreements", "products",
-    "voice_events", "data_events", "recharge_events",
+    "voice_events", "data_events", "recharge_events", "fee_charges",
 )
-SILVER_TABLES = ("dim_subscriber", "fact_usage", "fact_recharge")
+SILVER_TABLES = ("dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge")
 
 
 def _salts(cfg: PlatformConfig) -> dict[str, str]:
