@@ -43,7 +43,7 @@ learnable but not perfectly separable.
 
 ### Requirement: REQ-SYN-04 — Product fee charges & catalog enrichment
 The generator SHALL additionally emit a `fee_charges` fact (product/subscription
-fees) with `charge_type` ∈ {`recurring`,`one-time`,`overage`,`discount`} and a
+fees) with `charge_type` ∈ {`recurring`,`one_time`,`overage`,`discount`} and a
 `category`, referentially tied to a subscriber's products; enrich `products` with
 `category` and `monthly_fee`; and draw `recharge_type` from a realistic mix rather
 than a constant. These additions SHALL be additive (no change to labels, features,

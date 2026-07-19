@@ -27,11 +27,13 @@ import numpy as np
 import pandas as pd
 
 FRAUD_TYPES = ("sim_box", "card_fraud", "roaming_fraud")
-PAYMENT_METHODS = ("credit-card", "debit-card", "bank-transfer", "voucher")
+# The categorical values below double as Avro enum symbols (config/avro/*.avsc),
+# so they must be Avro-enum-safe: letters/digits/underscore only, no hyphens.
+PAYMENT_METHODS = ("credit_card", "cash", "voucher")
 NETWORK_TECH = ("3G", "4G", "4G+", "5G")
 ACCOUNT_TYPES = ("salaried", "self-employed", "student", "retired", "company", "normal")
 SEGMENTS = ("B2C", "B2B", "B2B2C")
-BUSINESS_LINES = ("mobile", "broadband", "iptv", "iot")
+BUSINESS_LINES = ("mobile", "broadband", "iptv", "fixed_line_telephony", "iot", "energy", "insurance")
 
 # Product price book: name -> (category, monthly_fee EUR). Categories mirror the
 # TMF product categories used by fee charges. Fees drive product-fee revenue.
@@ -43,10 +45,10 @@ PRODUCT_CATALOG = {
     "Roaming Pass": ("roaming", 12.99),
 }
 PRODUCT_NAMES = tuple(PRODUCT_CATALOG)
-# Recharge channels (weighted). Was a constant "manual", which made the
-# recharge-type split degenerate for analytics.
-RECHARGE_TYPES = ("manual", "auto-renewal", "promo", "voucher-topup")
-RECHARGE_TYPE_WEIGHTS = (0.55, 0.25, 0.10, 0.10)
+# Recharge channels (weighted). Avro-enum-safe symbols (config/avro/recharge_event.avsc);
+# was a constant "manual", which made the recharge-type split degenerate for analytics.
+RECHARGE_TYPES = ("voucher", "topup")
+RECHARGE_TYPE_WEIGHTS = (0.4, 0.6)
 
 
 @dataclass
@@ -303,7 +305,7 @@ def generate(
                 "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
                 "service_id": msisdn, "agreement_id": agreement_id,
                 "product_id": f"{product_id}-0", "product_name": "Device",
-                "category": "device", "charge_type": "one-time",
+                "category": "device", "charge_type": "one_time",
                 "amount": round(float(29 + 170 * aux_rng.random()), 2), "currency": "EUR",
                 "charged_at": _iso(start_date),
             })

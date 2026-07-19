@@ -39,7 +39,7 @@ def recharge_aggregates(fact_recharge: pd.DataFrame, windows=(30, 90)) -> pd.Dat
     last = grp_all["created_at"].max()
     out["days_since_last_recharge"] = (ref - last).dt.days
     out["share_credit_card"] = (
-        df[df["payment_method"] == "credit-card"].groupby(KEY).size() / grp_all.size()
+        df[df["payment_method"] == "credit_card"].groupby(KEY).size() / grp_all.size()
     )
     for w in windows:
         cutoff = ref - pd.Timedelta(days=w)

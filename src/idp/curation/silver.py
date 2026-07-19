@@ -72,7 +72,7 @@ def build_subscriber_dim(frames: dict[str, pd.DataFrame], salts: dict[str, str])
 
     keep = [
         "tenant_id", "msisdn", "imsi", "party_id", "account_id", "agreement_id",
-        "account_type", "account_segment", "business_line", "account_tenure_days",
+        "account_type", "account_segment", "agreement_type", "business_line", "account_tenure_days",
         "date_of_birth", "language", "is_company", "consent_marketing", "consent_analytics",
         "num_products", "has_device_agreement",
     ]

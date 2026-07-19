@@ -31,7 +31,7 @@ def test_fee_charges_are_coherent_and_typed():
     prod_ids = set(ds.products["id"]) | {f"{a.replace('-agr-', '-prod-')}-0" for a in ds.agreements["id"]}
     assert set(fees["product_id"]) <= prod_ids
     # recurring charges use the product monthly_fee
-    assert set(fees["charge_type"]) <= {"recurring", "one-time", "overage", "discount"}
+    assert set(fees["charge_type"]) <= {"recurring", "one_time", "overage", "discount"}
     assert (fees.loc[fees["charge_type"] == "discount", "amount"] < 0).all()
 
 
@@ -134,7 +134,7 @@ def test_fee_charges_tool(patched):
     assert out["revenue_by_product"]
     # shares sum to ~1.0
     assert abs(sum(out["revenue_share_by_product"].values()) - 1.0) < 0.01
-    assert set(out["by_charge_type"]["revenue"]) <= {"recurring", "one-time", "overage", "discount"}
+    assert set(out["by_charge_type"]["revenue"]) <= {"recurring", "one_time", "overage", "discount"}
 
 
 # --------------------------------------------------------------------------- #
