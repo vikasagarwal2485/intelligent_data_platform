@@ -173,6 +173,14 @@ timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving 
 	kubectl -n idp-platform exec -it deploy/timescaledb -- psql -U postgres -d idp \
 	  -c "\dt gold.*" -c "SELECT count(*) FROM gold.credit_scores;"
 
+.PHONY: timescale-verify
+timescale-verify: ## Verify the publish stage: list every gold.* serving table with its row count + a sample row
+	kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -d idp -P pager=off \
+	  -c "\dt+ gold.*" \
+	  -c "SELECT schemaname, relname AS table, n_live_tup AS approx_rows FROM pg_stat_user_tables WHERE schemaname='gold' ORDER BY relname;" \
+	  -c "SELECT tenant_id, count(*) AS rows FROM gold.credit_features GROUP BY tenant_id ORDER BY tenant_id;" \
+	  -c "SELECT * FROM gold.credit_features LIMIT 3;"
+
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire
 airflow-wire: ## Build DAG image into minikube + install Airflow (external metadata DB) + RBAC
