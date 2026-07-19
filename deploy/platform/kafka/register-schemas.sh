@@ -17,6 +17,7 @@ MAP=(
   "usage.voice:usage_event.avsc"
   "usage.data:usage_event.avsc"
   "recharge:recharge_event.avsc"
+  "fees:fee_charge.avsc"
 )
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }

@@ -42,6 +42,7 @@ def bronze_frames(multi_tenant_dataset):
         "parties": ds.parties, "accounts": ds.accounts, "agreements": ds.agreements,
         "products": ds.products, "voice_events": ds.voice_events,
         "data_events": ds.data_events, "recharge_events": ds.recharge_events,
+        "fee_charges": ds.fee_charges,
     }
 
 

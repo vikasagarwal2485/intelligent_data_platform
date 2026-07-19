@@ -21,7 +21,7 @@ def test_silver_stage_from_bronze_frames(bronze_frames):
     """Silver stage builds canonical tables from Bronze frames."""
     cfg = load_config()
     silver = to_silver(cfg, bronze=bronze_frames, persist=False)
-    assert set(silver) == {"dim_subscriber", "fact_usage", "fact_recharge"}
+    assert set(silver) == {"dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge"}
     assert len(silver["dim_subscriber"]) > 0
     assert set(silver["dim_subscriber"]["tenant_id"]) == {"tenant_a", "tenant_b"}
 

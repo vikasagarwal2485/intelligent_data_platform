@@ -21,7 +21,7 @@ RETENTION_MS=$(( RETENTION_DAYS * 24 * 60 * 60 * 1000 ))
 # Topic suffixes per the plan: entity (batch/CDC) + event (streaming) + DLQ.
 SUFFIXES=(
   parties accounts agreements products
-  usage.voice usage.data recharge dlq
+  usage.voice usage.data recharge fees dlq
 )
 
 if ! kubectl cluster-info >/dev/null 2>&1; then

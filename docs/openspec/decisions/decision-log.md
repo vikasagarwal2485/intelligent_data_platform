@@ -188,3 +188,32 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** Bring-up gains a step (`… platform-base → platform-services →
   app-deploy → …`). Each team applies and rolls back its own kustomization. The
   patch lives in app *overlays* (not the app base) so local vs AWS stay distinct.
+
+### ADR-0021 — MCP analytics tools read Silver via pandas, stdio server
+- **Status:** Accepted (2026-07-19)
+- **Context:** REQ-MCP-01…06 expose the lake to AI agents as five read-only,
+  tenant-scoped analytics tools. Two questions: what the tools read from, and how
+  they are served.
+- **Decision:** Each tool is a pure function that reads the tenant's **Silver**
+  tables (`dim_subscriber`/`fact_usage`/`fact_recharge`/`fact_fee_charge`) with the
+  existing `common.storage` pandas helpers and returns a JSON-able aggregate — no
+  raw PII, no cross-tenant reads. They are registered on an **MCP stdio server**
+  (`idp mcp`), the conventional surface for `mcp` clients / Claude Desktop. An
+  in-cluster streamable-HTTP Deployment is a later follow-up.
+- **Consequences:** Tools are unit-testable without a cluster (same pandas path as
+  the rest of the prototype); Trino is not a runtime dependency of the analytics
+  surface. Very large tenants would eventually want push-down SQL (deferred).
+
+### ADR-0022 — Synthetic fee-charge data is additive to the generator
+- **Status:** Accepted (2026-07-19)
+- **Context:** The fee-charge tool (REQ-MCP-05) has no source data — `products`
+  carried no price and there was no fee-charge event stream. `recharge_type` was
+  also a constant, making its split degenerate.
+- **Decision:** Extend the deterministic generator **additively**: a new
+  `fee_charges` fact (recurring/one-time/overage/discount), a `category`+
+  `monthly_fee` price book on `products`, and a weighted `recharge_type` draw. No
+  change to labels, features, or the ML models — fee charges are analytics-only in
+  this phase.
+- **Consequences:** Existing tables/columns and tests are unaffected (additive
+  only). Fee charges are available to Silver/MCP but intentionally **not** fed to
+  the credit/fraud models yet (a possible later feature-engineering change).

@@ -19,7 +19,7 @@ from idp.synthetic.generator import SyntheticDataset
 
 ENTITIES = (
     "parties", "accounts", "agreements", "products",
-    "voice_events", "data_events", "recharge_events",
+    "voice_events", "data_events", "recharge_events", "fee_charges",
 )
 
 

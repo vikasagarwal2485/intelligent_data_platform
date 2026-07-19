@@ -32,7 +32,21 @@ NETWORK_TECH = ("3G", "4G", "4G+", "5G")
 ACCOUNT_TYPES = ("salaried", "self-employed", "student", "retired", "company", "normal")
 SEGMENTS = ("B2C", "B2B", "B2B2C")
 BUSINESS_LINES = ("mobile", "broadband", "iptv", "iot")
-PRODUCT_NAMES = ("Data 1 GB", "Data 5 GB", "Voice 100", "Unlimited Social", "Roaming Pass")
+
+# Product price book: name -> (category, monthly_fee EUR). Categories mirror the
+# TMF product categories used by fee charges. Fees drive product-fee revenue.
+PRODUCT_CATALOG = {
+    "Data 1 GB": ("addon", 9.99),
+    "Data 5 GB": ("addon", 19.99),
+    "Voice 100": ("subscription", 14.99),
+    "Unlimited Social": ("addon", 7.99),
+    "Roaming Pass": ("roaming", 12.99),
+}
+PRODUCT_NAMES = tuple(PRODUCT_CATALOG)
+# Recharge channels (weighted). Was a constant "manual", which made the
+# recharge-type split degenerate for analytics.
+RECHARGE_TYPES = ("manual", "auto-renewal", "promo", "voucher-topup")
+RECHARGE_TYPE_WEIGHTS = (0.55, 0.25, 0.10, 0.10)
 
 
 @dataclass
@@ -46,6 +60,7 @@ class SyntheticDataset:
     voice_events: pd.DataFrame
     data_events: pd.DataFrame
     recharge_events: pd.DataFrame
+    fee_charges: pd.DataFrame
     labels: pd.DataFrame
 
     def tables(self) -> dict[str, pd.DataFrame]:
@@ -57,6 +72,7 @@ class SyntheticDataset:
             "voice_events": self.voice_events,
             "data_events": self.data_events,
             "recharge_events": self.recharge_events,
+            "fee_charges": self.fee_charges,
         }
 
 
@@ -78,11 +94,25 @@ def generate(
     # Deterministic per-tenant seed (builtin hash() is randomized per process).
     digest = hashlib.sha256(f"{tenant_id}:{seed}".encode()).hexdigest()
     rng = np.random.default_rng(int(digest[:8], 16))
+    # Separate stream for the additive analytics fields (recharge_type + fee
+    # charges) so the main `rng` sequence — which drives behaviour and labels —
+    # stays byte-identical to before these fields existed (ADR-0022).
+    aux_rng = np.random.default_rng(int(digest[8:16], 16))
     if start_date is None:
         start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
     parties, accounts, agreements, products = [], [], [], []
     voice_rows, data_rows, recharge_rows, label_rows = [], [], [], []
+    fee_rows: list[dict] = []
+
+    # Month-start timestamps within the generation window (for recurring fees).
+    month_starts: list[datetime] = []
+    _m = start_date.replace(day=1)
+    _end = start_date + timedelta(days=days)
+    while _m < _end:
+        if _m >= start_date:
+            month_starts.append(_m)
+        _m = (_m.replace(day=28) + timedelta(days=7)).replace(day=1)
 
     is_fraud_all = rng.random(subscribers) < fraud_rate
     fraud_type_idx = rng.integers(0, len(FRAUD_TYPES), subscribers)
@@ -136,12 +166,18 @@ def generate(
             "valid_from": _iso(acct_valid_from), "msisdn": msisdn, "imsi": imsi,
             "account_id": account_id,
         })
+        sub_products: list[dict] = []
         for p in range(num_products):
-            products.append({
+            name = PRODUCT_NAMES[rng.integers(0, len(PRODUCT_NAMES))]
+            category, monthly_fee = PRODUCT_CATALOG[name]
+            prod = {
                 "tenant_id": tenant_id, "id": f"{product_id}-{p}",
-                "product_type": "addon", "name": PRODUCT_NAMES[rng.integers(0, len(PRODUCT_NAMES))],
+                "product_type": "addon", "name": name, "category": category,
+                "monthly_fee": monthly_fee,
                 "lifecycle_status": "active", "agreement_id": agreement_id,
-            })
+            }
+            products.append(prod)
+            sub_products.append(prod)
 
         # ---- behaviour profiles ------------------------------------------------
         # base daily rates
@@ -150,7 +186,12 @@ def generate(
         # frequent recharges -> success-rate / avg-amount are well estimated
         recharge_prob = 0.40 + 0.30 * ability  # chance of recharge on a given day
         recharge_mean = 5 + 45 * ability
-        roaming_prob = 0.02
+        # Roaming is a per-subscriber trait (drawn on the aux stream so it does not
+        # perturb the main rng): most subscribers never roam, ~25% do. Without this
+        # a flat per-event probability makes *every* subscriber a roamer over a long
+        # window, collapsing the roamer/non-roamer split. Fraud overrides below.
+        is_roamer = bool(aux_rng.random() < 0.25)
+        roaming_prob = 0.08 if is_roamer else 0.0
         originating_ratio = 0.55
         # wide failure spread so recharge_success_rate is a strong credit signal
         fail_prob = 0.02 + 0.45 * (1 - ability)
@@ -215,6 +256,9 @@ def generate(
                 if not failed:
                     n_recharge_ok += 1
                     total_recharge += amount
+                recharge_type = RECHARGE_TYPES[
+                    aux_rng.choice(len(RECHARGE_TYPES), p=RECHARGE_TYPE_WEIGHTS)
+                ]
                 recharge_rows.append({
                     "tenant_id": tenant_id, "id": f"{agreement_id}-r-{d}",
                     "service_id": msisdn, "agreement_id": agreement_id,
@@ -222,8 +266,59 @@ def generate(
                     "payment_method": PAYMENT_METHODS[rng.integers(0, len(PAYMENT_METHODS))],
                     "status": "failed" if failed else "successful",
                     "failure_reason_code": "insufficient-funds" if failed else None,
-                    "source": "web", "recharge_type": "manual",
+                    "source": "web", "recharge_type": recharge_type,
                 })
+
+        # ---- product fee charges ----------------------------------------------
+        # Recurring monthly product fees + occasional one-time/overage/discount
+        # charges. Analytics-only (not fed to the ML models); see ADR-0022.
+        fc_seq = 0
+        for prod in sub_products:
+            for m in month_starts:
+                fc_seq += 1
+                fee_rows.append({
+                    "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
+                    "service_id": msisdn, "agreement_id": agreement_id,
+                    "product_id": prod["id"], "product_name": prod["name"],
+                    "category": prod["category"], "charge_type": "recurring",
+                    "amount": round(prod["monthly_fee"], 2), "currency": "EUR",
+                    "charged_at": _iso(m),
+                })
+                # occasional data/roaming overage on top of the plan
+                if aux_rng.random() < 0.15:
+                    fc_seq += 1
+                    fee_rows.append({
+                        "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
+                        "service_id": msisdn, "agreement_id": agreement_id,
+                        "product_id": prod["id"], "product_name": prod["name"],
+                        "category": prod["category"], "charge_type": "overage",
+                        "amount": round(float(2 + 18 * ability * aux_rng.random()), 2),
+                        "currency": "EUR",
+                        "charged_at": _iso(m + timedelta(days=int(aux_rng.integers(1, 27)))),
+                    })
+        # one-time device/activation charge for device agreements
+        if has_device and month_starts:
+            fc_seq += 1
+            fee_rows.append({
+                "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
+                "service_id": msisdn, "agreement_id": agreement_id,
+                "product_id": f"{product_id}-0", "product_name": "Device",
+                "category": "device", "charge_type": "one-time",
+                "amount": round(float(29 + 170 * aux_rng.random()), 2), "currency": "EUR",
+                "charged_at": _iso(start_date),
+            })
+        # small fraction get a loyalty discount (negative amount) on a random month
+        if month_starts and aux_rng.random() < 0.20:
+            fc_seq += 1
+            m = month_starts[aux_rng.integers(0, len(month_starts))]
+            fee_rows.append({
+                "tenant_id": tenant_id, "id": f"{agreement_id}-fc-{fc_seq}",
+                "service_id": msisdn, "agreement_id": agreement_id,
+                "product_id": f"{product_id}-0", "product_name": "Loyalty discount",
+                "category": "discount", "charge_type": "discount",
+                "amount": round(float(-(2 + 8 * aux_rng.random())), 2), "currency": "EUR",
+                "charged_at": _iso(m),
+            })
 
         # ---- credit label -----------------------------------------------------
         # Default risk is a mid-range function of behaviour so realized labels
@@ -268,6 +363,7 @@ def generate(
         voice_events=pd.DataFrame(voice_rows),
         data_events=pd.DataFrame(data_rows),
         recharge_events=pd.DataFrame(recharge_rows),
+        fee_charges=pd.DataFrame(fee_rows),
         labels=pd.DataFrame(label_rows),
     )
 
@@ -285,5 +381,6 @@ def generate_for_tenants(
         voice_events=pd.concat([p.voice_events for p in parts], ignore_index=True),
         data_events=pd.concat([p.data_events for p in parts], ignore_index=True),
         recharge_events=pd.concat([p.recharge_events for p in parts], ignore_index=True),
+        fee_charges=pd.concat([p.fee_charges for p in parts], ignore_index=True),
         labels=pd.concat([p.labels for p in parts], ignore_index=True),
     )

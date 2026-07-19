@@ -10,6 +10,7 @@ Usage (separated medallion stages):
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
     idp serve      # start the FastAPI scoring service
+    idp mcp        # start the MCP analytics server (stdio): 5 Silver analytics tools
 """
 from __future__ import annotations
 
@@ -143,6 +144,13 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     uvicorn.run("idp.serving.api:app", host=args.host, port=args.port, reload=False)
 
 
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    """Start the MCP analytics server (stdio): five read-only, tenant-scoped tools."""
+    from idp.mcp.server import main as mcp_main
+
+    mcp_main(config_path=args.config)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="idp", description="Intelligent Data Platform CLI")
     parser.add_argument("--config", default=None, help="Path to platform.yaml")
@@ -173,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--host", default="0.0.0.0")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(func=_cmd_serve)
+
+    sub.add_parser("mcp", help="Start the MCP analytics server (stdio): 5 Silver analytics tools").set_defaults(func=_cmd_mcp)
 
     args = parser.parse_args(argv)
     args.func(args)
