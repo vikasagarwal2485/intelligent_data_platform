@@ -65,6 +65,7 @@ Capability codes (`<CAP>`):
 | `BRZ` | bronze-ingestion | `STR` | streaming-kafka |
 | `SLV` | silver-curation | `PLT` | platform-deployment |
 | `GLD` | gold-features | `ORC` | orchestration |
+| `MCP` | mcp-analytics | | |
 
 Each `changes/phase-N/proposal.md` **What Changes** item cites the `REQ-*` id(s)
 it implements, so every implementation task traces back to a spec requirement and

@@ -17,6 +17,7 @@ change under `changes/`. Do not start a phase until the previous one's
 | 8 | [`phase-8-platform`](changes/phase-8-platform/proposal.md) | K8s deployment (minikube/EKS), Helm services, Kafka cluster, namespaces, on-demand + orchestrated stages | `platform-deployment`, `orchestration` |
 | 9 | [`phase-9-deploy-restructure`](changes/phase-9-deploy-restructure/proposal.md) | Reorganize `deploy/` into `platform/` (infra) and `app/` (workloads) for team ownership; pure move-and-rewire | `platform-deployment`, `orchestration` |
 | 10 | [`phase-10-app-overlays`](changes/phase-10-app-overlays/proposal.md) | Move the scoring-api out of the platform overlays into its own `app/overlays/{local,aws}`; add `make app-deploy` | `platform-deployment` |
+| 11 | [`phase-11-mcp-analytics`](changes/phase-11-mcp-analytics/proposal.md) | Five read-only, tenant-scoped MCP analytics tools over Silver (subscribers, usage, recharges, recharge anomalies, fee charges) + synthetic fee-charge data | `mcp-analytics`, `synthetic-data`, `silver-curation` |
 
 **Ordering rationale:** phases 0–6 build the runnable, testable core in pure
 Python (no cluster). Phase 7 attaches Kafka ingestion. Phase 8 deploys and
