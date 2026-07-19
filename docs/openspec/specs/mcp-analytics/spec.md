@@ -86,7 +86,7 @@ pairs), and (d) **monthly/weekly aggregate views** of recharge amount and volume
 The system SHALL provide `analyze_fee_charges_tool(tenant_id, ...)` that reads
 `fact_fee_charge` and returns: (a) **product fee revenue** (sum of charge amounts),
 (b) **product revenue distribution** (revenue share per product), (c) **charge-type
-analysis** (revenue and count per `charge_type`, e.g. recurring/one-time/overage/
+analysis** (revenue and count per `charge_type`, e.g. recurring/one_time/overage/
 discount), and (d) breakdowns by **product / category / month / quarter**.
 
 #### Scenario: SCN-MCP-05.1 — Revenue distribution and charge types

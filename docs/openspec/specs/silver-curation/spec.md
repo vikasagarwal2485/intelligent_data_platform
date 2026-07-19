@@ -55,10 +55,12 @@ entity tables are missing.
 
 ### Requirement: REQ-SLV-05 — Fee-charge fact
 The Silver stage SHALL build `fact_fee_charge` from the `fee_charges` Bronze
-entity — normalized `charged_at` (UTC), tenant-stamped, `service_id` tokenized per
-tenant — so product-fee analytics never see raw identifiers.
+entity — normalized `charged_at` (UTC), tenant-stamped — and SHALL re-derive
+`product_name` and `category` by joining the `products` table (the product owns
+those attributes). The charge references a product only and carries no PII.
 
-#### Scenario: SCN-SLV-05.1 — Fee fact built and tokenized
+#### Scenario: SCN-SLV-05.1 — Fee fact built and enriched from products
 - **WHEN** Silver is built for a tenant with `fee_charges` in Bronze
-- **THEN** `fact_fee_charge` is produced with a tokenized `service_id` (no raw
-  MSISDN), a UTC `charged_at`, and its `amount`/`charge_type`/`category` columns
+- **THEN** `fact_fee_charge` is produced with a UTC `charged_at`, its `product_id`/
+  `amount`/`charge_type`, and `product_name`/`category` joined from `products`, and
+  it contains no raw identifier (no `service_id`/MSISDN)

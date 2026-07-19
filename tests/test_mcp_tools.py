@@ -20,18 +20,16 @@ SALTS = {"tenant_a": "salt-a", "tenant_b": "salt-b"}
 # --------------------------------------------------------------------------- #
 # REQ-SYN-04 — synthetic fee charges + catalog/recharge enrichment            #
 # --------------------------------------------------------------------------- #
-def test_fee_charges_are_coherent_and_typed():
+def test_fee_charges_are_normalized_and_typed():
     ds = generate("tenant_a", subscribers=60, days=40, seed=7)
     fees = ds.fee_charges
     assert not fees.empty
-    assert {"tenant_id", "service_id", "product_id", "agreement_id", "amount",
-            "charge_type", "category", "charged_at"} <= set(fees.columns)
-    # referential: product_id/agreement_id resolve to generated rows
-    assert set(fees["agreement_id"]) <= set(ds.agreements["id"])
-    prod_ids = set(ds.products["id"]) | {f"{a.replace('-agr-', '-prod-')}-0" for a in ds.agreements["id"]}
-    assert set(fees["product_id"]) <= prod_ids
-    # recurring charges use the product monthly_fee
-    assert set(fees["charge_type"]) <= {"recurring", "one-time", "overage", "discount"}
+    # Normalized: references a product only; no denormalized name/category/service.
+    assert {"tenant_id", "id", "product_id", "amount", "charge_type", "charged_at"} <= set(fees.columns)
+    assert not ({"service_id", "agreement_id", "product_name", "category"} & set(fees.columns))
+    # referential: every product_id resolves to a generated product
+    assert set(fees["product_id"]) <= set(ds.products["id"])
+    assert set(fees["charge_type"]) <= {"recurring", "one_time", "overage", "discount"}
     assert (fees.loc[fees["charge_type"] == "discount", "amount"] < 0).all()
 
 
@@ -51,14 +49,16 @@ def test_generation_is_deterministic_for_fees():
 # --------------------------------------------------------------------------- #
 # REQ-SLV-05 — fact_fee_charge                                                 #
 # --------------------------------------------------------------------------- #
-def test_fact_fee_charge_built_and_tokenized(bronze_frames):
+def test_fact_fee_charge_enriched_from_products(bronze_frames):
     silver = curate(bronze_frames, SALTS)
     assert "fact_fee_charge" in silver
     fee = silver["fact_fee_charge"]
     assert not fee.empty
-    # service_id tokenized (no raw MSISDN, which starts with '5959')
-    assert fee["service_id"].astype(str).str.startswith("tok_").all()
-    assert not fee["service_id"].astype(str).str.startswith("5959").any()
+    # product_name/category re-derived by joining products; charge carries no PII
+    assert {"product_id", "product_name", "category"} <= set(fee.columns)
+    assert "service_id" not in fee.columns
+    assert fee["product_name"].notna().all()
+    assert fee["category"].notna().all()
 
 
 def test_build_fact_fee_charge_empty_is_safe():
@@ -134,7 +134,7 @@ def test_fee_charges_tool(patched):
     assert out["revenue_by_product"]
     # shares sum to ~1.0
     assert abs(sum(out["revenue_share_by_product"].values()) - 1.0) < 0.01
-    assert set(out["by_charge_type"]["revenue"]) <= {"recurring", "one-time", "overage", "discount"}
+    assert set(out["by_charge_type"]["revenue"]) <= {"recurring", "one_time", "overage", "discount"}
 
 
 # --------------------------------------------------------------------------- #

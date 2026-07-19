@@ -8,7 +8,7 @@
     {"name": "id", "type": "string"},
     {"name": "service_id", "type": "string", "doc": "MSISDN"},
     {"name": "agreement_id", "type": ["null", "string"], "default": null},
-    {"name": "event_type", "type": {"type": "enum", "name": "EventType", "symbols": ["voice", "data"]}},
+    {"name": "event_type", "type": {"type": "enum", "name": "EventType", "symbols": ["voice", "data", "sms"]}},
     {"name": "started_at", "type": "long", "logicalType": "timestamp-millis"},
     {"name": "created_at", "type": "long", "logicalType": "timestamp-millis"},
     {"name": "gross_amount", "type": "double"},
