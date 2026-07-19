@@ -51,9 +51,17 @@ def build_server(config_path: str | None = None):
     return server
 
 
+# Module-level instance so the standard MCP CLI can find it:
+#   mcp dev src/idp/mcp/server.py      # interactive MCP Inspector (needs Node/npx)
+#   mcp install src/idp/mcp/server.py  # register into Claude Desktop
+# Uses the default config (config/platform.yaml); reads Silver from the lake that
+# config points at (local dir when IDP_S3_ENDPOINT is unset, else MinIO/S3).
+mcp = build_server()
+
+
 def main(config_path: str | None = None) -> None:
     """Start the stdio MCP server (blocking)."""
-    build_server(config_path).run()
+    (build_server(config_path) if config_path else mcp).run()
 
 
 if __name__ == "__main__":
