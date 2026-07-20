@@ -153,6 +153,39 @@ def test_missing_tenant_returns_structured_not_raise(patched):
         assert isinstance(out, dict) and out["tenant_id"] == "tenant_does_not_exist"
 
 
+def test_unreachable_lake_surfaces_error_not_empty(patched, monkeypatch):
+    # A connectivity failure (e.g. MinIO port-forward down) must surface as an
+    # explicit error, not a misleading empty "0" result.
+    def boom(*a, **k):
+        raise ConnectionError("Connection refused")
+    monkeypatch.setattr(mcp_tools.storage, "read_parquet", boom)
+    out = mcp_tools.analyze_subscribers_tool("tenant_a")
+    assert out["tenant_id"] == "tenant_a"
+    assert "Connection refused" in out["error"]
+    assert "source" in out
+    assert "subscriber_count" not in out
+
+
+def test_absent_lake_reports_no_tenants(patched, monkeypatch):
+    # A genuinely empty lake (nothing written yet) reports no tenants, not a crash.
+    def missing(*a, **k):
+        raise FileNotFoundError("no such key")
+    monkeypatch.setattr(mcp_tools.storage, "read_parquet", missing)
+    out = mcp_tools.analyze_subscribers_tool("tenant_a")
+    assert out["available_tenants"] == [] and "error" in out
+
+
+def test_missing_tenant_asks_with_available_list(patched):
+    # No/unknown tenant -> return the real tenants + an instruction to ask the user.
+    out = mcp_tools.analyze_subscribers_tool("")
+    assert set(out["available_tenants"]) == {"tenant_a", "tenant_b"}
+    assert "action_required" in out
+    assert "subscriber_count" not in out
+    # an unknown tenant is handled the same way
+    out2 = mcp_tools.analyze_fee_charges_tool("tenant_zzz")
+    assert set(out2["available_tenants"]) == {"tenant_a", "tenant_b"}
+
+
 def test_registry_has_five_tools():
     assert len(mcp_tools.TOOLS) == 5
 

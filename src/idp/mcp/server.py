@@ -21,31 +21,52 @@ def build_server(config_path: str | None = None):
 
     @server.tool()
     def analyze_subscribers_tool(tenant_id: str) -> dict[str, Any]:
-        """Subscriber base: subscription vs device counts, business-line mix, roamer split."""
+        """Subscriber base: subscription vs device counts, business-line mix, roamer split.
+
+        tenant_id is REQUIRED. If the user has not named a tenant, ASK them which
+        tenant to analyze — do not guess. If the result contains `available_tenants`,
+        present those options to the user and ask which one.
+        """
         return tools.analyze_subscribers_tool(tenant_id, config_path=config_path)
 
     @server.tool()
     def analyze_usage_events_tool(tenant_id: str, granularity: str = "month") -> dict[str, Any]:
-        """Usage events: total count, revenue & duration per event type, usage over time."""
+        """Usage events: total count, revenue & duration per event type, usage over time.
+
+        tenant_id is REQUIRED — if the user hasn't named a tenant, ask which one
+        (use `available_tenants` from the result); never guess.
+        """
         return tools.analyze_usage_events_tool(tenant_id, granularity=granularity, config_path=config_path)
 
     @server.tool()
     def analyze_recharges_tool(tenant_id: str, granularity: str = "month") -> dict[str, Any]:
-        """Recharges: total top-up, count, average, splits by type/payment-method/time."""
+        """Recharges: total top-up, count, average, splits by type/payment-method/time.
+
+        tenant_id is REQUIRED — if the user hasn't named a tenant, ask which one
+        (use `available_tenants` from the result); never guess.
+        """
         return tools.analyze_recharges_tool(tenant_id, granularity=granularity, config_path=config_path)
 
     @server.tool()
     def analyze_recharge_anomalies_tool(
         tenant_id: str, sensitivity: float = 3.0, view: str = "monthly"
     ) -> dict[str, Any]:
-        """Recharge anomalies: amount/volume spikes, subscriber-day outliers, periodic views."""
+        """Recharge anomalies: amount/volume spikes, subscriber-day outliers, periodic views.
+
+        tenant_id is REQUIRED — if the user hasn't named a tenant, ask which one
+        (use `available_tenants` from the result); never guess.
+        """
         return tools.analyze_recharge_anomalies_tool(
             tenant_id, sensitivity=sensitivity, view=view, config_path=config_path
         )
 
     @server.tool()
     def analyze_fee_charges_tool(tenant_id: str, breakdown: str = "month") -> dict[str, Any]:
-        """Fee charges: product fee revenue, revenue distribution, charge-type & period breakdowns."""
+        """Fee charges: product fee revenue, revenue distribution, charge-type & period breakdowns.
+
+        tenant_id is REQUIRED — if the user hasn't named a tenant, ask which one
+        (use `available_tenants` from the result); never guess.
+        """
         return tools.analyze_fee_charges_tool(tenant_id, breakdown=breakdown, config_path=config_path)
 
     return server
