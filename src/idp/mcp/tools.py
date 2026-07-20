@@ -12,6 +12,7 @@ prototype — see ADR-0021.
 """
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 import pandas as pd
@@ -30,17 +31,82 @@ def _cfg(config_path: str | None) -> PlatformConfig:
     return load_config(config_path)
 
 
+class LakeReadError(Exception):
+    """The Silver lake could not be reached/read (vs the table simply being absent).
+
+    Raised for connectivity/permission failures so tools surface a clear error
+    instead of silently returning an empty ``0`` result — e.g. the MinIO
+    port-forward is down, or the endpoint/credentials are wrong.
+    """
+
+
 def _read_silver(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
-    """Read one Silver table and return only ``tenant_id``'s rows (empty if absent)."""
-    base = storage.lake_uri(cfg, "silver")
+    """Read one Silver table, tenant-scoped.
+
+    Returns an empty frame when the table is genuinely absent (nothing written
+    yet). Raises :class:`LakeReadError` when the lake can't be reached at all, so
+    a broken connection is not mistaken for "no data".
+    """
+    uri = f"{storage.lake_uri(cfg, 'silver')}/{table}"
     try:
-        df = storage.read_parquet(f"{base}/{table}", cfg)
-    except Exception:  # noqa: BLE001 - missing/empty table -> empty frame
-        return pd.DataFrame()
+        df = storage.read_parquet(uri, cfg)
+    except FileNotFoundError:
+        return pd.DataFrame()  # table not written yet -> genuinely empty
+    except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
+        raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
     if "tenant_id" not in df.columns:
         return pd.DataFrame()
     df["tenant_id"] = df["tenant_id"].astype(str)
     return df[df["tenant_id"] == str(tenant_id)].copy()
+
+
+def _available_tenants(cfg: PlatformConfig) -> list[str]:
+    """Distinct ``tenant_id`` values present in Silver (empty if nothing ingested)."""
+    uri = f"{storage.lake_uri(cfg, 'silver')}/{_DIM}"
+    try:
+        df = storage.read_parquet(uri, cfg)
+    except FileNotFoundError:
+        return []
+    except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
+        raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
+    if "tenant_id" not in df.columns:
+        return []
+    return sorted(df["tenant_id"].astype(str).unique().tolist())
+
+
+def _lake_guard(fn):
+    """Validate the tenant and turn lake failures into structured results (never raise).
+
+    Keeps the read-only contract and makes the two ambiguous cases explicit:
+
+    * **Unreachable lake** -> ``{"error", "source"}`` (not a misleading empty ``0``).
+    * **Missing/unknown tenant_id** -> the list of tenants that actually exist plus
+      an ``action_required`` telling the client to ASK the user which tenant rather
+      than guess. This is what turns "no tenant given" into a blocking question in
+      the client instead of a silent wrong-tenant query.
+    """
+    @functools.wraps(fn)
+    def wrapper(tenant_id: str = "", **kwargs):
+        cfg = _cfg(kwargs.get("config_path"))
+        try:
+            tenants = _available_tenants(cfg)
+            if not tenants:
+                return {"tenant_id": tenant_id or None,
+                        "error": "no tenant data found in the Silver lake "
+                                 "(nothing ingested yet, or wrong endpoint/lake)",
+                        "source": storage.lake_uri(cfg, "silver"),
+                        "available_tenants": []}
+            if not tenant_id or str(tenant_id) not in tenants:
+                return {"tenant_id": tenant_id or None,
+                        "error": f"tenant_id {tenant_id!r} is missing or unknown",
+                        "available_tenants": tenants,
+                        "action_required": "Ask the user which tenant to analyze; do "
+                                           "not guess. Then call again with that tenant_id."}
+            return fn(tenant_id, **kwargs)
+        except LakeReadError as e:
+            return {"tenant_id": tenant_id or None, "error": str(e),
+                    "source": storage.lake_uri(cfg, "silver")}
+    return wrapper
 
 
 def _period(series: pd.Series, granularity: str) -> pd.Series:
@@ -63,6 +129,7 @@ def _round_map(d: dict, ndigits: int = 2) -> dict:
 # --------------------------------------------------------------------------- #
 # Tool 1 — subscribers                                                         #
 # --------------------------------------------------------------------------- #
+@_lake_guard
 def analyze_subscribers_tool(tenant_id: str, *, config_path: str | None = None) -> dict[str, Any]:
     """Subscriber base analytics for one tenant (REQ-MCP-01):
     subscription vs device counts, business-line mix, roamer vs non-roamer split.
@@ -103,6 +170,7 @@ def analyze_subscribers_tool(tenant_id: str, *, config_path: str | None = None) 
 # --------------------------------------------------------------------------- #
 # Tool 2 — usage events                                                        #
 # --------------------------------------------------------------------------- #
+@_lake_guard
 def analyze_usage_events_tool(
     tenant_id: str, *, granularity: str = "month", config_path: str | None = None
 ) -> dict[str, Any]:
@@ -161,6 +229,7 @@ def analyze_usage_events_tool(
 # --------------------------------------------------------------------------- #
 # Tool 3 — recharges                                                           #
 # --------------------------------------------------------------------------- #
+@_lake_guard
 def analyze_recharges_tool(
     tenant_id: str, *, granularity: str = "month", config_path: str | None = None
 ) -> dict[str, Any]:
@@ -216,6 +285,7 @@ def analyze_recharges_tool(
 # --------------------------------------------------------------------------- #
 # Tool 4 — recharge anomalies                                                  #
 # --------------------------------------------------------------------------- #
+@_lake_guard
 def analyze_recharge_anomalies_tool(
     tenant_id: str,
     *,
@@ -300,6 +370,7 @@ def analyze_recharge_anomalies_tool(
 # --------------------------------------------------------------------------- #
 # Tool 5 — fee charges                                                         #
 # --------------------------------------------------------------------------- #
+@_lake_guard
 def analyze_fee_charges_tool(
     tenant_id: str, *, breakdown: str = "month", config_path: str | None = None
 ) -> dict[str, Any]:
