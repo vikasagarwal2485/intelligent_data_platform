@@ -46,8 +46,14 @@ deploy/
 make mk-up          # start minikube with ingress/metrics addons
 make image          # build idp/scoring-api:dev INTO minikube's docker daemon
 make platform-base  # kubectl apply -k deploy/platform/overlays/local  (namespaces/RBAC/isolation)
-make app-deploy     # kubectl apply -k deploy/app/overlays/local       (scoring-api)
+make app-deploy     # apply -k deploy/app/overlays/local + rollout restart (scoring-api)
 ```
+
+> **Re-deploying after a code change:** rebuild with `make image`, then run
+> `make app-deploy` again. Because the dev image keeps the same tag
+> (`idp/scoring-api:dev`), `kubectl apply` alone sees no change and won't restart
+> the pods; `app-deploy` therefore issues a `kubectl rollout restart` so new pods
+> pick up the freshly built image (and waits for the rollout to complete).
 
 > **Why `make image` first?** The scoring API runs a project image that is not
 > published to any registry. For local dev you build it directly into minikube's
