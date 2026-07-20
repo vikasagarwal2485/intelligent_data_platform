@@ -316,8 +316,12 @@ make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by serv
 > (inference) applies that model to the latest Gold features to produce
 > `credit_scores`/`fraud_scores`. Skip `score` (or `train`) and Gold/TimescaleDB
 > hold **features only** — which is why a `gold.credit_features`-only TimescaleDB
-> means scoring hasn't run. In Airflow this is **two DAGs**: `silver → gold → score
-> → publish` (refresh) and `labels → train` (daily).
+> means scoring hasn't run. In Airflow this is **three dataset-driven DAGs**:
+> `idp_features` (`silver → gold`), `idp_training` (`labels → train`), and
+> `idp_inference` (`score → publish`) — the last is scheduled on the *gold-features*
+> **or** *model* dataset, so it re-runs automatically when either refreshes (a new
+> model auto-re-scores; no manual second pass). `make airflow-trigger` unpauses all
+> three and kicks features + training.
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
@@ -338,7 +342,8 @@ make minio-reset                                # empty the lake buckets for a c
 ```
 
 **Production (orchestrated Silver/Gold):**
-- **Airflow** DAG (`idp_silver_gold`: `silver >> gold >> publish`, hourly) — tasks
+- **Airflow** — three dataset-driven DAGs (`idp_features`: `silver >> gold`;
+  `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) that
   launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; Silver
   and Gold each have an independent execution-engine switch** (`idp_silver_engine`
   / `idp_gold_engine` = `pandas` | `spark`) — same DAG shape either way. The Spark
@@ -487,7 +492,10 @@ latest Gold features to produce `credit_scores`/`fraud_scores`; `to_gold` builds
 features only. Both the model store and labels store live under MinIO `s3://idp-ml`
 (local dir otherwise) via `common/storage.py`, shared across the `train`, `score`
 and `scoring-api` pods (MLflow registry is the longer-term prod target). Orchestrated
-as two DAGs: `silver → gold → score → publish` and daily `labels → train`.
+as **three dataset-driven DAGs**: `idp_features` (`silver → gold`), `idp_training`
+(`labels → train`), and `idp_inference` (`score → publish`) — inference is scheduled
+on the gold-features **or** model dataset, so a new model or fresh features
+auto-re-scores with no manual re-run.
 
 ### 4.5 Serving layer
 

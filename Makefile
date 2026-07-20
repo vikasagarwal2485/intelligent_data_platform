@@ -284,9 +284,13 @@ airflow-ui: ## Port-forward the Airflow web UI to http://localhost:8080 (admin/a
 	kubectl -n idp-platform port-forward svc/airflow-webserver 8080:8080
 
 .PHONY: airflow-trigger
-airflow-trigger: ## Trigger the Silver->Gold DAG now (unpause + trigger) via the scheduler pod
-	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_silver_gold
-	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_silver_gold
+airflow-trigger: ## Unpause the 3 DAGs + trigger features & training (inference is dataset-driven)
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_features
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_inference
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_training
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_features
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_training
+	@echo ">> idp_inference is dataset-driven: it auto-runs when gold features refresh OR a new model lands."
 
 # --- Spark (production Silver / Gold) ---------------------------------------
 .PHONY: spark-configmap

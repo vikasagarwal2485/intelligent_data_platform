@@ -268,3 +268,23 @@ Consequences. Status: `Accepted` unless noted.
   cadence; feature-build and inference are decoupled. Bring-up gains `make labels`
   and `make score`. In production the `labels` task is replaced by the real
   observed-outcomes feed.
+
+### ADR-0026 — Three dataset-driven DAGs (features / inference / training)
+- **Status:** Accepted (2026-07-20) — refines ADR-0025
+- **Context:** Phase 13 folded `score` into the refresh DAG (`silver >> gold >>
+  score >> publish`). Scoring depends on a model produced by the training DAG on a
+  different cadence, so cold start wasted a score run and a newly trained model
+  only reached serving on a manual re-trigger — the three concerns (feature build,
+  inference, training) were coupled to one cadence.
+- **Decision:** Split into three DAGs wired by Airflow **Datasets**:
+  `idp_features` (`silver >> gold`, produces the gold-features dataset),
+  `idp_training` (`labels >> train`, produces the model dataset), and
+  `idp_inference` (`score >> publish`) scheduled on `(GOLD_FEATURES | MODEL)` — OR
+  semantics (Airflow >= 2.9) so it re-runs on a feature refresh OR a new model.
+  Inference always loads the current model from the store, so promotion
+  auto-re-scores with no manual pass. Each stage stays individually runnable
+  (`make` targets unchanged).
+- **Consequences:** Three DAGs instead of two and a dependency on Airflow >= 2.9
+  dataset conditions, but the cold-start double pass is gone, new models propagate
+  to serving automatically, and the three cadences are independent. `publish` stays
+  in the inference DAG (re-pushes features + scores each run — a harmless replace).
