@@ -4,9 +4,11 @@ Usage (separated medallion stages):
     idp produce    # synthetic data -> Kafka topics
     idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
     idp silver     # Bronze (S3) -> Silver (S3)    [Silver stage]
-    idp gold       # Silver (S3) -> Gold (S3)      [Gold stage: features + scores]
+    idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
+    idp score      # Gold features + models -> scores (S3)   [inference]
     idp publish    # Gold (S3) -> TimescaleDB      [serving stage]
-    idp train      # labelled data -> saved models [offline ML]
+    idp labels     # seed the labels/outcomes store (training input)
+    idp train      # Gold features + labels -> saved models  [offline ML]
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
     idp serve      # start the FastAPI scoring service
@@ -110,13 +112,35 @@ def _cmd_silver(args: argparse.Namespace) -> None:
 
 
 def _cmd_gold(args: argparse.Namespace) -> None:
-    """Gold stage: Silver (S3) -> feature tables (+ scores if models exist) (S3)."""
+    """Gold stage: Silver (S3) -> feature tables ONLY (S3). Scoring is `idp score`."""
     from idp.pipeline import to_gold
 
     cfg = load_config(args.config)
     result = to_gold(cfg, persist=True)
     print(json.dumps({"gold_tables": result["gold_tables"], "counts": result["counts"]},
                      indent=2, default=str))
+    print("Next: 'idp score' to write credit/fraud scores from these features.")
+
+
+def _cmd_score(args: argparse.Namespace) -> None:
+    """Score stage: Gold features (S3) + models (store) -> score tables (S3)."""
+    from idp.pipeline import to_scores
+
+    cfg = load_config(args.config)
+    result = to_scores(cfg, persist=True)
+    print(json.dumps({"score_tables": result["score_tables"]}, indent=2, default=str))
+    if not result["score_tables"]:
+        print("No scores written — no trained model in the store. Run 'idp train' first.")
+
+
+def _cmd_labels(args: argparse.Namespace) -> None:
+    """Seed the labels/outcomes store (s3://<prefix>-ml/labels) for offline training."""
+    from idp.pipeline import to_labels
+
+    cfg = load_config(args.config)
+    labels = to_labels(cfg, persist=True)
+    print(json.dumps({"labels_written": int(len(labels)),
+                      "tenants": sorted(labels["tenant_id"].unique().tolist())}, indent=2))
 
 
 def _cmd_publish(args: argparse.Namespace) -> None:
@@ -129,7 +153,7 @@ def _cmd_publish(args: argparse.Namespace) -> None:
 
 
 def _cmd_train(args: argparse.Namespace) -> None:
-    """Offline ML training on a labelled dataset -> saved models."""
+    """Offline ML training: Gold features (S3) + labels store -> saved models."""
     from idp.pipeline import train
 
     cfg = load_config(args.config)
@@ -173,7 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     p_cons.set_defaults(func=_cmd_consume)
 
     sub.add_parser("silver", help="Silver stage: Bronze (S3) -> canonical Silver (S3)").set_defaults(func=_cmd_silver)
-    sub.add_parser("gold", help="Gold stage: Silver (S3) -> feature tables + scores (S3)").set_defaults(func=_cmd_gold)
+    sub.add_parser("gold", help="Gold stage: Silver (S3) -> feature tables ONLY (S3)").set_defaults(func=_cmd_gold)
+    sub.add_parser("score", help="Score stage: Gold features + models -> score tables (S3)").set_defaults(func=_cmd_score)
+    sub.add_parser("labels", help="Seed the labels/outcomes store (training input)").set_defaults(func=_cmd_labels)
     sub.add_parser("publish", help="Serving stage: Gold (S3) -> TimescaleDB").set_defaults(func=_cmd_publish)
     sub.add_parser("train", help="Offline ML training on labelled data -> saved models").set_defaults(func=_cmd_train)
 

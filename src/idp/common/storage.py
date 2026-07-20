@@ -77,6 +77,19 @@ def model_uri(cfg: PlatformConfig, name: str) -> str:
     return str(Path(cfg.storage.ml_artifacts) / name)
 
 
+def labels_uri(cfg: PlatformConfig) -> str:
+    """Base URI for the ground-truth **labels/outcomes** store (training input).
+
+    Kept in the ML area (``s3://<prefix>-ml/labels`` or a local dir), deliberately
+    OUTSIDE the Gold/serving feature path so labels never leak into features or the
+    published serving tables — only the offline train stage reads them.
+    """
+    s3 = cfg.s3
+    if s3.get("enabled"):
+        return f"s3://{s3['bucket_prefix']}-ml/labels"
+    return str(Path(cfg.storage.ml_artifacts) / "labels")
+
+
 def _model_opts(uri: str, cfg: PlatformConfig) -> dict[str, Any]:
     """fsspec options keyed off the URI scheme (S3 creds only for s3:// paths)."""
     return storage_options(cfg) if uri.startswith("s3://") else {}

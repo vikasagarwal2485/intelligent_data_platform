@@ -22,13 +22,15 @@ output, exposed as CLI commands and as Kubernetes Jobs in `idp-app`.
 - **THEN** it produces Gold on `s3://idp-gold`
 
 ### Requirement: REQ-ORC-02 — Scheduled orchestration (Airflow) and production Gold (Spark)
-The system SHALL provide an Airflow DAG that orchestrates `silver >> gold` on a
-schedule plus a separate daily training DAG, and a PySpark job implementing the
-Gold stage for production scale.
+The system SHALL provide **two** Airflow DAGs — a refresh DAG chaining
+`silver >> gold >> score >> publish` on a schedule, and a separate daily training
+DAG chaining `labels >> train` — plus a PySpark job implementing the Gold stage
+for production scale.
 
-#### Scenario: SCN-ORC-02.1 — DAG chains Silver then Gold
-- **WHEN** the medallion DAG runs
-- **THEN** the `silver` task completes before `gold`, each reading/writing S3
+#### Scenario: SCN-ORC-02.1 — Refresh DAG chains the stages
+- **WHEN** the refresh DAG runs
+- **THEN** `silver` completes before `gold`, `gold` (features) before `score`
+  (inference), and `score` before `publish`, each reading/writing S3
 
 #### Scenario: SCN-ORC-02.2 — Spark Gold parity
 - **WHEN** the Spark Gold job runs against Silver
@@ -37,8 +39,8 @@ Gold stage for production scale.
 
 ### Requirement: REQ-ORC-03 — Local composition remains available
 The system SHALL keep a local `run` orchestrator that composes the same stage
-functions (generate → bronze → silver → train → gold) for development and testing
-and for offline model training.
+functions (generate → bronze → silver → labels → gold → train → score) for
+development and testing and for offline model training.
 
 #### Scenario: SCN-ORC-03.1 — Local end-to-end
 - **WHEN** `idp run` executes locally

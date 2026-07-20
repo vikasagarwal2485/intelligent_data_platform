@@ -19,6 +19,7 @@ change under `changes/`. Do not start a phase until the previous one's
 | 10 | [`phase-10-app-overlays`](changes/phase-10-app-overlays/proposal.md) | Move the scoring-api out of the platform overlays into its own `app/overlays/{local,aws}`; add `make app-deploy` | `platform-deployment` |
 | 11 | [`phase-11-mcp-analytics`](changes/phase-11-mcp-analytics/proposal.md) | Five read-only, tenant-scoped MCP analytics tools over Silver (subscribers, usage, recharges, recharge anomalies, fee charges) + synthetic fee-charge data | `mcp-analytics`, `synthetic-data`, `silver-curation` |
 | 12 | [`phase-12-ml-store-explain`](changes/phase-12-ml-store-explain/proposal.md) | Shared MinIO model store (`s3://idp-ml`) + `make train`; fee-charge features fed to the credit model; SHAP/scorecard adverse-action reason codes | `ml-models` |
+| 13 | [`phase-13-training-inference-split`](changes/phase-13-training-inference-split/proposal.md) | Train on historical Gold + a labels store (`s3://idp-ml/labels`, no synthetic regen); Gold features-only + separate `idp score` stage; two DAGs (silver→gold→score→publish, labels→train) | `ml-models`, `orchestration` |
 
 **Ordering rationale:** phases 0–6 build the runnable, testable core in pure
 Python (no cluster). Phase 7 attaches Kafka ingestion. Phase 8 deploys and

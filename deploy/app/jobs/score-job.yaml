@@ -1,0 +1,37 @@
+# On-demand Score stage (idp-app): batch inference. Reads Gold FEATURE tables from
+# MinIO + the trained models from the model store (s3://idp-ml), writes
+# credit_scores/fraud_scores back to Gold. Run after `make gold` (and once
+# `make train` has put models in the store).
+#
+# Apply:  kubectl -n idp-app apply -f deploy/app/jobs/score-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-score
+  namespace: idp-app
+  labels: { app: idp-medallion, stage: score }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-medallion, stage: score }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: score
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "score"]
+          env:
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio.idp-platform.svc:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET_PREFIX
+              value: "idp"
+          resources:
+            requests: { cpu: "250m", memory: 1Gi }
+            limits: { cpu: "1", memory: 3Gi }

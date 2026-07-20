@@ -29,8 +29,9 @@ Prerequisites:
   * the Airflow SA may create pods in `idp-app` (deploy/platform/airflow/rbac.yaml)
 
 DAGs:
-  * idp_silver_gold : silver >> gold >> publish   (hourly)
-  * idp_train       : train                       (daily)
+  * idp_silver_gold : silver >> gold >> score >> publish   (hourly refresh)
+  * idp_train       : labels >> train                      (daily; fits on Gold
+                      features + the labels store, no synthetic regen)
 """
 from __future__ import annotations
 
@@ -152,26 +153,33 @@ def _gold_task() -> KubernetesPodOperator:
     return _stage("gold", "gold")
 
 
+# DAG 1 — refresh: Silver -> Gold (features) -> Score (inference) -> Publish.
+# Gold builds features only; Score applies the trained models from the store; the
+# two are separate tasks so feature-build and inference are decoupled.
 with DAG(
     dag_id="idp_silver_gold",
-    description="Medallion refresh: Silver -> Gold -> publish to serving DB",
+    description="Medallion refresh: Silver -> Gold -> Score -> publish to serving DB",
     schedule="0 * * * *",                   # hourly
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args=default_args,
     tags=["idp", "medallion"],
 ) as dag_refresh:
-    # publish is an INDEPENDENT stage (Gold -> TimescaleDB), never folded into Gold.
-    _silver_task() >> _gold_task() >> _stage("publish", "publish", extra_env=TS_ENV)
+    (_silver_task() >> _gold_task() >> _stage("score", "score")
+     >> _stage("publish", "publish", extra_env=TS_ENV))
 
 
+# DAG 2 — training: fit the models on historical Gold features + the labels store,
+# on its own (daily) cadence. The `labels` task seeds the outcomes store — in this
+# prototype it stands in for the business's real observed-outcomes feed; in
+# production replace it with that feed and keep just `train`.
 with DAG(
     dag_id="idp_train",
-    description="Offline ML training on labelled data",
+    description="Offline ML training on Gold features + labels store",
     schedule="0 2 * * *",                   # daily 02:00
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args=default_args,
     tags=["idp", "ml"],
 ) as dag_train:
-    _stage("train", "train")
+    _stage("labels", "labels") >> _stage("train", "train")
