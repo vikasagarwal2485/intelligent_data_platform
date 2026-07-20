@@ -112,6 +112,26 @@ def test_train_reads_gold_and_labels_from_lake(tmp_path):
     assert storage.model_exists(storage.model_uri(cfg, "credit_model.joblib"), cfg)
 
 
+def test_labels_from_config_join_gold_features(tmp_path):
+    # to_labels(cfg) (no explicit dataset) regenerates per-tenant from cfg.synthetic;
+    # those labels MUST join Gold features built from the same config (same tokens).
+    from idp.pipeline import (ENTITIES, GOLD_FEATURE_TABLES, _gen_dataset, _read_labels,
+                              _read_layer, to_bronze, to_gold, to_labels, to_silver)
+    cfg = _local_cfg(tmp_path)
+    cfg.raw["synthetic"] = {"subscribers_per_tenant": 50, "days": 25, "seed": 7,
+                            "fraud_rate": 0.2, "default_rate": 0.2}
+    ds = _gen_dataset(cfg)                       # build the lake from cfg.synthetic
+    frames = {e: getattr(ds, e) for e in ENTITIES}
+    to_bronze(cfg, frames)
+    to_gold(cfg, silver=to_silver(cfg, frames))
+    to_labels(cfg)                              # NO dataset -> per-tenant regen from cfg
+
+    labels = _read_labels(cfg)
+    gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
+    merged = gold["credit_features"].merge(labels, on=["tenant_id", "service_id"])
+    assert len(merged) == len(gold["credit_features"]) > 0   # every subscriber joins a label
+
+
 def test_train_lake_path_errors_without_labels(tmp_path):
     import pytest
     from idp.pipeline import ENTITIES, to_bronze, to_gold, to_silver, train
