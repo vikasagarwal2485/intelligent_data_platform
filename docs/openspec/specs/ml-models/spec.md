@@ -50,6 +50,37 @@ persist the models to the artifact store (MLflow in production).
 - **THEN** `credit_model` and `fraud_model` artifacts are written and reload to
   produce identical predictions
 
-#### Scenario: SCN-ML-03.2 — Explainability available
+#### Scenario: SCN-ML-03.2 — Adverse-action reason codes
 - **WHEN** a credit decision is produced
-- **THEN** per-decision reason codes (e.g. SHAP) can be generated for adverse action
+- **THEN** `reason_codes()` returns the top-k features raising the PD (adverse
+  reasons), via SHAP when the optional `shap` package is installed and otherwise
+  via the interpretable logistic scorecard, and the scoring API includes them in
+  the `/credit-limit` response
+
+### Requirement: REQ-ML-04 — Shared model artifact store
+Trained models SHALL be persisted to a store shared by the separate train, Gold
+and serving processes — the object store (`s3://<prefix>-ml`, i.e. MinIO/S3) when
+S3 is enabled, else a local dir. `train` writes the models; `to_gold` and the
+scoring API load them from the same store; when a model is absent Gold SHALL still
+produce the feature tables (graceful degrade).
+
+#### Scenario: SCN-ML-04.1 — Gold scores from the store
+- **WHEN** `train` has written the credit/fraud models to the store and `to_gold`
+  runs without in-memory models
+- **THEN** it loads them from the store and Gold contains `credit_scores` and
+  `fraud_scores`
+
+#### Scenario: SCN-ML-04.2 — Graceful degrade without models
+- **WHEN** `to_gold` runs and no model exists in the store
+- **THEN** Gold contains the feature tables only, without raising
+
+### Requirement: REQ-ML-05 — Fee-charge features feed the credit model
+The credit feature set SHALL include product fee-charge signals (total,
+recurring, overage, count, recent window), attributed to a subscriber via the
+product's agreement, so product-fee commitment informs the credit decision
+(ADR-0023; reverses the analytics-only stance of ADR-0022 for the credit model).
+
+#### Scenario: SCN-ML-05.1 — Fee features attributed to subscribers
+- **WHEN** credit features are built on Silver that includes `fact_fee_charge`
+- **THEN** the feature table has `fee_total`/`fee_recurring_total`/`fee_overage_count`/
+  `fee_charge_count`/`fee_total_30d`, non-zero for subscribers that have fee charges

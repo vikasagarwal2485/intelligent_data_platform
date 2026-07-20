@@ -1,0 +1,37 @@
+# On-demand offline training (idp-app): fits the credit + fraud models on the
+# labelled synthetic dataset (labels never enter the lake — ADR-0014) and writes
+# the model artifacts to the MinIO model store (s3://idp-ml) so the Gold job and
+# the scoring API can load them. Run before `make gold` if you want scores.
+#
+# Apply:  kubectl -n idp-app apply -f deploy/app/jobs/train-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-train
+  namespace: idp-app
+  labels: { app: idp-medallion, stage: train }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-medallion, stage: train }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: train
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "train"]
+          env:
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio.idp-platform.svc:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET_PREFIX
+              value: "idp"
+          resources:
+            requests: { cpu: "250m", memory: 1Gi }
+            limits: { cpu: "1", memory: 3Gi }

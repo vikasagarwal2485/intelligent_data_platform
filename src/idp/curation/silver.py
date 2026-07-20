@@ -118,10 +118,11 @@ def build_fact_fee_charge(frames: dict[str, pd.DataFrame], salts: dict[str, str]
     """Product fee-charge fact (recurring/one_time/overage/discount).
 
     The raw charge is normalized: it references a PRODUCT only (``product_id``).
-    Silver re-derives ``product_name`` and ``category`` by joining the products
-    table (the product owns those attributes), so downstream analytics can do
-    product/category breakdowns. The charge carries no PII (the service lives on
-    the product's agreement), so no tokenization is needed here.
+    Silver re-derives ``product_name``, ``category`` and ``agreement_id`` by
+    joining the products table (the product owns those attributes), so analytics
+    can do product/category breakdowns and features can attribute fees to a
+    subscriber (agreement -> service). The charge itself carries no PII, so no
+    tokenization is needed here.
     """
     fees = frames.get("fee_charges", pd.DataFrame())
     if fees.empty:
@@ -136,7 +137,11 @@ def build_fact_fee_charge(frames: dict[str, pd.DataFrame], salts: dict[str, str]
     if not products.empty:
         prod = products.copy()
         prod["id"] = prod["id"].map(strip_uuid_wrapper)
-        cols = ["tenant_id", "id", "name"] + (["category"] if "category" in prod.columns else [])
+        if "agreement_id" in prod.columns:
+            prod["agreement_id"] = prod["agreement_id"].map(strip_uuid_wrapper)
+        cols = (["tenant_id", "id", "name"]
+                + (["category"] if "category" in prod.columns else [])
+                + (["agreement_id"] if "agreement_id" in prod.columns else []))
         prod = prod[cols].rename(columns={"id": "product_id", "name": "product_name"})
         fees = fees.merge(prod, on=["tenant_id", "product_id"], how="left")
     require_tenant_column(fees)

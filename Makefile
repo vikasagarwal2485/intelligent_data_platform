@@ -220,6 +220,14 @@ gold: ## Gold stage (idp-app): Silver (S3) -> feature tables (+scores) (S3)
 	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
 	kubectl -n idp-app logs job/idp-gold
 
+.PHONY: train
+train: ## Train stage (idp-app): fit credit+fraud models -> MinIO model store (s3://idp-ml)
+	kubectl -n idp-app delete job idp-train --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/train-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-train --timeout=600s
+	kubectl -n idp-app logs job/idp-train
+	@echo ">> Models written to s3://idp-ml. Now 'make gold' will include credit/fraud scores."
+
 .PHONY: publish
 publish: ## Serving stage (idp-app): Gold (S3) -> TimescaleDB (indexed serving copy)
 	kubectl -n idp-app delete job idp-publish --ignore-not-found

@@ -304,9 +304,15 @@ Health checks & fixes if a component is unhappy:
 ```bash
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
-make gold          # 3) Gold stage:   Silver (S3) -> feature tables (+scores) (S3)
-make publish       # 4) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
+make train         # 3) Train stage:  fit credit+fraud models -> MinIO model store (s3://idp-ml)
+make gold          # 4) Gold stage:   Silver (S3) -> feature tables + SCORES (S3)
+make publish       # 5) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
 ```
+> **`make train` before `make gold` is what puts scores in Gold.** Models are
+> shared via the MinIO model store (`s3://idp-ml`), so the separate train, Gold and
+> scoring-api pods all use them. Skip `make train` and Gold still runs, but emits
+> **feature tables only** (no `credit_scores`/`fraud_scores`) — which is why a
+> `gold.credit_features`-only TimescaleDB means training hasn't run.
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
@@ -453,9 +459,14 @@ the dimension without exposing the raw MSISDN.
 **Credit-limit** (`ml/credit_model.py`) — two-stage:
 1. **PD model**: gradient-boosted classifier (`HistGradientBoostingClassifier`,
    a drop-in for LightGBM/XGBoost) predicting probability of default; a logistic
-   scorecard is trained alongside as an interpretable baseline.
+   scorecard is trained alongside as an interpretable baseline. Features include
+   recharge, usage/spend, tenure **and product fee-charge signals** (fee total /
+   recurring / overage — attributed to a subscriber via the product's agreement).
 2. **Limit sizing**: `recommended_limit = affordability(recharge, tenure) × (1 − PD)`,
    clipped to policy bands. Metrics: AUC, KS, Gini (out-of-sample holdout).
+3. **Adverse-action reason codes** (`reason_codes`): top features raising the PD,
+   via SHAP (`TreeExplainer`) when the optional `shap` extra is installed, else the
+   logistic-scorecard contributions. Returned in the `/credit-limit` response.
 
 **Fraud** (`ml/fraud_model.py`) — layered hybrid, fused into one score:
 - **Rules** (`rule_flags`): SIM-box / recharge-burst / roaming thresholds (zero training).
@@ -463,7 +474,10 @@ the dimension without exposing the raw MSISDN.
 - **Anomaly**: `IsolationForest` for novel/unlabelled fraud.
 - Fusion: `0.6·proba + 0.2·anomaly + 0.2·rules`. Metrics: PR-AUC, precision@k.
 
-Models are persisted with joblib to `ml/artifacts/` (MLflow registry is the prod target).
+Models are persisted to a **shared model store** — MinIO `s3://idp-ml` in-cluster
+(local dir otherwise) — via `common/storage.py`, so the separate `make train`,
+`make gold` and `scoring-api` pods all load the same artifacts (MLflow registry is
+the longer-term prod target). Train with `make train` (or `idp train`).
 
 ### 4.5 Serving layer
 
