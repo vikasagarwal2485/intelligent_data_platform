@@ -25,7 +25,7 @@ from idp.features.credit_features import build_credit_features
 from idp.features.fraud_features import build_fraud_features
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
-from idp.synthetic.generator import SyntheticDataset, generate_for_tenants
+from idp.synthetic.generator import SyntheticDataset, generate, generate_for_tenants
 
 ENTITIES = (
     "parties", "accounts", "agreements", "products",
@@ -205,9 +205,28 @@ def to_labels(cfg: PlatformConfig, *, dataset: SyntheticDataset | None = None,
     serving path so labels never leak into features/serving.
     """
     cfg = cfg or load_config()
-    if dataset is None:
-        dataset = _gen_dataset(cfg)
-    labels = _tokenize_labels(dataset.labels, _salts(cfg))
+    if dataset is not None:
+        labels = _tokenize_labels(dataset.labels, _salts(cfg))
+    else:
+        # Generate ONE tenant at a time and keep only the labels (drop the heavy
+        # event tables) so peak memory stays small — mirrors the produce job.
+        # Uses the same synthetic params as produce (subscribers/days/seed), which
+        # is REQUIRED: the labels' tokenized service_id must match the Gold features
+        # produced from the same generation, or the training join is empty.
+        syn = cfg.synthetic
+        parts = []
+        for tenant_id in cfg.tenant_ids:
+            ds = generate(
+                tenant_id,
+                subscribers=int(syn.get("subscribers_per_tenant", 200)),
+                days=int(syn.get("days", 60)),
+                fraud_rate=float(syn.get("fraud_rate", 0.05)),
+                default_rate=float(syn.get("default_rate", 0.12)),
+                seed=int(syn.get("seed", 42)),
+            )
+            parts.append(ds.labels)
+            del ds
+        labels = _tokenize_labels(pd.concat(parts, ignore_index=True), _salts(cfg))
     if persist:
         storage.write_parquet(labels, storage.labels_uri(cfg), cfg, partition_cols=["tenant_id"])
     return labels
@@ -220,6 +239,10 @@ def _read_labels(cfg: PlatformConfig) -> pd.DataFrame:
         return pd.DataFrame()
     if "tenant_id" in df.columns:
         df["tenant_id"] = df["tenant_id"].astype(str)
+    # Partitioned-parquet writes append, so re-seeding stacks copies — keep the
+    # latest label per subscriber so the training join can't fan out duplicates.
+    if {"tenant_id", "service_id"} <= set(df.columns):
+        df = df.drop_duplicates(subset=["tenant_id", "service_id"], keep="last").reset_index(drop=True)
     return df
 
 
@@ -278,6 +301,16 @@ def train(
 
     credit_df = credit_feats.merge(labels, on=["tenant_id", "service_id"])
     fraud_df = fraud_feats.merge(labels, on=["tenant_id", "service_id"])
+
+    if credit_df.empty:
+        raise RuntimeError(
+            "Training set is empty: labels did not join any Gold features "
+            f"(gold rows={len(credit_feats)}, label rows={len(labels)}). The labels "
+            "must be generated with the SAME synthetic params (subscribers/days/seed) "
+            "as the data that produced Gold — otherwise the tokenized service_ids "
+            "differ. Re-seed labels ('idp labels'/make labels) with matching "
+            "IDP_SUBSCRIBERS/IDP_DAYS, or regenerate the lake end-to-end."
+        )
 
     c_train, c_test = _safe_split(credit_df, "will_default")
     credit_model = CreditLimitModel(
