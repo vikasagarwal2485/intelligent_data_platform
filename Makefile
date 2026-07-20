@@ -67,7 +67,30 @@ mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_des
 	@echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
 	@echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
 	@echo "# The 'cd $(CURDIR)' makes the local Silver lake (data/lake/silver) resolve."
-	@echo "# Populate it first with 'make run' (or point at MinIO via IDP_S3_* env)."
+	@echo "# Populate it first with 'make run' (or use 'make mcp-config-minio' for MinIO)."
+
+.PHONY: mcp-config-minio
+mcp-config-minio: ## Print the Claude Desktop MCP config for MinIO mode (Silver from MinIO via 127.0.0.1:9000)
+	@printf '%s\n' \
+	  '{' \
+	  '  "mcpServers": {' \
+	  '    "idp-analytics": {' \
+	  '      "command": "$(abspath $(PY))",' \
+	  '      "args": ["-m", "idp.cli", "mcp"],' \
+	  '      "env": {' \
+	  '        "IDP_S3_ENDPOINT": "http://127.0.0.1:9000",' \
+	  '        "IDP_S3_ACCESS_KEY": "minioadmin",' \
+	  '        "IDP_S3_SECRET_KEY": "minioadmin123",' \
+	  '        "IDP_S3_BUCKET_PREFIX": "idp"' \
+	  '      }' \
+	  '    }' \
+	  '  }' \
+	  '}'
+	@echo ""
+	@echo "# MinIO mode. Prereqs: 'make install' (installs mcp), Silver present in idp-silver,"
+	@echo "# and keep 'make minio-api' running (forwards 127.0.0.1:9000) while Claude uses it."
+	@echo "# Paste into (create if missing), then fully quit (Cmd-Q) and reopen Claude Desktop:"
+	@echo "#   ~/Library/Application Support/Claude/claude_desktop_config.json"
 
 .PHONY: smoke
 smoke: ## End-to-end smoke test (pipeline + tenant isolation)
