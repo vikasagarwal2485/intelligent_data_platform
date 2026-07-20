@@ -239,6 +239,10 @@ def _read_labels(cfg: PlatformConfig) -> pd.DataFrame:
         return pd.DataFrame()
     if "tenant_id" in df.columns:
         df["tenant_id"] = df["tenant_id"].astype(str)
+    # Partitioned-parquet writes append, so re-seeding stacks copies — keep the
+    # latest label per subscriber so the training join can't fan out duplicates.
+    if {"tenant_id", "service_id"} <= set(df.columns):
+        df = df.drop_duplicates(subset=["tenant_id", "service_id"], keep="last").reset_index(drop=True)
     return df
 
 
