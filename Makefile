@@ -277,6 +277,21 @@ airflow-wire: ## Build DAG image into minikube + install Airflow (external metad
 	helm upgrade --install airflow apache-airflow/airflow -n idp-platform --version 1.15.0 \
 	  -f deploy/platform/airflow/values.yaml --timeout 15m
 	kubectl apply -f deploy/platform/airflow/rbac.yaml
+	$(MAKE) airflow-reload
+
+.PHONY: airflow-reload
+airflow-reload: ## Rebuild the DAG image + restart Airflow so it re-parses the DAGs (run after any DAG change)
+	@echo ">> Rebuilding the DAG image into minikube (idp/airflow:dev)..."
+	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile pipelines/airflow/dags
+	# The image tag never changes, so pods won't restart on their own — force it so
+	# the scheduler/dag-processor pick up the new baked DAGs (imagePullPolicy
+	# IfNotPresent resolves the freshly rebuilt local tag).
+	@echo ">> Restarting Airflow to re-parse DAGs..."
+	-kubectl -n idp-platform rollout restart deploy/airflow-scheduler
+	-kubectl -n idp-platform rollout restart deploy/airflow-dag-processor
+	-kubectl -n idp-platform rollout restart deploy/airflow-webserver
+	kubectl -n idp-platform rollout status deploy/airflow-scheduler --timeout=180s
+	@echo ">> DAGs reloaded. New DAG ids may take ~30s to appear (DAG parse interval)."
 
 .PHONY: airflow-ui
 airflow-ui: ## Port-forward the Airflow web UI to http://localhost:8080 (admin/admin)
