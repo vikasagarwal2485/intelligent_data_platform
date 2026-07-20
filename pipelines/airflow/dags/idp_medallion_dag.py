@@ -3,7 +3,7 @@
 Airflow is the ORCHESTRATOR (schedule / order / retries); each stage runs as a
 POD it launches. Silver AND Gold each have an EXECUTION-ENGINE switch, so either
 stage can run single-node (pandas) or distributed (Spark) independently — the DAG
-shape (silver >> gold >> publish) is identical regardless:
+shape is identical regardless:
 
   * pandas — launches `idp silver` / `idp gold` in the scoring-api image.
   * spark  — launches `spark-submit` of pipelines/spark/{silver,gold}_job.py in an
@@ -28,10 +28,15 @@ Prerequisites:
   * for spark: the idp-silver-spark / idp-gold-spark ConfigMaps (`make spark-configmap`)
   * the Airflow SA may create pods in `idp-app` (deploy/platform/airflow/rbac.yaml)
 
-DAGs:
-  * idp_silver_gold : silver >> gold >> score >> publish   (hourly refresh)
-  * idp_train       : labels >> train                      (daily; fits on Gold
-                      features + the labels store, no synthetic regen)
+DAGs (three, decoupled by cadence and wired via Airflow Datasets):
+  * idp_features  : silver >> gold           (hourly; PRODUCES gold-features dataset)
+  * idp_inference : score  >> publish        (DATASET-DRIVEN: runs on new features
+                    OR a new model; loads the current model each run)
+  * idp_training  : labels >> train          (daily; PRODUCES model dataset)
+
+So a new model auto-re-scores (inference fires on the model dataset) and fresh
+features auto-re-score — no manual second pass. Requires Airflow >= 2.9 for the
+`|` (OR) dataset condition.
 """
 from __future__ import annotations
 
@@ -39,6 +44,7 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.datasets import Dataset
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from kubernetes.client import models as k8s
 
@@ -47,6 +53,14 @@ SPARK_IMAGE = "apache/spark:3.5.3"
 APP_NS = "idp-app"
 BUCKET_PREFIX = "idp"
 MINIO_ENDPOINT = "http://minio.idp-platform.svc:9000"
+
+# Datasets wire the three DAGs together (Airflow data-aware scheduling). The
+# `gold` task produces GOLD_FEATURES; the `train` task produces MODEL; the
+# inference DAG is scheduled on (GOLD_FEATURES | MODEL) so it runs on either a
+# feature refresh OR a new model — no manual re-trigger. (URIs are logical
+# identifiers, not fetched by Airflow.)
+GOLD_FEATURES = Dataset("s3://idp-gold/credit_features")
+MODEL = Dataset("s3://idp-ml/credit_model.joblib")
 # Per-tenant PII salts for the Spark Silver job (DEV values; match config/platform.yaml
 # and the pandas path so tokens are identical). Source from a Secret on EKS.
 SPARK_SALTS = "tenant_a=salt-a-CHANGE-ME,tenant_b=salt-b-CHANGE-ME"
@@ -153,33 +167,51 @@ def _gold_task() -> KubernetesPodOperator:
     return _stage("gold", "gold")
 
 
-# DAG 1 — refresh: Silver -> Gold (features) -> Score (inference) -> Publish.
-# Gold builds features only; Score applies the trained models from the store; the
-# two are separate tasks so feature-build and inference are decoupled.
+# DAG 1 — FEATURES (refresh): Silver -> Gold (features only), on the data cadence.
+# The gold task PRODUCES the `gold-features` dataset, which drives inference.
 with DAG(
-    dag_id="idp_silver_gold",
-    description="Medallion refresh: Silver -> Gold -> Score -> publish to serving DB",
-    schedule="0 * * * *",                   # hourly
+    dag_id="idp_features",
+    description="Feature refresh: Silver -> Gold (features only)",
+    schedule="0 * * * *",                   # hourly (data cadence)
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args=default_args,
-    tags=["idp", "medallion"],
-) as dag_refresh:
-    (_silver_task() >> _gold_task() >> _stage("score", "score")
-     >> _stage("publish", "publish", extra_env=TS_ENV))
+    tags=["idp", "medallion", "features"],
+) as dag_features:
+    _gold = _gold_task()
+    _gold.outlets = [GOLD_FEATURES]          # updating features triggers inference
+    _silver_task() >> _gold
 
 
-# DAG 2 — training: fit the models on historical Gold features + the labels store,
-# on its own (daily) cadence. The `labels` task seeds the outcomes store — in this
-# prototype it stands in for the business's real observed-outcomes feed; in
-# production replace it with that feed and keep just `train`.
+# DAG 2 — INFERENCE (serve): Score -> Publish. DATASET-DRIVEN — it runs whenever
+# NEW features land OR a NEW model is promoted (Airflow >= 2.9 `|` = OR). It always
+# loads the current model from the store, so a fresh model auto-re-scores with no
+# manual re-run; graceful (no scores) until a model exists.
 with DAG(
-    dag_id="idp_train",
+    dag_id="idp_inference",
+    description="Inference + serve: Score -> Publish (runs on new features OR new model)",
+    schedule=(GOLD_FEATURES | MODEL),
+    start_date=datetime(2026, 1, 1),
+    catchup=False,
+    default_args=default_args,
+    tags=["idp", "ml", "inference"],
+) as dag_inference:
+    _stage("score", "score") >> _stage("publish", "publish", extra_env=TS_ENV)
+
+
+# DAG 3 — TRAINING: labels -> train, on its own (daily) cadence. The train task
+# PRODUCES the `model` dataset (which triggers inference). The `labels` task seeds
+# the outcomes store — in this prototype it stands in for the business's real
+# observed-outcomes feed; in production replace it with that feed and keep `train`.
+with DAG(
+    dag_id="idp_training",
     description="Offline ML training on Gold features + labels store",
     schedule="0 2 * * *",                   # daily 02:00
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args=default_args,
-    tags=["idp", "ml"],
-) as dag_train:
-    _stage("labels", "labels") >> _stage("train", "train")
+    tags=["idp", "ml", "training"],
+) as dag_training:
+    _train = _stage("train", "train")
+    _train.outlets = [MODEL]                 # a new model triggers inference
+    _stage("labels", "labels") >> _train
