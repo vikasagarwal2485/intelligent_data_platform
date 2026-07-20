@@ -563,17 +563,59 @@ used standalone. Three ways to connect:
   .venv/bin/mcp install src/idp/mcp/server.py --name idp-analytics
   ```
 
-**Pointing at MinIO instead of the local dir.** To serve Silver from the cluster's
-MinIO, set the S3 env before launching (also works inside the Claude Desktop
-`env` block); port-forward MinIO first (`make minio-console` forwards the console;
-for the API use `kubectl -n idp-platform port-forward svc/minio 9000:9000`):
+#### Serving Silver from the cluster's MinIO
+
+Instead of the local `data/lake/silver` dir, the host MCP server can read Silver
+straight from the cluster's MinIO. Setting `IDP_S3_ENDPOINT` flips the server into
+S3 mode (`lake_uri` → `s3://idp-silver`).
+
+**1. Make sure Silver exists in MinIO.** Deploying the app (`make image` +
+`make app-deploy`) does *not* populate the lake — run the in-cluster stages once:
 ```bash
-IDP_S3_ENDPOINT=http://localhost:9000 IDP_S3_ACCESS_KEY=minioadmin \
-IDP_S3_SECRET_KEY=minioadmin123 IDP_S3_BUCKET_PREFIX=idp make mcp
+make stream    # produce -> Kafka -> consume -> Bronze (s3://idp-bronze)
+make silver    # Bronze -> Silver (s3://idp-silver)
+make minio-ls  # confirm idp-silver has dim_subscriber/ fact_usage/ fact_recharge/ fact_fee_charge/
 ```
 
-Make targets: `make mcp` (start), `make mcp-smoke` (verify), `make mcp-config`
-(Claude Desktop config).
+**2. Port-forward the MinIO S3 API to your host** (keep it running in its own terminal):
+```bash
+make minio-api   # = kubectl -n idp-platform port-forward svc/minio 9000:9000
+```
+
+**3. Point the MCP server at MinIO and verify.** Use `127.0.0.1` (not `localhost`)
+— an IP endpoint forces S3 path-style addressing, which MinIO needs:
+```bash
+export IDP_S3_ENDPOINT=http://127.0.0.1:9000
+export IDP_S3_ACCESS_KEY=minioadmin
+export IDP_S3_SECRET_KEY=minioadmin123
+export IDP_S3_BUCKET_PREFIX=idp
+make mcp-smoke   # reads Silver from MinIO (skips the local-pipeline fallback)
+make mcp         # start the server for a client
+```
+
+**4. Claude Desktop (MinIO mode).** No `cd` is needed (it reads MinIO, not the
+local dir); put the S3 env in the config's `env` block. The port-forward from
+step 2 must be running whenever Claude Desktop launches the server:
+```json
+{
+  "mcpServers": {
+    "idp-analytics": {
+      "command": "/ABSOLUTE/PATH/TO/repo/.venv/bin/python",
+      "args": ["-m", "idp.cli", "mcp"],
+      "env": {
+        "IDP_S3_ENDPOINT": "http://127.0.0.1:9000",
+        "IDP_S3_ACCESS_KEY": "minioadmin",
+        "IDP_S3_SECRET_KEY": "minioadmin123",
+        "IDP_S3_BUCKET_PREFIX": "idp"
+      }
+    }
+  }
+}
+```
+
+Make targets: `make mcp` (start), `make mcp-smoke` (verify, local or MinIO),
+`make mcp-config` (local-dir Claude Desktop config), `make minio-api` (forward the
+S3 API).
 
 ---
 

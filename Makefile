@@ -43,8 +43,9 @@ mcp: ## Start the MCP analytics server (stdio): 5 read-only, tenant-scoped Silve
 	$(PY) -m idp.cli mcp
 
 .PHONY: mcp-smoke
-mcp-smoke: ## Verify the MCP tools against local Silver (auto-runs the pipeline if the lake is empty)
-	@test -d data/lake/silver/dim_subscriber || (echo ">> Silver lake empty; running pipeline..." && $(PY) -m idp.cli run >/dev/null)
+mcp-smoke: ## Verify the MCP tools (local Silver, or MinIO when IDP_S3_ENDPOINT is set)
+	@if [ -n "$$IDP_S3_ENDPOINT" ]; then echo ">> Reading Silver from S3/MinIO at $$IDP_S3_ENDPOINT"; \
+	 elif [ ! -d data/lake/silver/dim_subscriber ]; then echo ">> Silver lake empty; running pipeline..." && $(PY) -m idp.cli run >/dev/null; fi
 	@echo ">> analyze_subscribers_tool(tenant_a):"
 	@$(PY) -c "import json,idp.mcp.tools as t; print(json.dumps(t.analyze_subscribers_tool('tenant_a'), indent=2))"
 	@echo ">> analyze_fee_charges_tool(tenant_a):"
@@ -156,6 +157,11 @@ minio-mkbuckets: ## Create the lake buckets if missing (idp-bronze/silver/gold/m
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
 	@echo "Open http://localhost:9001  (user: minioadmin  pass: minioadmin123)"
 	kubectl -n idp-platform port-forward svc/minio-console 9001:9001
+
+.PHONY: minio-api
+minio-api: ## Port-forward the MinIO S3 API to 127.0.0.1:9000 (for the host MCP server to read Silver)
+	@echo "MinIO S3 API on http://127.0.0.1:9000  (keep this running while the MCP server reads Silver)"
+	kubectl -n idp-platform port-forward svc/minio 9000:9000
 
 .PHONY: kafka-ui
 kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
