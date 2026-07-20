@@ -293,7 +293,7 @@ make mk-up                              # start minikube (ingress, metrics-serve
 make image                              # build the idp/scoring-api:dev image into minikube
 make platform-base                      # namespaces (idp-platform, idp-app, tenants), RBAC, isolation
 make platform-services                  # install platform services (MinIO, Kafka operator, Trino, ...)
-make app-deploy                         # deploy the scoring-api app into idp-app
+make app-deploy                         # deploy/redeploy scoring-api into idp-app (rolls pods to the new image)
 make nessie-fix                         # ensure Nessie is healthy (in-memory store)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
 ```

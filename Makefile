@@ -286,8 +286,15 @@ platform-base: ## Apply the platform base overlay (namespaces, RBAC, tenant isol
 	kubectl apply -k deploy/platform/overlays/local
 
 .PHONY: app-deploy
-app-deploy: ## Deploy the scoring-api app (idp-app); needs `make image` + `make platform-base`
+app-deploy: ## Deploy/redeploy the scoring-api app (idp-app); needs `make image` + `make platform-base`
 	kubectl apply -k deploy/app/overlays/local
+	# The dev image tag (idp/scoring-api:dev) never changes, so `apply` alone sees
+	# no spec diff and won't restart pods — they'd keep the stale image. Force a
+	# rollout so new pods pick up the freshly built local image (imagePullPolicy:
+	# Never reuses minikube's docker daemon). `rollout restart` is a no-op-safe
+	# annotation bump that also works right after a first-time create.
+	kubectl -n idp-app rollout restart deploy/scoring-api
+	kubectl -n idp-app rollout status deploy/scoring-api --timeout=180s
 
 .PHONY: mk-down
 mk-down: ## Stop minikube
