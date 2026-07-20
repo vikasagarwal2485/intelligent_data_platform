@@ -84,6 +84,14 @@ S3_ENV = [
     k8s.V1EnvVar(name="IDP_S3_SECRET_KEY", value="minioadmin123"),
     k8s.V1EnvVar(name="IDP_S3_BUCKET_PREFIX", value=BUCKET_PREFIX),
 ]
+# Synthetic-generation volume for the `labels` task. MUST MATCH the produce job
+# (deploy/app/jobs/produce-job.yaml) — labels are regenerated deterministically
+# from these params and must line up with the data that became Gold, or the
+# training join is empty. Keep in lock-step with produce-job.yaml.
+SYN_ENV = [
+    k8s.V1EnvVar(name="IDP_SUBSCRIBERS", value="150"),
+    k8s.V1EnvVar(name="IDP_DAYS", value="14"),
+]
 # TimescaleDB env for the serving (publish) stage.
 TS_ENV = [
     k8s.V1EnvVar(name="IDP_TS_HOST", value="timescaledb.idp-platform.svc"),
@@ -214,4 +222,4 @@ with DAG(
 ) as dag_training:
     _train = _stage("train", "train")
     _train.outlets = [MODEL]                 # a new model triggers inference
-    _stage("labels", "labels") >> _train
+    _stage("labels", "labels", extra_env=SYN_ENV) >> _train
