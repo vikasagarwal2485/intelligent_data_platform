@@ -1,5 +1,6 @@
-# On-demand Gold stage (idp-app): reads Silver from MinIO, builds feature tables
-# (and scores if trained models are available), writes Gold.
+# On-demand Gold stage (idp-app): reads Silver from MinIO, builds the FEATURE
+# tables (credit_features/fraud_features) and writes Gold. Scoring is a separate
+# stage — see score-job.yaml / `make score`.
 #
 # Apply:  kubectl -n idp-app apply -f deploy/jobs/gold-job.yaml
 apiVersion: batch/v1

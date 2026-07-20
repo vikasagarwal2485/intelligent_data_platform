@@ -214,19 +214,34 @@ silver: ## Silver stage (idp-app): Bronze (S3) -> canonical Silver (S3)
 	kubectl -n idp-app logs job/idp-silver
 
 .PHONY: gold
-gold: ## Gold stage (idp-app): Silver (S3) -> feature tables (+scores) (S3)
+gold: ## Gold stage (idp-app): Silver (S3) -> feature tables ONLY (S3)
 	kubectl -n idp-app delete job idp-gold --ignore-not-found
 	kubectl -n idp-app apply -f deploy/app/jobs/gold-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
 	kubectl -n idp-app logs job/idp-gold
+	@echo ">> Gold features written. Run 'make score' to add credit/fraud scores."
+
+.PHONY: score
+score: ## Score stage (idp-app): Gold features + models (store) -> score tables (S3)
+	kubectl -n idp-app delete job idp-score --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/score-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-score --timeout=600s
+	kubectl -n idp-app logs job/idp-score
+
+.PHONY: labels
+labels: ## Seed the labels/outcomes store (idp-app): -> s3://idp-ml/labels (training input)
+	kubectl -n idp-app delete job idp-labels --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/labels-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-labels --timeout=600s
+	kubectl -n idp-app logs job/idp-labels
 
 .PHONY: train
-train: ## Train stage (idp-app): fit credit+fraud models -> MinIO model store (s3://idp-ml)
+train: ## Train stage (idp-app): Gold features + labels store -> models (s3://idp-ml). Needs 'make labels' first.
 	kubectl -n idp-app delete job idp-train --ignore-not-found
 	kubectl -n idp-app apply -f deploy/app/jobs/train-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-train --timeout=600s
 	kubectl -n idp-app logs job/idp-train
-	@echo ">> Models written to s3://idp-ml. Now 'make gold' will include credit/fraud scores."
+	@echo ">> Models written to s3://idp-ml. 'make score' now writes credit/fraud scores."
 
 .PHONY: publish
 publish: ## Serving stage (idp-app): Gold (S3) -> TimescaleDB (indexed serving copy)

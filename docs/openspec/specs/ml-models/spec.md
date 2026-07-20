@@ -58,21 +58,15 @@ persist the models to the artifact store (MLflow in production).
   the `/credit-limit` response
 
 ### Requirement: REQ-ML-04 — Shared model artifact store
-Trained models SHALL be persisted to a store shared by the separate train, Gold
+Trained models SHALL be persisted to a store shared by the separate train, score
 and serving processes — the object store (`s3://<prefix>-ml`, i.e. MinIO/S3) when
-S3 is enabled, else a local dir. `train` writes the models; `to_gold` and the
-scoring API load them from the same store; when a model is absent Gold SHALL still
-produce the feature tables (graceful degrade).
+S3 is enabled, else a local dir. `train` writes the models; the Score stage and
+the scoring API load them from the same store.
 
-#### Scenario: SCN-ML-04.1 — Gold scores from the store
-- **WHEN** `train` has written the credit/fraud models to the store and `to_gold`
-  runs without in-memory models
-- **THEN** it loads them from the store and Gold contains `credit_scores` and
-  `fraud_scores`
-
-#### Scenario: SCN-ML-04.2 — Graceful degrade without models
-- **WHEN** `to_gold` runs and no model exists in the store
-- **THEN** Gold contains the feature tables only, without raising
+#### Scenario: SCN-ML-04.1 — Score reads models from the store
+- **WHEN** `train` has written the credit/fraud models to the store and the Score
+  stage runs without in-memory models
+- **THEN** it loads them from the store and writes `credit_scores`/`fraud_scores`
 
 ### Requirement: REQ-ML-05 — Fee-charge features feed the credit model
 The credit feature set SHALL include product fee-charge signals (total,
@@ -84,3 +78,39 @@ product's agreement, so product-fee commitment informs the credit decision
 - **WHEN** credit features are built on Silver that includes `fact_fee_charge`
 - **THEN** the feature table has `fee_total`/`fee_recurring_total`/`fee_overage_count`/
   `fee_charge_count`/`fee_total_30d`, non-zero for subscribers that have fee charges
+
+### Requirement: REQ-ML-06 — Train on historical Gold + a labels store
+Training SHALL learn from the lake, not by regenerating synthetic data: ground-truth
+labels are persisted to a **labels/outcomes store** (`s3://<prefix>-ml/labels`),
+tokenized on `service_id` and kept OUTSIDE the Gold/serving path (no leakage). The
+`train` stage SHALL read historical **Gold features + the labels store**, join, fit,
+and persist the models; it SHALL fail clearly if either is missing. (A local
+in-memory path is retained for cluster-free dev/tests.)
+
+#### Scenario: SCN-ML-06.1 — Fit from the lake, no regeneration
+- **WHEN** Gold features exist and the labels store is seeded, and `train` runs with
+  no in-memory dataset
+- **THEN** it reads both from storage, fits, and writes the models to the store
+
+#### Scenario: SCN-ML-06.2 — Clear error without inputs
+- **WHEN** `train` runs on the lake path but Gold features or labels are missing
+- **THEN** it raises a clear error naming the missing input (Gold / labels)
+
+#### Scenario: SCN-ML-06.3 — Labels stay out of serving
+- **WHEN** labels are written
+- **THEN** they go to the labels store (not the Gold feature tables) and `publish`
+  never copies them to the serving DB
+
+### Requirement: REQ-ML-07 — Scoring is a separate inference stage
+Gold SHALL build **feature tables only**; a separate **Score** stage
+(`idp score`) SHALL read Gold features + the trained models and write
+`credit_scores`/`fraud_scores` back to Gold. When a model is absent the Score
+stage SHALL skip that score table (graceful) rather than fail.
+
+#### Scenario: SCN-ML-07.1 — Gold is features-only
+- **WHEN** `to_gold` runs
+- **THEN** its output is `credit_features`/`fraud_features` and contains no score tables
+
+#### Scenario: SCN-ML-07.2 — Score writes score tables
+- **WHEN** the Score stage runs with models available
+- **THEN** it writes `credit_scores` and `fraud_scores` from the Gold features

@@ -10,7 +10,7 @@ from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.features.credit_features import CREDIT_FEATURES, build_credit_features
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
-from idp.pipeline import to_gold
+from idp.pipeline import to_gold, to_scores
 
 
 def _local_cfg(tmp_path):
@@ -66,15 +66,60 @@ def test_reason_codes_are_adverse_and_labelled(credit_labeled):
             assert r["method"] in ("shap", "scorecard")
 
 
-# --- end-to-end: Gold loads models from the store and emits scores ----------
-def test_gold_loads_models_from_store(tmp_path, silver, credit_labeled, fraud_labeled):
+# --- end-to-end: Score stage loads models from the store and emits scores ----
+def test_score_loads_models_from_store(tmp_path, silver, credit_labeled, fraud_labeled):
     cfg = _local_cfg(tmp_path)
     cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
     fm = FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])
     storage.save_model(cm, storage.model_uri(cfg, "credit_model.joblib"), cfg)
     storage.save_model(fm, storage.model_uri(cfg, "fraud_model.joblib"), cfg)
 
-    # to_gold gets NO models in-memory -> must load them from the store
-    result = to_gold(cfg, silver=silver, persist=False)
-    assert "credit_scores" in result["gold_tables"]
-    assert "fraud_scores" in result["gold_tables"]
+    gold = to_gold(cfg, silver=silver, persist=False)   # features only, no scores
+    assert "credit_scores" not in gold["gold_tables"]
+    # to_scores gets NO models in-memory -> must load them from the store
+    result = to_scores(cfg, gold=gold, persist=False)
+    assert "credit_scores" in result["score_tables"]
+    assert "fraud_scores" in result["score_tables"]
+
+
+# --- labels store + lake-path training (phase 13) ---------------------------
+def test_labels_store_roundtrip(tmp_path):
+    from idp.pipeline import _read_labels, to_labels
+    from idp.synthetic.generator import generate_for_tenants
+    cfg = _local_cfg(tmp_path)
+    ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
+    to_labels(cfg, dataset=ds)
+    lbl = _read_labels(cfg)
+    assert not lbl.empty
+    assert {"tenant_id", "service_id", "will_default", "is_fraud"} <= set(lbl.columns)
+    assert lbl["service_id"].astype(str).str.startswith("tok_").all()  # tokenized, no raw MSISDN
+
+
+def test_train_reads_gold_and_labels_from_lake(tmp_path):
+    from idp.pipeline import ENTITIES, to_bronze, to_gold, to_labels, to_silver, train
+    from idp.synthetic.generator import generate_for_tenants
+    cfg = _local_cfg(tmp_path)
+    ds = generate_for_tenants(["tenant_a"], subscribers=80, days=40, fraud_rate=0.2, seed=7)
+    frames = {e: getattr(ds, e) for e in ENTITIES}
+    to_bronze(cfg, frames)
+    silver = to_silver(cfg, frames)
+    to_gold(cfg, silver=silver)        # persist Gold features to the (local) lake
+    to_labels(cfg, dataset=ds)         # seed the labels store
+
+    # LAKE path: no dataset/silver -> train reads Gold features + labels from storage
+    result = train(cfg)
+    assert "credit" in result["models"] and "fraud" in result["models"]
+    assert storage.model_exists(storage.model_uri(cfg, "credit_model.joblib"), cfg)
+
+
+def test_train_lake_path_errors_without_labels(tmp_path):
+    import pytest
+    from idp.pipeline import ENTITIES, to_bronze, to_gold, to_silver, train
+    from idp.synthetic.generator import generate_for_tenants
+    cfg = _local_cfg(tmp_path)
+    ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
+    frames = {e: getattr(ds, e) for e in ENTITIES}
+    to_bronze(cfg, frames)
+    to_gold(cfg, silver=to_silver(cfg, frames))   # Gold exists but NO labels seeded
+    with pytest.raises(RuntimeError, match="labels"):
+        train(cfg)

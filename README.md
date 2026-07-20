@@ -304,15 +304,20 @@ Health checks & fixes if a component is unhappy:
 ```bash
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
-make train         # 3) Train stage:  fit credit+fraud models -> MinIO model store (s3://idp-ml)
-make gold          # 4) Gold stage:   Silver (S3) -> feature tables + SCORES (S3)
-make publish       # 5) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
+make labels        # 3) Seed the labels/outcomes store -> s3://idp-ml/labels (training input)
+make gold          # 4) Gold stage:  Silver (S3) -> feature tables ONLY (S3)
+make train         # 5) Train stage: Gold features + labels -> models (s3://idp-ml)
+make score         # 6) Score stage: Gold features + models -> credit/fraud SCORES (S3)
+make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
 ```
-> **`make train` before `make gold` is what puts scores in Gold.** Models are
-> shared via the MinIO model store (`s3://idp-ml`), so the separate train, Gold and
-> scoring-api pods all use them. Skip `make train` and Gold still runs, but emits
-> **feature tables only** (no `credit_scores`/`fraud_scores`) — which is why a
-> `gold.credit_features`-only TimescaleDB means training hasn't run.
+> **Training vs scoring are separate** (phase-13). `train` (fit) learns from
+> **historical Gold features + the labels store** — no synthetic regeneration — and
+> writes a model to the shared MinIO model store (`s3://idp-ml`). `score`
+> (inference) applies that model to the latest Gold features to produce
+> `credit_scores`/`fraud_scores`. Skip `score` (or `train`) and Gold/TimescaleDB
+> hold **features only** — which is why a `gold.credit_features`-only TimescaleDB
+> means scoring hasn't run. In Airflow this is **two DAGs**: `silver → gold → score
+> → publish` (refresh) and `labels → train` (daily).
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
@@ -474,10 +479,15 @@ the dimension without exposing the raw MSISDN.
 - **Anomaly**: `IsolationForest` for novel/unlabelled fraud.
 - Fusion: `0.6·proba + 0.2·anomaly + 0.2·rules`. Metrics: PR-AUC, precision@k.
 
-Models are persisted to a **shared model store** — MinIO `s3://idp-ml` in-cluster
-(local dir otherwise) — via `common/storage.py`, so the separate `make train`,
-`make gold` and `scoring-api` pods all load the same artifacts (MLflow registry is
-the longer-term prod target). Train with `make train` (or `idp train`).
+**Training vs. inference (phase-13).** `train` (fit) is a separate offline job that
+reads **historical Gold features + a labels/outcomes store** (`s3://idp-ml/labels`,
+kept out of the serving path so labels never leak) and writes a model — it does
+**not** regenerate synthetic data. `score` (inference) applies the model to the
+latest Gold features to produce `credit_scores`/`fraud_scores`; `to_gold` builds
+features only. Both the model store and labels store live under MinIO `s3://idp-ml`
+(local dir otherwise) via `common/storage.py`, shared across the `train`, `score`
+and `scoring-api` pods (MLflow registry is the longer-term prod target). Orchestrated
+as two DAGs: `silver → gold → score → publish` and daily `labels → train`.
 
 ### 4.5 Serving layer
 

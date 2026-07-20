@@ -249,3 +249,22 @@ Consequences. Status: `Accepted` unless noted.
   artifacts are shared and durable (survive pod restarts). SHAP stays optional so
   the image isn't bloated; the scorecard fallback is the regulatory-standard
   adverse-action method and always available.
+
+### ADR-0025 — Train on historical Gold + a labels store; split Gold/Score
+- **Status:** Accepted (2026-07-20) — refines ADR-0014
+- **Context:** ADR-0014 kept labels out of the lake, so `train` regenerated
+  synthetic data in memory instead of learning from historical lake data. Scoring
+  was also folded into `to_gold`, coupling feature-build with inference and forcing
+  a "train before gold" order.
+- **Decision:** Persist ground-truth labels to a dedicated **labels/outcomes store**
+  (`s3://<prefix>-ml/labels`), tokenized and kept OUTSIDE the Gold/serving path so
+  they never leak into features or the published serving tables. `train` reads
+  historical **Gold features + the labels store** (no synthetic regeneration; a
+  local in-memory path remains for dev/tests). Make **Gold features-only** and add
+  a separate **Score** stage (`idp score`) for inference. Orchestrate as two DAGs:
+  refresh `silver >> gold >> score >> publish`, and daily `labels >> train`.
+- **Consequences:** Refines ADR-0014 — labels now have a home, but a governed one
+  (ML area only, never serving). Training learns from the lake and runs on its own
+  cadence; feature-build and inference are decoupled. Bring-up gains `make labels`
+  and `make score`. In production the `labels` task is replaced by the real
+  observed-outcomes feed.
