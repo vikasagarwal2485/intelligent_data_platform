@@ -88,6 +88,40 @@ def usage_aggregates(fact_usage: pd.DataFrame, windows=(30, 90)) -> pd.DataFrame
     return out.reset_index()
 
 
+def fee_aggregates(
+    fact_fee_charge: pd.DataFrame, dim: pd.DataFrame, windows=(30, 90)
+) -> pd.DataFrame:
+    """Per-subscriber product fee-charge aggregates (ADR-0023).
+
+    Fees are normalized to a product, so they are attributed to a subscriber via
+    ``agreement_id -> service_id`` from the subscriber dimension. These are spend /
+    commitment signals for the credit model.
+    """
+    if fact_fee_charge is None or fact_fee_charge.empty or "agreement_id" not in fact_fee_charge.columns:
+        return pd.DataFrame(columns=KEY)
+    df = fact_fee_charge.copy()
+    link = dim[["tenant_id", "agreement_id", "service_id"]].drop_duplicates()
+    df = df.merge(link, on=["tenant_id", "agreement_id"], how="inner")
+    if df.empty:
+        return pd.DataFrame(columns=KEY)
+    df["charged_at"] = pd.to_datetime(df["charged_at"], utc=True, errors="coerce")
+    ref = _reference_time(df, col="charged_at")
+    ct = df.get("charge_type", pd.Series("", index=df.index))
+
+    out = pd.DataFrame(index=df.groupby(KEY).size().index)
+    out["fee_charge_count"] = df.groupby(KEY).size()
+    out["fee_total"] = df.groupby(KEY)["amount"].sum()
+    out["fee_avg_amount"] = df.groupby(KEY)["amount"].mean()
+    out["fee_recurring_total"] = df[ct == "recurring"].groupby(KEY)["amount"].sum()
+    out["fee_overage_count"] = df[ct == "overage"].groupby(KEY).size()
+    out["fee_discount_total"] = df[ct == "discount"].groupby(KEY)["amount"].sum()
+    for w in windows:
+        cutoff = ref - pd.Timedelta(days=w)
+        win = df[df["charged_at"] >= cutoff]
+        out[f"fee_total_{w}d"] = win.groupby(KEY)["amount"].sum()
+    return out.fillna(0.0).reset_index()
+
+
 def merge_features(
     dim: pd.DataFrame, *aggregates: pd.DataFrame
 ) -> pd.DataFrame:

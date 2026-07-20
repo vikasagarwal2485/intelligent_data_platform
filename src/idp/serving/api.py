@@ -14,6 +14,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from idp.common import storage
 from idp.common.config import load_config
 from idp.features.credit_features import CREDIT_FEATURES
 from idp.features.fraud_features import FRAUD_FEATURES
@@ -37,24 +38,30 @@ def _to_frame(req: ScoreRequest, feature_list: list[str]) -> pd.DataFrame:
 def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
     """Application factory. Loads models lazily so the app starts without them."""
     cfg = load_config()
-    art = Path(artifacts_dir or cfg.storage.ml_artifacts)
     app = FastAPI(title="IDP Scoring API", version="0.1.0")
     state: dict[str, Any] = {"credit": None, "fraud": None}
 
+    def _muri(name: str) -> str:
+        # explicit override (tests) stays local; otherwise the model store
+        # (MinIO s3://idp-ml in-cluster, local dir otherwise).
+        if artifacts_dir is not None:
+            return str(Path(artifacts_dir) / name)
+        return storage.model_uri(cfg, name)
+
     def _credit() -> CreditLimitModel:
         if state["credit"] is None:
-            path = art / "credit_model.joblib"
-            if not path.exists():
+            uri = _muri("credit_model.joblib")
+            if not storage.model_exists(uri, cfg):
                 raise HTTPException(503, "credit model not trained yet")
-            state["credit"] = CreditLimitModel.load(path)
+            state["credit"] = storage.load_model(uri, cfg)
         return state["credit"]
 
     def _fraud() -> FraudModel:
         if state["fraud"] is None:
-            path = art / "fraud_model.joblib"
-            if not path.exists():
+            uri = _muri("fraud_model.joblib")
+            if not storage.model_exists(uri, cfg):
                 raise HTTPException(503, "fraud model not trained yet")
-            state["fraud"] = FraudModel.load(path)
+            state["fraud"] = storage.load_model(uri, cfg)
         return state["fraud"]
 
     @app.get("/health")
@@ -64,7 +71,9 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
     @app.post("/credit-limit")
     def credit_limit(req: ScoreRequest) -> dict[str, Any]:
         frame = _to_frame(req, CREDIT_FEATURES)
-        result = _credit().recommend_limit(frame).iloc[0].to_dict()
+        model = _credit()
+        result = model.recommend_limit(frame).iloc[0].to_dict()
+        result["reason_codes"] = model.reason_codes(frame, top_k=3)[0]  # adverse-action codes
         return result
 
     @app.post("/fraud-score")

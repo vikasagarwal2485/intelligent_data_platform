@@ -217,3 +217,35 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** Existing tables/columns and tests are unaffected (additive
   only). Fee charges are available to Silver/MCP but intentionally **not** fed to
   the credit/fraud models yet (a possible later feature-engineering change).
+
+### ADR-0023 — Fee-charge features feed the credit model
+- **Status:** Accepted (2026-07-20) — refines ADR-0022 for the credit model
+- **Context:** ADR-0022 kept fee charges analytics-only. Product-fee commitment
+  (recurring fees, overages) is a genuine spend/affordability signal for credit.
+- **Decision:** Enrich Silver `fact_fee_charge` with `agreement_id` (from the
+  product join) so fees attribute to a subscriber (`agreement_id → service_id`),
+  and add `fee_total`/`fee_recurring_total`/`fee_overage_count`/`fee_charge_count`/
+  `fee_total_30d` to `CREDIT_FEATURES`. The fraud model is left unchanged (fee
+  signals are weak fraud indicators; avoids destabilizing its features).
+- **Consequences:** The credit model retrains on a wider feature set. Fees remain
+  normalized at the raw layer (product_id only); the agreement link and the
+  per-subscriber attribution are Silver/feature-time joins.
+
+### ADR-0024 — Shared MinIO model store + adverse-action reason codes
+- **Status:** Accepted (2026-07-20)
+- **Context:** `train`, `gold` and `scoring-api` are separate pods; models were
+  saved to an ephemeral per-pod `ml/artifacts` dir, so Gold/serving never saw the
+  trained models and Gold silently emitted feature tables with no scores. Also no
+  per-decision explainability existed.
+- **Decision:** Persist models to an object-store **model store** — `s3://<prefix>-ml`
+  (MinIO/S3) when S3 is enabled, else a local dir — via `storage.save_model/
+  load_model/model_exists` (joblib over fsspec, chosen by URI scheme). `train`
+  writes; `to_gold` and the scoring API read; a new `train-job.yaml`/`make train`
+  runs training in-cluster; the scoring API Deployment gets the S3 env. Add
+  `CreditLimitModel.reason_codes()` — SHAP `TreeExplainer` when the optional `shap`
+  extra is installed, else logistic-scorecard contributions — surfaced in the
+  `/credit-limit` response.
+- **Consequences:** Bring-up gains a `make train` step before `make gold`. Model
+  artifacts are shared and durable (survive pod restarts). SHAP stays optional so
+  the image isn't bloated; the scorecard fallback is the regulatory-standard
+  adverse-action method and always available.

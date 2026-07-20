@@ -15,8 +15,6 @@ composes them locally for dev/testing.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -113,11 +111,12 @@ def to_gold(
 
     credit_model = (models or {}).get("credit")
     fraud_model = (models or {}).get("fraud")
-    art = Path(cfg.storage.ml_artifacts)
-    if credit_model is None and (art / "credit_model.joblib").exists():
-        credit_model = CreditLimitModel.load(art / "credit_model.joblib")
-    if fraud_model is None and (art / "fraud_model.joblib").exists():
-        fraud_model = FraudModel.load(art / "fraud_model.joblib")
+    credit_uri = storage.model_uri(cfg, "credit_model.joblib")
+    fraud_uri = storage.model_uri(cfg, "fraud_model.joblib")
+    if credit_model is None and storage.model_exists(credit_uri, cfg):
+        credit_model = storage.load_model(credit_uri, cfg)
+    if fraud_model is None and storage.model_exists(fraud_uri, cfg):
+        fraud_model = storage.load_model(fraud_uri, cfg)
     if credit_model is not None:
         outputs["credit_scores"] = credit_model.recommend_limit(outputs["credit_features"])
     if fraud_model is not None:
@@ -223,8 +222,8 @@ def train(
     fraud_metrics = fraud_model.evaluate(f_test, f_test["is_fraud"])
 
     if persist:
-        credit_model.save(Path(cfg.storage.ml_artifacts) / "credit_model.joblib")
-        fraud_model.save(Path(cfg.storage.ml_artifacts) / "fraud_model.joblib")
+        storage.save_model(credit_model, storage.model_uri(cfg, "credit_model.joblib"), cfg)
+        storage.save_model(fraud_model, storage.model_uri(cfg, "fraud_model.joblib"), cfg)
 
     return {
         "credit_metrics": credit_metrics,

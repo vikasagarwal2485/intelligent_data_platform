@@ -8,7 +8,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from idp.features.base import KEY, merge_features, recharge_aggregates, usage_aggregates
+from idp.features.base import (
+    KEY, fee_aggregates, merge_features, recharge_aggregates, usage_aggregates,
+)
 
 # Numeric features consumed by the credit model.
 CREDIT_FEATURES = [
@@ -18,6 +20,8 @@ CREDIT_FEATURES = [
     "days_since_last_recharge", "share_credit_card",
     "usage_charged_amount", "usage_charged_amount_30d", "voice_minutes", "data_bytes",
     "arpu_monthly", "spend_to_recharge_ratio",
+    # product fee-charge signals (spend commitment) — ADR-0023
+    "fee_total", "fee_recurring_total", "fee_overage_count", "fee_charge_count", "fee_total_30d",
 ]
 
 
@@ -26,7 +30,8 @@ def build_credit_features(silver: dict[str, pd.DataFrame], windows=(30, 90)) -> 
     dim = silver["dim_subscriber"].copy()
     rech = recharge_aggregates(silver["fact_recharge"], windows)
     usage = usage_aggregates(silver["fact_usage"], windows)
-    feats = merge_features(dim, rech, usage)
+    fees = fee_aggregates(silver.get("fact_fee_charge", pd.DataFrame()), dim, windows)
+    feats = merge_features(dim, rech, usage, fees)
 
     feats["has_device_agreement"] = feats["has_device_agreement"].astype(int)
     feats["is_company"] = feats.get("is_company", 0).astype(int)

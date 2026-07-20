@@ -107,6 +107,43 @@ class CreditLimitModel:
         out["recommended_limit"] = limit
         return out.reset_index(drop=True)
 
+    # --- explainability (adverse-action reason codes) --------------------------
+    def _pd_contributions(self, Xm: pd.DataFrame) -> tuple[np.ndarray, str]:
+        """Signed per-feature contributions to the probability/odds of default.
+
+        Uses SHAP (TreeExplainer on the PD model) when the ``shap`` package is
+        installed, else the interpretable logistic **scorecard** — the standard
+        adverse-action method — via ``coef · standardized_feature``. Positive =
+        pushes default risk UP (an adverse reason).
+        """
+        try:
+            import shap  # optional; heavy, not a core dependency
+
+            explainer = shap.TreeExplainer(self.pd_model)
+            values = explainer.shap_values(Xm)
+            arr = values[1] if isinstance(values, list) else values
+            return np.asarray(arr, dtype=float), "shap"
+        except Exception:  # noqa: BLE001 - fall back to the scorecard
+            scaler = self.scorecard.named_steps["scale"]
+            lr = self.scorecard.named_steps["lr"]
+            z = (Xm.values - scaler.mean_) / scaler.scale_
+            return z * lr.coef_[0], "scorecard"
+
+    def reason_codes(self, X: pd.DataFrame, top_k: int = 3) -> list[list[dict]]:
+        """Top-``k`` adverse-action reason codes per row (features raising PD most)."""
+        Xm = X[self.features].astype(float)
+        contribs, method = self._pd_contributions(Xm)
+        reasons: list[list[dict]] = []
+        for i in range(len(Xm)):
+            row = contribs[i]
+            order = np.argsort(row)[::-1][:top_k]
+            reasons.append([
+                {"feature": self.features[j], "contribution": round(float(row[j]), 4),
+                 "method": method}
+                for j in order if row[j] > 0
+            ])
+        return reasons
+
     # --- evaluation ------------------------------------------------------------
     def evaluate(self, X: pd.DataFrame, y: pd.Series | np.ndarray) -> dict[str, float]:
         y = np.asarray(y).astype(int)
