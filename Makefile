@@ -261,7 +261,9 @@ timescale-verify: ## Verify the publish stage: list every gold.* serving table w
 	  -c "\dt+ gold.*" \
 	  -c "SELECT schemaname, relname AS table, n_live_tup AS approx_rows FROM pg_stat_user_tables WHERE schemaname='gold' ORDER BY relname;" \
 	  -c "SELECT tenant_id, count(*) AS rows FROM gold.credit_features GROUP BY tenant_id ORDER BY tenant_id;" \
-	  -c "SELECT * FROM gold.credit_features LIMIT 3;"
+	  -c "SELECT * FROM gold.credit_features LIMIT 3;" \
+      -c "SELECT tenant_id, count(*) AS rows FROM gold.credit_scores GROUP BY tenant_id ORDER BY tenant_id;" \
+	  -c "SELECT * FROM gold.credit_scores LIMIT 3;"
 
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire
