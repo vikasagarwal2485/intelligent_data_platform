@@ -30,19 +30,34 @@ def get_engine(cfg: PlatformConfig):
 
 
 def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None) -> None:
-    """Replace a serving table with ``df`` and index it by (tenant_id, service_id)."""
+    """Replace a serving table with ``df`` and index it by (tenant_id, service_id).
+
+    Concurrency-safe: ``if_exists="replace"`` does DROP+CREATE, and two publishers
+    running at once (e.g. ``make publish`` overlapping the inference DAG's publish
+    task) would race on the Postgres type catalog — `duplicate key value violates
+    unique constraint "pg_type_typname_nsp_index"`. We serialize per-table writers
+    with a transaction-scoped **advisory lock** and do the whole replace in one
+    transaction, so concurrent publishers wait their turn instead of colliding.
+    """
     from sqlalchemy import text
 
-    if schema:
-        with engine.begin() as conn:
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-    df.to_sql(name, engine, schema=schema, if_exists="replace", index=False,
-              method="multi", chunksize=1000)
+    # The advisory lock below is Postgres-only; skip it on other backends (e.g. the
+    # SQLite engine used in tests), which lack pg_advisory_xact_lock/hashtext and
+    # have no cross-process DDL race to guard against.
+    is_postgres = engine.dialect.name == "postgresql"
+    qualified = f'"{schema}"."{name}"' if schema else f'"{name}"'
     idx_cols = [c for c in KEY_COLUMNS if c in df.columns]
-    if idx_cols:
-        qualified = f'"{schema}"."{name}"' if schema else f'"{name}"'
-        cols = ", ".join(f'"{c}"' for c in idx_cols)
-        with engine.begin() as conn:
+    with engine.begin() as conn:
+        if schema:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        # Serialize concurrent publishers of THIS table (released at commit).
+        if is_postgres:
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                         {"k": f"{schema or ''}.{name}"})
+        df.to_sql(name, conn, schema=schema, if_exists="replace", index=False,
+                  method="multi", chunksize=1000)
+        if idx_cols:
+            cols = ", ".join(f'"{c}"' for c in idx_cols)
             conn.execute(text(f'CREATE INDEX IF NOT EXISTS "ix_{name}_key" ON {qualified} ({cols})'))
 
 
