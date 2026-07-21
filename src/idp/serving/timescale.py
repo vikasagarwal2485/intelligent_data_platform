@@ -41,14 +41,19 @@ def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None
     """
     from sqlalchemy import text
 
+    # The advisory lock below is Postgres-only; skip it on other backends (e.g. the
+    # SQLite engine used in tests), which lack pg_advisory_xact_lock/hashtext and
+    # have no cross-process DDL race to guard against.
+    is_postgres = engine.dialect.name == "postgresql"
     qualified = f'"{schema}"."{name}"' if schema else f'"{name}"'
     idx_cols = [c for c in KEY_COLUMNS if c in df.columns]
     with engine.begin() as conn:
         if schema:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         # Serialize concurrent publishers of THIS table (released at commit).
-        conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                     {"k": f"{schema or ''}.{name}"})
+        if is_postgres:
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                         {"k": f"{schema or ''}.{name}"})
         df.to_sql(name, conn, schema=schema, if_exists="replace", index=False,
                   method="multi", chunksize=1000)
         if idx_cols:
