@@ -1,13 +1,16 @@
-"""Phase 11 — MCP analytics tools, synthetic fee charges, and Silver fee fact.
+"""Phase 11/14 — MCP analytics tools, synthetic fee charges, and Silver fee fact.
 
-Covers REQ-SYN-04, REQ-SLV-05, and REQ-MCP-01…06. The five tools read a locally
-persisted Silver lake (s3 disabled); a per-test config points storage at a tmp
-dir and `load_config` in the tools module is monkeypatched to return it.
+Covers REQ-SYN-04, REQ-SLV-05, and REQ-MCP-01…08. Five tools read a locally
+persisted Silver lake; two read the Gold score tables. A per-test config points
+storage at a tmp dir and `load_config` in the tools module is monkeypatched to
+return it.
 """
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
+from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.curation.silver import build_fact_fee_charge, curate
 from idp.mcp import tools as mcp_tools
@@ -186,8 +189,96 @@ def test_missing_tenant_asks_with_available_list(patched):
     assert set(out2["available_tenants"]) == {"tenant_a", "tenant_b"}
 
 
-def test_registry_has_five_tools():
-    assert len(mcp_tools.TOOLS) == 5
+def test_registry_has_seven_tools():
+    assert len(mcp_tools.TOOLS) == 7
+    assert {"analyze_fraud_score_tool", "analyze_credit_score_tool"} <= set(mcp_tools.TOOLS)
+
+
+# --------------------------------------------------------------------------- #
+# REQ-MCP-07/08 — fraud & credit score distributions over 7/15/30-day windows #
+# --------------------------------------------------------------------------- #
+def _cfg_with_fresh_gold(local_cfg, tmp_path):
+    """A cfg that reuses the module's Silver (for the tenant guard) but writes Gold
+    to a per-test tmp dir, so partitioned score writes never accumulate across tests."""
+    s = local_cfg.storage
+    fresh = StorageConfig(
+        root=s.root, landing=s.landing, bronze=s.bronze, silver=s.silver,
+        gold=str(tmp_path / "gold"), ml_artifacts=s.ml_artifacts,
+    )
+    return PlatformConfig(raw=local_cfg.raw, tenants=local_cfg.tenants, storage=fresh)
+
+
+@pytest.fixture()
+def scored_cfg(local_cfg, tmp_path, monkeypatch):
+    """Write Gold score tables (fraud_scores/credit_scores) with a scored_at spread
+    over ~40 days so the 7/15/30-day windows are genuinely different sizes."""
+    cfg = _cfg_with_fresh_gold(local_cfg, tmp_path)
+    now = pd.Timestamp.now(tz="UTC")
+    ages = [1, 1, 5, 12, 12, 25, 25, 25, 38, 38]  # days back
+    fraud = pd.DataFrame({
+        "tenant_id": "tenant_a",
+        "service_id": [f"tok_{i}" for i in range(len(ages))],
+        "fraud_proba": [0.05, 0.9, 0.2, 0.6, 0.1, 0.3, 0.8, 0.15, 0.5, 0.25],
+        "rule_score": [0.0, 1.0, 0.2, 0.4, 0.0, 0.2, 0.6, 0.0, 0.4, 0.2],
+        "fraud_score": [0.04, 0.85, 0.22, 0.55, 0.08, 0.28, 0.74, 0.12, 0.48, 0.24],
+        "scored_at": [now - pd.Timedelta(days=d) for d in ages],
+    })
+    credit = pd.DataFrame({
+        "tenant_id": "tenant_a",
+        "service_id": [f"tok_{i}" for i in range(len(ages))],
+        "pd": [0.05, 0.5, 0.2, 0.35, 0.1, 0.25, 0.45, 0.12, 0.3, 0.22],
+        "affordability_base": [100.0, 60.0, 80.0, 50.0, 120.0, 90.0, 40.0, 110.0, 70.0, 85.0],
+        "recommended_limit": [90.0, 30.0, 60.0, 32.0, 108.0, 67.0, 22.0, 96.0, 49.0, 66.0],
+        "scored_at": [now - pd.Timedelta(days=d) for d in ages],
+    })
+    gold = storage.lake_uri(cfg, "gold")
+    storage.write_parquet(fraud, f"{gold}/fraud_scores", cfg, partition_cols=["tenant_id"])
+    storage.write_parquet(credit, f"{gold}/credit_scores", cfg, partition_cols=["tenant_id"])
+    monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: cfg)
+    return cfg
+
+
+def test_fraud_score_tool_windows(scored_cfg):
+    out = mcp_tools.analyze_fraud_score_tool("tenant_a")
+    assert out["windows_days"] == [7, 15, 30]
+    bw = out["by_window"]
+    assert set(bw) == {"7d", "15d", "30d"}
+    # window sizes are monotone non-decreasing and reflect the scored_at spread
+    assert bw["7d"]["count"] == 3 <= bw["15d"]["count"] == 5 <= bw["30d"]["count"] == 8
+    dist = bw["30d"]["fraud_proba"]
+    assert dist["count"] == 8 and dist["min"] <= dist["median"] <= dist["max"]
+    assert "rule_score" in bw["30d"] and "fraud_score" in bw["30d"]
+
+
+def test_credit_score_tool_windows_and_gap(scored_cfg):
+    out = mcp_tools.analyze_credit_score_tool("tenant_a")
+    bw = out["by_window"]
+    assert bw["7d"]["count"] == 3 and bw["30d"]["count"] == 8
+    # affordability_gap = affordability_base - recommended_limit (the risk haircut)
+    for w in ("7d", "15d", "30d"):
+        assert {"pd", "affordability_base", "recommended_limit", "affordability_gap"} <= set(bw[w])
+    assert bw["30d"]["affordability_gap"]["mean"] > 0
+
+
+def test_score_tools_tenant_isolation(scored_cfg):
+    # tenant_b has no scores written -> graceful empty note, not tenant_a's data
+    out = mcp_tools.analyze_fraud_score_tool("tenant_b")
+    assert out["tenant_id"] == "tenant_b" and out["count"] == 0 and "note" in out
+
+
+def test_score_tools_snapshot_note_without_timestamp(local_cfg, tmp_path, monkeypatch):
+    # No scored_at column -> each window falls back to the full snapshot with a note.
+    cfg = _cfg_with_fresh_gold(local_cfg, tmp_path)
+    frame = pd.DataFrame({
+        "tenant_id": "tenant_a", "service_id": ["tok_0", "tok_1"],
+        "fraud_proba": [0.2, 0.7], "rule_score": [0.1, 0.5], "fraud_score": [0.2, 0.66],
+    })
+    storage.write_parquet(frame, f"{storage.lake_uri(cfg, 'gold')}/fraud_scores",
+                          cfg, partition_cols=["tenant_id"])
+    monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: cfg)
+    out = mcp_tools.analyze_fraud_score_tool("tenant_a")
+    assert all(out["by_window"][w]["count"] == 2 for w in ("7d", "15d", "30d"))
+    assert "note" in out["by_window"]["7d"]
 
 
 def test_server_builds_and_registers_tools():

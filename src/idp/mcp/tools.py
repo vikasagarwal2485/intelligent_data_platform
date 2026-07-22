@@ -15,6 +15,7 @@ from __future__ import annotations
 import functools
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from idp.common import storage
@@ -25,6 +26,10 @@ _DIM = "dim_subscriber"
 _USAGE = "fact_usage"
 _RECHARGE = "fact_recharge"
 _FEES = "fact_fee_charge"
+# Gold score tables (produced by `idp score`).
+_CREDIT_SCORES = "credit_scores"
+_FRAUD_SCORES = "fraud_scores"
+_SCORE_WINDOWS = (7, 15, 30)  # days
 
 
 def _cfg(config_path: str | None) -> PlatformConfig:
@@ -40,14 +45,14 @@ class LakeReadError(Exception):
     """
 
 
-def _read_silver(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
-    """Read one Silver table, tenant-scoped.
+def _read_layer_table(cfg: PlatformConfig, layer: str, table: str, tenant_id: str) -> pd.DataFrame:
+    """Read one table from a lake layer ('silver'|'gold'), tenant-scoped.
 
     Returns an empty frame when the table is genuinely absent (nothing written
     yet). Raises :class:`LakeReadError` when the lake can't be reached at all, so
     a broken connection is not mistaken for "no data".
     """
-    uri = f"{storage.lake_uri(cfg, 'silver')}/{table}"
+    uri = f"{storage.lake_uri(cfg, layer)}/{table}"
     try:
         df = storage.read_parquet(uri, cfg)
     except FileNotFoundError:
@@ -58,6 +63,14 @@ def _read_silver(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFram
         return pd.DataFrame()
     df["tenant_id"] = df["tenant_id"].astype(str)
     return df[df["tenant_id"] == str(tenant_id)].copy()
+
+
+def _read_silver(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
+    return _read_layer_table(cfg, "silver", table, tenant_id)
+
+
+def _read_gold(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
+    return _read_layer_table(cfg, "gold", table, tenant_id)
 
 
 def _available_tenants(cfg: PlatformConfig) -> list[str]:
@@ -124,6 +137,60 @@ def _period(series: pd.Series, granularity: str) -> pd.Series:
 
 def _round_map(d: dict, ndigits: int = 2) -> dict:
     return {k: round(float(v), ndigits) for k, v in d.items()}
+
+
+def _distribution(series: pd.Series, bins: int = 8) -> dict[str, Any]:
+    """Compact numeric distribution: count, summary stats, percentiles, histogram."""
+    s = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+    if s.empty:
+        return {"count": 0}
+    qs = s.quantile([0.10, 0.25, 0.50, 0.75, 0.90])
+    counts, edges = np.histogram(s.to_numpy(), bins=bins)
+    return {
+        "count": int(s.size),
+        "mean": round(float(s.mean()), 4),
+        "std": round(float(s.std(ddof=0)), 4),
+        "min": round(float(s.min()), 4),
+        "p10": round(float(qs.loc[0.10]), 4),
+        "p25": round(float(qs.loc[0.25]), 4),
+        "median": round(float(qs.loc[0.50]), 4),
+        "p75": round(float(qs.loc[0.75]), 4),
+        "p90": round(float(qs.loc[0.90]), 4),
+        "max": round(float(s.max()), 4),
+        "histogram": [
+            {"lo": round(float(edges[i]), 4), "hi": round(float(edges[i + 1]), 4),
+             "count": int(counts[i])}
+            for i in range(len(counts))
+        ],
+    }
+
+
+def _windowed_distributions(df: pd.DataFrame, metrics: list[str],
+                            windows=_SCORE_WINDOWS) -> dict[str, Any]:
+    """Per-window (last N days, relative to the latest scored_at) distributions.
+
+    If the score table has no ``scored_at`` (older data, or a single un-timestamped
+    write), every window falls back to the full snapshot with a note — meaningful
+    time windows require accumulated, timestamped score history (multiple `idp
+    score` runs over days).
+    """
+    out: dict[str, Any] = {}
+    has_ts = "scored_at" in df.columns and df["scored_at"].notna().any()
+    ts = pd.to_datetime(df["scored_at"], utc=True, errors="coerce") if has_ts else None
+    ref = ts.max() if has_ts else None
+    for w in windows:
+        if has_ts:
+            sub = df[ts >= ref - pd.Timedelta(days=int(w))]
+        else:
+            sub = df
+        block: dict[str, Any] = {"count": int(len(sub))}
+        if not has_ts:
+            block["note"] = "no scored_at timestamp; showing the full snapshot"
+        for m in metrics:
+            if m in sub.columns:
+                block[m] = _distribution(sub[m])
+        out[f"{int(w)}d"] = block
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -427,6 +494,62 @@ def analyze_fee_charges_tool(
     }
 
 
+# --------------------------------------------------------------------------- #
+# Tool 6 — fraud score distributions                                           #
+# --------------------------------------------------------------------------- #
+@_lake_guard
+def analyze_fraud_score_tool(tenant_id: str, *, config_path: str | None = None) -> dict[str, Any]:
+    """Fraud-score distributions for one tenant over the last 7/15/30 days (REQ-MCP-07).
+
+    Reads the Gold ``fraud_scores`` table (from `idp score`) and returns, per window,
+    the distribution of the supervised probability (`fraud_proba`), the deterministic
+    `rule_score`, and the fused `fraud_score`. Windows are relative to the latest
+    `scored_at`; without accumulated timestamped history each window is the current
+    snapshot (see note in the result).
+    """
+    cfg = _cfg(config_path)
+    scores = _read_gold(cfg, _FRAUD_SCORES, tenant_id)
+    if scores.empty:
+        return {"tenant_id": tenant_id, "count": 0,
+                "note": "no fraud scores for tenant — run 'idp score' after training"}
+    return {
+        "tenant_id": tenant_id,
+        "windows_days": list(_SCORE_WINDOWS),
+        "by_window": _windowed_distributions(
+            scores, ["fraud_proba", "rule_score", "fraud_score"]),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Tool 7 — credit score distributions                                          #
+# --------------------------------------------------------------------------- #
+@_lake_guard
+def analyze_credit_score_tool(tenant_id: str, *, config_path: str | None = None) -> dict[str, Any]:
+    """Credit-score distributions for one tenant over the last 7/15/30 days (REQ-MCP-08).
+
+    Reads the Gold ``credit_scores`` table (from `idp score`) and returns, per window,
+    the distribution of probability-of-default (`pd`), affordability (`affordability_base`),
+    the `recommended_limit`, and the affordability-vs-limit **gap** (the risk haircut,
+    `affordability_base - recommended_limit`). Windows are relative to the latest
+    `scored_at`.
+    """
+    cfg = _cfg(config_path)
+    scores = _read_gold(cfg, _CREDIT_SCORES, tenant_id)
+    if scores.empty:
+        return {"tenant_id": tenant_id, "count": 0,
+                "note": "no credit scores for tenant — run 'idp score' after training"}
+    if {"affordability_base", "recommended_limit"} <= set(scores.columns):
+        scores = scores.assign(
+            affordability_gap=scores["affordability_base"].astype(float)
+            - scores["recommended_limit"].astype(float))
+    return {
+        "tenant_id": tenant_id,
+        "windows_days": list(_SCORE_WINDOWS),
+        "by_window": _windowed_distributions(
+            scores, ["pd", "affordability_base", "recommended_limit", "affordability_gap"]),
+    }
+
+
 # Registry consumed by server.py (name -> callable).
 TOOLS = {
     "analyze_subscribers_tool": analyze_subscribers_tool,
@@ -434,4 +557,6 @@ TOOLS = {
     "analyze_recharges_tool": analyze_recharges_tool,
     "analyze_recharge_anomalies_tool": analyze_recharge_anomalies_tool,
     "analyze_fee_charges_tool": analyze_fee_charges_tool,
+    "analyze_fraud_score_tool": analyze_fraud_score_tool,
+    "analyze_credit_score_tool": analyze_credit_score_tool,
 }
