@@ -534,10 +534,10 @@ Inspect the TimescaleDB serving tables: `make timescale-psql`.
 ### 4.6 MCP analytics server
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server exposes the
-curated lake to AI agents (e.g. Claude Desktop) as **five read-only, tenant-scoped
-analytics tools** over the Silver tables. Every tool takes a `tenant_id`, reads
-only that tenant's data, and returns compact aggregated JSON — never raw PII, never
-cross-tenant (`src/idp/mcp/`, ADR-0021).
+curated lake to AI agents (e.g. Claude Desktop) as **seven read-only, tenant-scoped
+analytics tools** — five over the Silver tables, two over the Gold score tables.
+Every tool takes a `tenant_id`, reads only that tenant's data, and returns compact
+aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`, ADR-0021).
 
 | Tool | Answers |
 |---|---|
@@ -546,6 +546,13 @@ cross-tenant (`src/idp/mcp/`, ADR-0021).
 | `analyze_recharges_tool` | total/avg/count top-ups, splits by recharge type / payment method / time |
 | `analyze_recharge_anomalies_tool` | amount & volume spikes, subscriber-day anomalies, weekly/monthly views |
 | `analyze_fee_charges_tool` | product fee revenue, revenue distribution, charge-type & product/category/month/quarter breakdowns |
+| `analyze_fraud_score_tool` | fraud probability, rule-score & fused fraud-score distributions over the last 7/15/30 days |
+| `analyze_credit_score_tool` | probability-of-default, affordability, recommended-limit & affordability-vs-limit gap distributions over 7/15/30 days |
+
+> The two score tools read the Gold `fraud_scores` / `credit_scores` tables written
+> by `idp score`. Meaningful 7/15/30-day windows need accumulated timestamped score
+> history (multiple `idp score` runs); with a single snapshot every window shows the
+> same distribution and the result says so.
 
 **Prerequisites.** The `mcp` package (installed by `make install`) and **Silver
 data in the lake** the server reads. The lake is chosen by config: a local

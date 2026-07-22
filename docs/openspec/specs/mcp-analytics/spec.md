@@ -4,10 +4,11 @@
 
 Expose the curated lake to AI agents as a small set of **read-only, tenant-scoped
 analytics tools** over the **Model Context Protocol (MCP)**. Each tool answers a
-focused business question about the Silver tables (`dim_subscriber`, `fact_usage`,
-`fact_recharge`, `fact_fee_charge`) by returning compact, aggregated JSON — never
-raw PII, never cross-tenant data. The tools are the natural-language analytics
-surface on top of the medallion lake (ADR-0020).
+focused business question — five over the Silver tables (`dim_subscriber`,
+`fact_usage`, `fact_recharge`, `fact_fee_charge`) and two over the Gold score
+tables (`fraud_scores`, `credit_scores`) — by returning compact, aggregated
+JSON — never raw PII, never cross-tenant data. The tools are the natural-language
+analytics surface on top of the medallion lake (ADR-0020).
 
 Capability code: `MCP`.
 
@@ -101,14 +102,14 @@ discount), and (d) breakdowns by **product / category / month / quarter**.
   category
 
 ### Requirement: REQ-MCP-06 — Read-only, tenant-scoped MCP exposure
-The five tools SHALL be exposed by an MCP server (`idp mcp`) as read-only tools.
-Every tool SHALL require a `tenant_id` argument and read **only** that tenant's
-Silver partition; no tool writes to the lake, and no tool returns raw
-(untokenized) subscriber identifiers.
+The tools SHALL be exposed by an MCP server (`idp mcp`) as read-only tools. Every
+tool SHALL require a `tenant_id` argument and read **only** that tenant's lake
+partition; no tool writes to the lake, and no tool returns raw (untokenized)
+subscriber identifiers.
 
 #### Scenario: SCN-MCP-06.1 — Tools discoverable over MCP
 - **WHEN** an MCP client lists tools against the running server
-- **THEN** all five `analyze_*_tool` tools are advertised with descriptions and
+- **THEN** all `analyze_*_tool` tools are advertised with descriptions and
   input schemas
 
 #### Scenario: SCN-MCP-06.2 — Tenant isolation enforced
@@ -120,3 +121,45 @@ Silver partition; no tool writes to the lake, and no tool returns raw
 - **WHEN** a tool is called with an unknown or missing `tenant_id`
 - **THEN** the tool returns a structured empty/error result rather than raising, and
   never leaks another tenant's data
+
+### Requirement: REQ-MCP-07 — Fraud-score distribution tool
+The system SHALL provide `analyze_fraud_score_tool(tenant_id, ...)` that reads the
+Gold `fraud_scores` table and returns, for the tenant, the **distribution** of the
+supervised fraud probability (`fraud_proba`), the deterministic `rule_score`, and
+the fused `fraud_score` over the **last 7, 15 and 30 days**. Each distribution
+SHALL include count, mean, standard deviation, min/max, key percentiles, and a
+histogram. Windows are computed relative to the latest `scored_at`; when the score
+table carries no timestamp history, each window SHALL fall back to the current
+snapshot and say so.
+
+#### Scenario: SCN-MCP-07.1 — Per-window distributions
+- **WHEN** the tool runs for a tenant with timestamped fraud scores spanning
+  several weeks
+- **THEN** it returns `by_window` keyed by `7d`/`15d`/`30d`, each carrying a
+  `fraud_proba`, `rule_score`, and `fraud_score` distribution, and the window
+  counts are non-decreasing from 7d to 30d
+
+#### Scenario: SCN-MCP-07.2 — Snapshot fallback without history
+- **WHEN** the score table has no `scored_at` timestamps
+- **THEN** every window returns the full current snapshot with a note that time
+  windows require accumulated scoring history
+
+### Requirement: REQ-MCP-08 — Credit-score distribution tool
+The system SHALL provide `analyze_credit_score_tool(tenant_id, ...)` that reads the
+Gold `credit_scores` table and returns, for the tenant, the **distribution** of the
+probability-of-default (`pd`), the affordability estimate (`affordability_base`),
+the `recommended_limit`, and the **affordability-vs-limit gap**
+(`affordability_base − recommended_limit`, the risk haircut) over the **last 7, 15
+and 30 days**, tenant-scoped, with the same distribution shape and snapshot-fallback
+behaviour as REQ-MCP-07.
+
+#### Scenario: SCN-MCP-08.1 — Distributions incl. affordability gap
+- **WHEN** the tool runs for a tenant with timestamped credit scores
+- **THEN** each of `7d`/`15d`/`30d` carries `pd`, `affordability_base`,
+  `recommended_limit`, and `affordability_gap` distributions, and the gap is the
+  affordability minus the recommended limit
+
+#### Scenario: SCN-MCP-08.2 — Tenant isolation
+- **WHEN** the tool is called for a tenant with no scores written
+- **THEN** it returns a structured empty result (count 0 + note) and never another
+  tenant's scores

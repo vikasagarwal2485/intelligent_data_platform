@@ -148,6 +148,12 @@ def to_scores(cfg: PlatformConfig, gold: dict | None = None, *, models: dict | N
     if fraud_model is not None and ff is not None and not ff.empty:
         outputs["fraud_scores"] = fraud_model.score(ff)
 
+    # Stamp each scoring run so downstream analytics can build 7/15/30-day
+    # windows; a fresh UTC timestamp per `idp score` run accumulates history.
+    scored_at = pd.Timestamp.now(tz="UTC")
+    for df in outputs.values():
+        df["scored_at"] = scored_at
+
     if persist:
         for name, df in outputs.items():
             storage.write_parquet(df, f"{storage.lake_uri(cfg, 'gold')}/{name}", cfg,
