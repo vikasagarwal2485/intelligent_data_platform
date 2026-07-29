@@ -114,7 +114,7 @@ flowchart TB
     SYN["Operator data"] --> |Streaming| KAFKA
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
-    KAFKA --> SPARK[Spark batch curate] --> S
+    SPARK[Spark batch curate] --> S
     B --> S
     S --> G1 & G2
     G1 --> FS
