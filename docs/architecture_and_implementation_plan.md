@@ -125,7 +125,6 @@ flowchart TB
     S --> TR
     G1 --> TR
     GOV -.enforces.-> S & G1 & TR & API
-    SPARK -.metrics.-> MON
     API -.metrics.-> MON
 ```
 
