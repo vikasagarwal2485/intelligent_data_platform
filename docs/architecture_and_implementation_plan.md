@@ -97,7 +97,7 @@ flowchart TB
 
     subgraph ML["ML / Serving"]
         FS["Feature Store (Feast)<br/>offline=Iceberg, online=Timescale"]
-        M1["Credit-Limit model"]
+        M1["Credit risk model"]
         M2["Fraud model"]
         REG["MLflow registry S3/MinIO"]
         API["FastAPI scoring service (batch + on-demand)"]
