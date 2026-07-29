@@ -115,13 +115,11 @@ flowchart TB
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
     KAFKA --> SPARK[Spark batch curate] --> S
-    B -.backfill.-> S
+    B --> S
     S --> G1 & G2
     G1 --> FS
     FS --> M1 & M2
     M1 & M2 --> REG --> API
-    KAFKA -.deferred.-> RT
-    FS -.deferred.-> RT
     AF --> SPARK & S & G1 & M1 & M2
     S --> TR
     G1 --> TR
