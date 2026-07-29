@@ -75,10 +75,6 @@ events link to a subscriber via `service-id` (MSISDN) and to `agreements/product
 
 ```mermaid
 flowchart TB
-    subgraph SRC["Sources (data_samples/)"]
-        E1["Entities: customers, accounts,<br/> products (JSON:API)"]
-        E2["Events: voice, data usage,<br/>recharge (JSON:API)"]
-    end
 
     subgraph ING["Ingestion"]
         NIFI["Apache NiFi<br/>file land + route + validate"]
@@ -114,9 +110,8 @@ flowchart TB
         GOV["Multi-tenancy + RBAC + GDPR<br/>(Keycloak/OPA, tenant_id isolation)"]
     end
 
-    SYN["Synthetic data generator"] --> E1 & E2
-    E1 --> NIFI --> KAFKA
-    E2 --> NIFI --> KAFKA
+    SYN["Operator data"] --> |Batch files| NIFI --> KAFKA
+    SYN["Operator data"] --> |Streaming| KAFKA
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
     KAFKA --> SPARK[Spark batch curate] --> S
