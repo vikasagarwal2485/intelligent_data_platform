@@ -115,13 +115,13 @@ flowchart TB
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
     B --> S
+    AF --> |Spark batch| S
+    AF --> |Spark batch| G1
+    AF --> M1 & M2
     S --> G1 & G2
     G1 --> FS
     FS --> M1 & M2
     M1 & M2 --> REG --> API
-    AF --> |Spark batch curate| S
-    AF --> |Spark batch curate| G1
-    AF --> M1 & M2
     S --> TR
     G1 --> TR
     GOV -.enforces.-> S & G1 & TR & API
