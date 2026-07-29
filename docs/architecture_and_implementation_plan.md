@@ -99,7 +99,7 @@ flowchart TB
         FS["Feature Store (Feast)<br/>offline=Iceberg, online=Timescale"]
         M1["Credit-Limit model"]
         M2["Fraud model"]
-        REG["MLflow registry"]
+        REG["MLflow registry S3/MinIO"]
         API["FastAPI scoring service (batch + on-demand)"]
     end
 
