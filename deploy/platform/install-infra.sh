@@ -16,10 +16,6 @@ set -euo pipefail
 NS="${1:-idp-platform}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# MinIO client image, from quay.io to match the server chart. Docker Hub's
-# minio/mc now returns "pull access denied / repository does not exist".
-MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc}"
-
 # --- Preflight: the Kubernetes API must be reachable -------------------------
 echo ">> Checking cluster connectivity (context: $(kubectl config current-context 2>/dev/null || echo none))"
 if ! kubectl cluster-info >/dev/null 2>&1; then
@@ -80,9 +76,12 @@ hi minio minio/minio --timeout 10m \
 
 echo ">> creating lake buckets (idp-bronze/silver/gold/ml) once MinIO is ready"
 kubectl -n "${NS}" rollout status deploy/minio --timeout=300s || true
-kubectl -n "${NS}" delete pod mc-mkbuckets --ignore-not-found >/dev/null 2>&1 || true
-kubectl -n "${NS}" run mc-mkbuckets --rm -i --restart=Never --image="${MC_IMAGE}" --command -- /bin/sh -c \
-  'until mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null 2>&1 && mc ls m >/dev/null 2>&1; do echo "waiting for minio..."; sleep 3; done; for b in idp-bronze idp-silver idp-gold idp-ml; do mc mb --ignore-existing m/$b && echo "bucket $b ready"; done'
+# Run mc INSIDE the MinIO server pod (it ships /usr/bin/mc) rather than pulling a
+# standalone client image: the public minio/mc repo (Docker Hub AND quay.io) now
+# returns "unauthorized" for anonymous pulls, which ImagePullBackOffs a client pod.
+# HOME=/tmp keeps mc's config dir writable; MC_HOST_m needs no `mc alias set`.
+kubectl -n "${NS}" exec -i deploy/minio -- sh -c \
+  'export HOME=/tmp MC_HOST_m=http://minioadmin:minioadmin123@127.0.0.1:9000; until mc ls m >/dev/null 2>&1; do echo "waiting for minio..."; sleep 3; done; for b in idp-bronze idp-silver idp-gold idp-ml; do mc mb --ignore-existing m/$b && echo "bucket $b ready"; done'
 
 echo ">> serving DB (TimescaleDB, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/timescaledb/timescaledb.yaml"
