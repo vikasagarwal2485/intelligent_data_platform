@@ -30,6 +30,9 @@ dev = ["pytest>=7.4", "httpx>=0.27"]
 # SHAP-based adverse-action reason codes. Optional/heavy: when absent the credit
 # model falls back to interpretable logistic-scorecard contributions.
 explain = ["shap>=0.44"]
+# Local Spark for the pandas<->Spark engine parity tests (`pytest -m spark`); matches
+# the apache/spark:3.5.3 image the Spark stage jobs run in. Needs a JDK (11/17).
+spark = ["pyspark==3.5.3"]
 
 [project.scripts]
 idp = "idp.cli:main"
@@ -41,3 +44,4 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["spark: needs pyspark + a JDK (pandas<->Spark engine parity); skipped when absent"]
