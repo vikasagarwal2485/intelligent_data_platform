@@ -3,14 +3,17 @@
 Each stage is an INDEPENDENT step that reads its input layer and writes its
 output layer, so the concerns stay separated (no consumer->silver->gold chaining):
 
-    to_bronze : raw frames                -> Bronze  (s3://idp-bronze / local)
-    to_silver : Bronze  -> canonical      -> Silver  (s3://idp-silver / local)
-    to_gold   : Silver  -> features/score -> Gold    (s3://idp-gold   / local)
-    train     : labelled features -> models (offline ML; labels not in the lake)
+    to_bronze      : raw frames              -> Bronze   (s3://idp-bronze / local)
+    to_silver      : Bronze  -> canonical    -> Silver   (s3://idp-silver / local)
+    to_gold        : Silver  -> features     -> Gold     (s3://idp-gold   / local; features ONLY)
+    to_scores      : Gold features + models  -> Gold score tables (inference)
+    publish_serving: Gold    -> TimescaleDB serving copy
+    to_labels      : ground-truth outcomes   -> labels store (s3://idp-ml/labels)
+    train          : Gold features + labels  -> models (offline ML; labels not in the lake)
 
-Each of to_silver/to_gold reads its input from storage by default, or accepts an
-in-memory frame set (used by the local `run` orchestrator and by tests). The
-`idp` CLI exposes them as `consume` (Bronze), `silver`, `gold`, `train`; `run`
+Each stage reads its input from storage by default, or accepts in-memory frames
+(used by the local `run` orchestrator and by tests). The `idp` CLI exposes them as
+`consume` (Bronze), `silver`, `gold`, `score`, `publish`, `labels`, `train`; `run`
 composes them locally for dev/testing.
 """
 from __future__ import annotations

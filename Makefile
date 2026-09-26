@@ -39,7 +39,7 @@ serve: ## Start the FastAPI scoring service on :8000
 	$(PY) -m idp.cli serve
 
 .PHONY: mcp
-mcp: ## Start the MCP analytics server (stdio): 5 read-only, tenant-scoped Silver tools
+mcp: ## Start the MCP analytics server (stdio): 7 read-only, tenant-scoped tools (5 Silver, 2 Gold scores)
 	$(PY) -m idp.cli mcp
 
 .PHONY: mcp-smoke

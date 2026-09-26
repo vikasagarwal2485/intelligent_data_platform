@@ -45,3 +45,10 @@ def test_score_stage_scores_gold_features(bronze_frames, multi_tenant_dataset):
     result = to_scores(cfg, gold=gold, models=trained["models"], persist=False)
     assert "credit_scores" in result["score_tables"]
     assert "fraud_scores" in result["score_tables"]
+
+
+def test_fee_charges_have_their_own_topic():
+    # SCN-STR-01.2 — fee charges land on t.<tenant>.fees
+    from idp.streaming.producer import _topic
+    assert TABLE_TO_SUFFIX["fee_charges"] == "fees"
+    assert _topic("t", "tenant_b", TABLE_TO_SUFFIX["fee_charges"]) == "t.tenant_b.fees"

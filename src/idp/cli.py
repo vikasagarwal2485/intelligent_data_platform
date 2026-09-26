@@ -12,7 +12,7 @@ Usage (separated medallion stages):
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
     idp serve      # start the FastAPI scoring service
-    idp mcp        # start the MCP analytics server (stdio): 5 Silver analytics tools
+    idp mcp        # start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)
 """
 from __future__ import annotations
 
@@ -169,7 +169,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
 
 def _cmd_mcp(args: argparse.Namespace) -> None:
-    """Start the MCP analytics server (stdio): five read-only, tenant-scoped tools."""
+    """Start the MCP analytics server (stdio): seven read-only, tenant-scoped tools."""
     from idp.mcp.server import main as mcp_main
 
     mcp_main(config_path=args.config)
@@ -208,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(func=_cmd_serve)
 
-    sub.add_parser("mcp", help="Start the MCP analytics server (stdio): 5 Silver analytics tools").set_defaults(func=_cmd_mcp)
+    sub.add_parser("mcp", help="Start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)").set_defaults(func=_cmd_mcp)
 
     args = parser.parse_args(argv)
     args.func(args)
