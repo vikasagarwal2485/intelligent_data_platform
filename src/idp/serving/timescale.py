@@ -30,7 +30,11 @@ def get_engine(cfg: PlatformConfig):
 
 
 def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None) -> None:
-    """Replace a serving table with ``df`` and index it by (tenant_id, service_id).
+    """Replace a serving table with ``df``, uniquely indexed by (tenant_id, service_id).
+
+    The unique index enforces one serving row per subscriber (REQ-SRV-05). A frame
+    with duplicate keys fails the index build inside the transaction, so the table
+    previously published stays intact.
 
     Concurrency-safe: ``if_exists="replace"`` does DROP+CREATE, and two publishers
     running at once (e.g. ``make publish`` overlapping the inference DAG's publish
@@ -58,7 +62,7 @@ def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None
                   method="multi", chunksize=1000)
         if idx_cols:
             cols = ", ".join(f'"{c}"' for c in idx_cols)
-            conn.execute(text(f'CREATE INDEX IF NOT EXISTS "ix_{name}_key" ON {qualified} ({cols})'))
+            conn.execute(text(f'CREATE UNIQUE INDEX IF NOT EXISTS "ux_{name}_key" ON {qualified} ({cols})'))
 
 
 def publish_gold(cfg: PlatformConfig, gold: dict[str, pd.DataFrame], engine=None) -> list[str]:

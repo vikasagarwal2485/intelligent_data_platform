@@ -7,7 +7,7 @@ local directories. This lets the same code run locally and in-cluster.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import fsspec
 import joblib
@@ -41,10 +41,30 @@ def lake_uri(cfg: PlatformConfig, layer: str) -> str:
     return getattr(cfg.storage, layer)
 
 
+WriteMode = Literal["replace", "append"]
+
+# pyarrow dataset-writer behaviour per mode (partitioned writes only).
+# "delete_matching" removes just the partition directories being written
+# (e.g. tenant_id=tenant_a), so a replace never touches other tenants.
+_EXISTING_DATA_BEHAVIOR = {"replace": "delete_matching", "append": "overwrite_or_ignore"}
+
+
 def write_parquet(
-    df: pd.DataFrame, uri: str, cfg: PlatformConfig, *, partition_cols: list[str] | None = None
+    df: pd.DataFrame,
+    uri: str,
+    cfg: PlatformConfig,
+    *,
+    partition_cols: list[str] | None = None,
+    mode: WriteMode = "replace",
 ) -> None:
     """Write a DataFrame to Parquet at ``uri`` (local or s3://).
+
+    ``mode`` (partitioned writes):
+
+    * ``"replace"`` (default) — the partitions present in ``df`` are replaced, so
+      re-running a stage is idempotent; other partitions are left untouched.
+    * ``"append"`` — new files are added next to the existing ones (used for the
+      score history, REQ-ML-07).
 
     NOTE: no S3 bucket "ensure" step here. An earlier attempt to create the bucket
     first (via s3fs) shared/poisoned the fsspec filesystem cache that this write
@@ -52,10 +72,14 @@ def write_parquet(
     buckets are provisioned separately (install-infra.sh / `make minio-mkbuckets`),
     so this stays a plain, cache-clean ``to_parquet``.
     """
+    if mode not in _EXISTING_DATA_BEHAVIOR:
+        raise ValueError(f"unknown write mode {mode!r}; expected 'replace' or 'append'")
     opts = storage_options(cfg)
     if opts is None and not uri.startswith("s3://"):
         Path(uri).mkdir(parents=True, exist_ok=True)
-    df.to_parquet(uri, index=False, partition_cols=partition_cols, storage_options=opts)
+    extra = ({"existing_data_behavior": _EXISTING_DATA_BEHAVIOR[mode]}
+             if partition_cols else {})
+    df.to_parquet(uri, index=False, partition_cols=partition_cols, storage_options=opts, **extra)
 
 
 def read_parquet(uri: str, cfg: PlatformConfig) -> pd.DataFrame:

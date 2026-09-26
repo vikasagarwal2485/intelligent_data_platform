@@ -156,4 +156,22 @@ kubectl -n idp-platform delete pvc timescaledb-data && kubectl apply -n idp-plat
 -f deploy/platform/timescaledb/timescaledb.yaml`. Give the node more memory to
 avoid repeat OOMs (`minikube start --memory=20480`).
 
+**Duplicate rows in Silver/Gold/labels after upgrading, or `publish` failing on
+a UNIQUE index** (`UNIQUE constraint failed` / `could not create unique index
+"ux_<table>_key"`): lakes written before idempotent stage writes stacked a new
+copy of every Silver/Gold feature/labels table on each re-run. Stages now
+*replace* the tenant partitions they write (Bronze and the score history still
+append), and serving tables are uniquely keyed by `(tenant_id, service_id)`.
+Clean an old lake once, with the new image built (`make image`):
+```bash
+# either start fresh ...
+make minio-reset && make stream silver gold labels train score publish
+# ... or keep Bronze and rewrite each derived table once (replace mode drops the copies)
+make silver gold labels && make score publish
+```
+Run `make score` before `publish`: publish serves each tenant's latest score run,
+and a run written before the upgrade may itself hold duplicates. Score history
+(`credit_scores`/`fraud_scores`) keeps its earlier runs; duplicates inside an old
+run only affect the 7/15/30-day MCP distributions.
+
 `make platform-services` already applies the tuned Trino/Nessie values for fresh installs.
