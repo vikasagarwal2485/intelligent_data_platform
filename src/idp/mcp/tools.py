@@ -20,6 +20,7 @@ import pandas as pd
 
 from idp.common import storage
 from idp.common.config import PlatformConfig, load_config
+from idp.common.tenancy import TenantIsolationError, require_tenant_column, scope_to_tenant
 
 # Silver tables the tools read.
 _DIM = "dim_subscriber"
@@ -59,10 +60,28 @@ def _read_layer_table(cfg: PlatformConfig, layer: str, table: str, tenant_id: st
         return pd.DataFrame()  # table not written yet -> genuinely empty
     except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
         raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
-    if "tenant_id" not in df.columns:
-        return pd.DataFrame()
+    return _scoped(df, str(tenant_id), table)
+
+
+def _isolation_error(table: str, err: TenantIsolationError) -> TenantIsolationError:
+    """Name the offending table on a tenant-isolation violation."""
+    wrapped = TenantIsolationError(f"table {table!r}: {err}")
+    wrapped.table = table
+    return wrapped
+
+
+def _scoped(df: pd.DataFrame, tenant_id: str, table: str) -> pd.DataFrame:
+    """The tenant's rows via the single tenant gateway (REQ-FND-02/06).
+
+    Untagged data (no ``tenant_id`` column) is an isolation violation, never an
+    empty or unscoped result.
+    """
+    try:
+        require_tenant_column(df)
+    except TenantIsolationError as e:
+        raise _isolation_error(table, e) from e
     df["tenant_id"] = df["tenant_id"].astype(str)
-    return df[df["tenant_id"] == str(tenant_id)].copy()
+    return scope_to_tenant(df, tenant_id)
 
 
 def _read_silver(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
@@ -82,8 +101,10 @@ def _available_tenants(cfg: PlatformConfig) -> list[str]:
         return []
     except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
         raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
-    if "tenant_id" not in df.columns:
-        return []
+    try:
+        require_tenant_column(df)
+    except TenantIsolationError as e:
+        raise _isolation_error(_DIM, e) from e
     return sorted(df["tenant_id"].astype(str).unique().tolist())
 
 
@@ -93,6 +114,8 @@ def _lake_guard(fn):
     Keeps the read-only contract and makes the two ambiguous cases explicit:
 
     * **Unreachable lake** -> ``{"error", "source"}`` (not a misleading empty ``0``).
+    * **Untagged table** (no ``tenant_id``) -> ``{"error": "tenant isolation
+      violation: ...", "table"}``; never served as empty or unscoped data.
     * **Missing/unknown tenant_id** -> the list of tenants that actually exist plus
       an ``action_required`` telling the client to ASK the user which tenant rather
       than guess. This is what turns "no tenant given" into a blocking question in
@@ -119,6 +142,11 @@ def _lake_guard(fn):
         except LakeReadError as e:
             return {"tenant_id": tenant_id or None, "error": str(e),
                     "source": storage.lake_uri(cfg, "silver")}
+        except TenantIsolationError as e:
+            # Untagged data must never be served as empty or unscoped (REQ-FND-06).
+            return {"tenant_id": tenant_id or None,
+                    "error": f"tenant isolation violation: {e}",
+                    "table": getattr(e, "table", None)}
     return wrapper
 
 

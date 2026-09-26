@@ -6,9 +6,10 @@ from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
 
 
 def test_credit_features_shape_and_columns(silver, credit_features):
-    # SCN-GLD-01.1
+    # SCN-GLD-01.1 — one row per subscriber with analytics consent (REQ-FND-05)
     assert set(["tenant_id", "service_id"] + CREDIT_FEATURES).issubset(credit_features.columns)
-    assert len(credit_features) == len(silver["dim_subscriber"])
+    dim = silver["dim_subscriber"]
+    assert len(credit_features) == int(dim["consent_analytics"].fillna(False).astype(bool).sum())
     assert credit_features[CREDIT_FEATURES].notna().all().all()
 
 

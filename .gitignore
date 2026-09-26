@@ -20,6 +20,8 @@ data/synthetic/*.parquet
 data/ground_truth/
 ml/artifacts/
 *.parquet
+# ...except the golden reference tables the regression tests compare against.
+!tests/golden/**/*.parquet
 
 # Local infra / secrets
 .env

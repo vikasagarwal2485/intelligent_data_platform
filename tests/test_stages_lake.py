@@ -23,6 +23,12 @@ def _read(cfg, layer, table) -> pd.DataFrame:
     return df
 
 
+def _consenting(cfg) -> int:
+    """Subscribers with analytics consent — the ones that get Gold rows (REQ-FND-05)."""
+    dim = _read(cfg, "silver", "dim_subscriber")
+    return int(dim["consent_analytics"].fillna(False).astype(bool).sum())
+
+
 # --- REQ-SLV-04 ---------------------------------------------------------------
 def test_silver_fails_clearly_without_core_bronze(spark, tmp_path):
     # SCN-SLV-04.1
@@ -50,10 +56,11 @@ def test_gold_built_from_persisted_silver(spark, tmp_path):
     land_golden_bronze(cfg)
     to_silver(cfg)
     result = to_gold(cfg)
-    assert result["counts"]["subscribers"] == 40
+    n = _consenting(cfg)
+    assert 0 < n <= 40 and result["counts"]["subscribers"] == n
     for table in result["gold_tables"]:
         df = _read(cfg, "gold", table)
-        assert len(df) == 40 and not df.duplicated(KEY).any()
+        assert len(df) == n and not df.duplicated(KEY).any()
 
 
 def test_gold_fails_clearly_without_silver(spark, tmp_path):
@@ -119,7 +126,7 @@ def test_scores_read_gold_from_the_lake(local_lake):
     models = train(local_lake, persist=False)["models"]
     out = to_scores(local_lake, models=models, persist=False)
     assert out["score_tables"] == ["credit_scores", "fraud_scores"]
-    assert len(out["credit_scores"]) == 120
+    assert len(out["credit_scores"]) == _consenting(local_lake)
 
 
 def test_run_equals_separate_stages(spark, tmp_path, monkeypatch):

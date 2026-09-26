@@ -286,3 +286,50 @@ def test_server_builds_and_registers_tools():
 
     server = build_server()
     assert server is not None
+
+
+# --------------------------------------------------------------------------- #
+# REQ-FND-06 — tenant-scoped reads go through the gateway                      #
+# --------------------------------------------------------------------------- #
+def _untagged_copy(local_cfg, tmp_path, table):
+    """A lake identical to local_cfg's Silver except ``table`` lacks tenant_id."""
+    import shutil
+    from pathlib import Path
+    root = tmp_path / "untagged"
+    shutil.copytree(local_cfg.storage.silver, root / "silver")
+    df = pd.read_parquet(root / "silver" / table).drop(columns=["tenant_id"])
+    shutil.rmtree(root / "silver" / table)
+    (root / "silver" / table).mkdir()
+    df.to_parquet(root / "silver" / table / "part-0.parquet", index=False)
+    s = local_cfg.storage
+    storage_cfg = StorageConfig(root=str(root), landing=s.landing, bronze=s.bronze,
+                                silver=str(root / "silver"), gold=str(root / "gold"),
+                                ml_artifacts=s.ml_artifacts)
+    return PlatformConfig(raw=local_cfg.raw, tenants=local_cfg.tenants, storage=storage_cfg)
+
+
+@pytest.mark.parametrize("table,tool", [
+    ("fact_usage", "analyze_usage_events_tool"),       # a fact read by one tool
+    ("dim_subscriber", "analyze_subscribers_tool"),    # the table tenant discovery reads
+])
+def test_untagged_table_is_an_isolation_error(local_cfg, tmp_path, monkeypatch, table, tool):
+    # SCN-FND-06.1
+    cfg = _untagged_copy(local_cfg, tmp_path, table)
+    monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: cfg)
+    out = getattr(mcp_tools, tool)("tenant_a")
+    assert out["error"].startswith("tenant isolation violation") and out["table"] == table
+    assert not ({"total_events", "subscriber_count", "business_line_mix"} & set(out))   # no rows served
+
+
+def test_tools_read_through_the_tenant_gateway(patched, monkeypatch):
+    # SCN-FND-06.2 — every tool's rows come from scope_to_tenant for the caller's tenant
+    calls = []
+    real = mcp_tools.scope_to_tenant
+    monkeypatch.setattr(mcp_tools, "scope_to_tenant",
+                        lambda df, t: calls.append(t) or real(df, t))
+    for name, fn in mcp_tools.TOOLS.items():
+        if name in ("analyze_fraud_score_tool", "analyze_credit_score_tool"):
+            continue                                   # Gold score tables: covered by scored_cfg tests
+        calls.clear()
+        fn("tenant_a")
+        assert calls and set(calls) == {"tenant_a"}, name

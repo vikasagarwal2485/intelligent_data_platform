@@ -60,9 +60,13 @@ def test_pipeline_fraud_model_beats_base_rate(pipeline_result):
     assert fm["pr_auc"] > 0.7
 
 
-def test_pipeline_scores_cover_all_subscribers(pipeline_result):
-    _, summary = pipeline_result
-    n = summary["counts"]["subscribers"]
+def test_pipeline_scores_cover_all_consenting_subscribers(pipeline_result):
+    # every subscriber with analytics consent is scored; the others never are (REQ-FND-05)
+    import pandas as pd
+    tmp_path, summary = pipeline_result
+    dim = pd.read_parquet(tmp_path / "silver" / "dim_subscriber")
+    n = int(dim["consent_analytics"].fillna(False).astype(bool).sum())
+    assert 0 < n < summary["counts"]["subscribers"]
     assert len(summary["credit_scores"]) == n
     assert len(summary["fraud_scores"]) == n
 

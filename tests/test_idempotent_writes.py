@@ -145,7 +145,8 @@ def test_gold_refresh_after_changed_silver_leaves_no_stale_rows(tmp_path, frames
                           partition_cols=["tenant_id"])   # replace mode: tenants' partitions swapped
     to_gold(cfg)
     gold = _read(cfg, "gold", "credit_features")
-    assert set(map(tuple, gold[KEY].values)) == set(map(tuple, keep[KEY].values))
+    consenting = keep[keep["consent_analytics"].fillna(False).astype(bool)]   # REQ-FND-05
+    assert set(map(tuple, gold[KEY].values)) == set(map(tuple, consenting[KEY].values))
 
 
 # --- 3. publish latest + uniqueness ------------------------------------------

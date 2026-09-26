@@ -1,8 +1,8 @@
 """Gold feature engineering: Silver -> credit/fraud feature tables, on Spark (plan 4).
 
 Pure DataFrame functions. Each feature table is keyed by ``(tenant_id,
-service_id)`` — one row per subscriber in ``dim_subscriber`` — followed by exactly
-the model feature contract (``idp.features.CREDIT_FEATURES`` /
+service_id)`` — one row per subscriber in ``dim_subscriber`` who granted analytics
+consent (REQ-FND-05) — followed by exactly the model feature contract (``idp.features.CREDIT_FEATURES`` /
 ``FRAUD_FEATURES``).
 
 Lookback windows use one reference time per source table: that table's latest
@@ -13,10 +13,29 @@ from __future__ import annotations
 
 from typing import Any
 
+from idp.common.pii import ConsentError
 from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
 
 KEY = ["tenant_id", "service_id"]
 DAY_US = 86_400 * 1_000_000
+
+
+def consenting_subscribers(dim: Any, purpose: str = "analytics") -> Any:
+    """Subscribers who granted consent for ``purpose`` (REQ-FND-05).
+
+    Fail closed: a false or null ``consent_<purpose>`` excludes the subscriber, and
+    a dimension without the column raises :class:`ConsentError` rather than
+    passing everyone through.
+    """
+    from pyspark.sql import functions as F
+
+    col = f"consent_{purpose}"
+    if col not in dim.columns:
+        raise ConsentError(
+            f"dim_subscriber has no {col!r} column; cannot decide consent for "
+            f"{purpose!r} processing. Rebuild Silver ('idp silver') first."
+        )
+    return dim.filter(F.coalesce(F.col(col).cast("boolean"), F.lit(False)))
 
 
 def _ref_us(df: Any, col: str) -> int | None:
@@ -139,10 +158,13 @@ def _select(df: Any, features: list[str]) -> Any:
 
 
 def build_credit_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
-    """Credit feature table (plan 4.2): recharge ability/reliability, spend, tenure, fees."""
+    """Credit feature table (plan 4.2): recharge ability/reliability, spend, tenure, fees.
+
+    Only subscribers with analytics consent get a row (REQ-FND-05).
+    """
     from pyspark.sql import functions as F
 
-    dim = silver["dim_subscriber"]
+    dim = consenting_subscribers(silver["dim_subscriber"])
     feats = _merge(dim,
                    recharge_aggregates(silver["fact_recharge"], windows),
                    usage_aggregates(silver["fact_usage"], windows),
@@ -162,11 +184,14 @@ def build_credit_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
 
 
 def build_fraud_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
-    """Fraud feature table (plan 4.3): velocity, traffic asymmetry, roaming, recharge anomalies."""
+    """Fraud feature table (plan 4.3): velocity, traffic asymmetry, roaming, recharge anomalies.
+
+    Only subscribers with analytics consent get a row (REQ-FND-05).
+    """
     from pyspark.sql import Window
     from pyspark.sql import functions as F
 
-    feats = _merge(silver["dim_subscriber"],
+    feats = _merge(consenting_subscribers(silver["dim_subscriber"]),
                    recharge_aggregates(silver["fact_recharge"], windows),
                    usage_aggregates(silver["fact_usage"], windows))
     # per-tenant population z-score of the max recharge (card-fraud signal)

@@ -2,15 +2,24 @@
 
 Implements deterministic, per-tenant-salted tokenization so PII (MSISDN, IMSI,
 IMEI, phone, email) can be used as stable join keys in the lakehouse without
-storing the raw identifier. Also provides consent-based filtering used by the
-feature/ML layers (a subscriber without analytics consent is excluded from
-model training/scoring).
+storing the raw identifier.
+
+Consent (REQ-FND-05) is enforced once, where Gold features are built:
+``idp.transforms.features.consenting_subscribers`` drops every subscriber whose
+``consent_analytics`` is false or null (fail closed) and raises
+:class:`ConsentError` when the column is missing. Training, scoring, the serving
+store and score analytics all read Gold, so they inherit the exclusion.
+:func:`filter_by_consent` below is the equivalent row filter for pandas frames.
 """
 from __future__ import annotations
 
 import hashlib
 
 import pandas as pd
+
+class ConsentError(RuntimeError):
+    """Consent information needed to decide on processing is missing (fail closed)."""
+
 
 # Columns that must be tokenized before leaving the Silver layer.
 PII_COLUMNS = ("msisdn", "imsi", "imei", "phone", "email", "other_party_number", "service_id")
@@ -40,10 +49,11 @@ def tokenize_columns(df: pd.DataFrame, salt: str, columns=PII_COLUMNS) -> pd.Dat
 def filter_by_consent(
     df: pd.DataFrame, purpose: str = "analytics", consent_col_prefix: str = "consent_"
 ) -> pd.DataFrame:
-    """Keep only rows where the subscriber granted consent for ``purpose``.
+    """Keep only rows where the subscriber granted consent for ``purpose`` (pandas).
 
-    If the consent column is absent, the frame is returned unchanged (consent is
-    enforced upstream at the subscriber dimension).
+    Null counts as no consent. If the consent column is absent the frame is
+    returned unchanged; the ML path does not rely on this helper; it enforces
+    consent fail-closed in ``idp.transforms.features.consenting_subscribers``.
     """
     col = f"{consent_col_prefix}{purpose}"
     if col not in df.columns:

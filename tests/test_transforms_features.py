@@ -7,7 +7,8 @@ from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.transforms import features
 
 DIM_SCHEMA = ("tenant_id string, service_id string, agreement_id string, account_tenure_days long, "
-              "num_products long, has_device_agreement boolean, is_company boolean")
+              "num_products long, has_device_agreement boolean, is_company boolean, "
+              "consent_analytics boolean")
 RECH_SCHEMA = ("tenant_id string, id string, service_id string, created_at timestamp, amount double, "
                "status string, payment_method string")
 USAGE_SCHEMA = ("tenant_id string, id string, service_id string, event_type string, started_at timestamp, "
@@ -24,15 +25,17 @@ def _ts(s):
 @pytest.fixture()
 def silver(spark):
     dim = spark.createDataFrame([
-        ("tenant_a", "s1", "g1", 400, 2, False, False),
-        ("tenant_a", "s2", "g2", 10, 0, True, True),
-        ("tenant_b", "s3", "g3", 100, 1, False, False),
+        ("tenant_a", "s1", "g1", 400, 2, False, False, True),
+        ("tenant_a", "s2", "g2", 10, 0, True, True, True),
+        ("tenant_b", "s3", "g3", 100, 1, False, False, True),
+        ("tenant_a", "s4", "g4", 50, 1, False, False, False),   # no analytics consent
     ], DIM_SCHEMA)
     rech = spark.createDataFrame([
         ("tenant_a", "r1", "s1", _ts("2026-03-31T00:00:00"), 10.0, "successful", "credit_card"),
         ("tenant_a", "r2", "s1", _ts("2026-01-15T00:00:00"), 30.0, "successful", "cash"),
         ("tenant_a", "r3", "s1", _ts("2026-03-30T00:00:00"), 50.0, "failed", "cash"),
         ("tenant_b", "r4", "s3", _ts("2026-03-01T00:00:00"), 20.0, "successful", "voucher"),
+        ("tenant_a", "r5", "s4", _ts("2026-02-01T00:00:00"), 500.0, "successful", "cash"),
     ], RECH_SCHEMA)
     usage = spark.createDataFrame([
         ("tenant_a", "u1", "s1", "voice", _ts("2026-03-31T10:00:00"), 2.0, 120.0, False, "originating", "tok_x"),
@@ -102,3 +105,24 @@ def test_fraud_zscore_is_per_tenant(silver):
     assert rows["s1"]["recharge_amount_zscore"] == pytest.approx(1.0)
     assert rows["s2"]["recharge_amount_zscore"] == pytest.approx(-1.0)
     assert rows["s3"]["recharge_amount_zscore"] == 0.0
+
+
+# --- REQ-FND-05: analytics consent (fail closed) ------------------------------
+def test_consenting_subscribers_fails_closed(spark):
+    from idp.common.pii import ConsentError
+    dim = spark.createDataFrame(
+        [("tenant_a", "yes", True), ("tenant_a", "no", False), ("tenant_a", "unknown", None)],
+        "tenant_id string, service_id string, consent_analytics boolean")
+    kept = {r["service_id"] for r in features.consenting_subscribers(dim).collect()}
+    assert kept == {"yes"}                                   # SCN-FND-05.3: null == no consent
+    with pytest.raises(ConsentError, match="consent_analytics"):
+        features.consenting_subscribers(dim.drop("consent_analytics"))
+
+
+def test_non_consenting_subscriber_excluded_from_both_tables(silver):
+    # SCN-FND-05.1 — s4 has activity but no consent: no feature row, and its large
+    # recharge does not leak into the per-tenant z-score of the others
+    credit = _rows(features.build_credit_features(silver, (30, 90)))
+    fraud = _rows(features.build_fraud_features(silver, (30, 90)))
+    assert set(credit) == set(fraud) == {"s1", "s2", "s3"}   # every consenting subscriber once
+    assert fraud["s1"]["recharge_amount_zscore"] == pytest.approx(1.0)

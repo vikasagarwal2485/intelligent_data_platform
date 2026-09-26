@@ -8,8 +8,7 @@ true. Because model training, the Score stage, the serving store and the score
 analytics all read Gold, a non-consenting subscriber SHALL never be trained on,
 scored, published or reported per subscriber. A null or missing consent value SHALL
 be treated as no consent. If the subscriber data has no consent column at all, the
-Gold stage SHALL fail with a clear error rather than include every subscriber. This
-SHALL hold for both execution engines.
+Gold stage SHALL fail with a clear error rather than include every subscriber.
 
 #### Scenario: SCN-FND-05.1 — Non-consenting subscriber excluded from features
 - **WHEN** Gold is built from Silver in which subscriber S has

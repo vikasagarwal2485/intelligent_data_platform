@@ -33,7 +33,8 @@ def main() -> None:
                 src = Path(getattr(cfg.storage, layer)) / t
                 dst = HERE / layer / t
                 shutil.rmtree(dst, ignore_errors=True)
-                shutil.copytree(src, dst)
+                # Parquet only: skip Spark's .crc checksums and _SUCCESS markers.
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*.crc", "_SUCCESS"))
                 print(f"wrote {dst.relative_to(HERE.parent.parent)}")
 
 

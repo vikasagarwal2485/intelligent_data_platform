@@ -17,8 +17,8 @@ data is used.
 ## What Changes
 
 - Subscribers without analytics consent are excluded when Gold features are built,
-  in both engines, so they never reach training, scoring, the serving store or
-  score analytics. Missing or null consent counts as **no consent** (fail closed).
+  once, in the Spark feature transforms (the single engine), so they never reach
+  training, scoring, the serving store or score analytics. Missing or null consent counts as **no consent** (fail closed).
 - A lake table used for model features that has no consent information fails the
   Gold stage loudly instead of passing everyone through.
 - Every tenant-scoped read in the MCP analytics path goes through the tenant
@@ -40,14 +40,16 @@ None.
 ## Impact
 
 - Code:
-  - `src/idp/common/pii.py` (strict mode)
-  - `src/idp/features/credit_features.py`, `fraud_features.py` (filter the dim)
-  - `pipelines/spark/gold_job.py` (same filter)
+  - `src/idp/transforms/features.py` (Spark consent filter on `dim_subscriber`)
+  - `src/idp/common/pii.py` (`ConsentError`; docstring fixed to name the real
+    enforcement point)
   - `src/idp/mcp/tools.py` (read via `scope_to_tenant`)
 - Data: Gold, scores and serving shrink by the non-consenting share. Tests asserting
-  "one feature row per subscriber" change to "per consenting subscriber".
-- Ordering: after `idempotent-stage-writes`, so a revoked subscriber's old Gold rows
-  are actually removed on refresh. The Spark part coordinates with
-  `spark-engine-parity`.
+  "one feature row per subscriber" change to "per consenting subscriber". The golden
+  Gold files (`tests/golden/gold/`) are regenerated; the only difference must be the
+  non-consenting rows.
+- Ordering: after `idempotent-stage-writes` (so a revoked subscriber's old Gold rows
+  are removed on refresh) and `spark-single-engine` (so the filter is written once,
+  in `idp.transforms`). Both are archived.
 - Non-goal: aggregate Silver analytics (MCP tools 1–5) keep counting all
   subscribers; see design.md.
