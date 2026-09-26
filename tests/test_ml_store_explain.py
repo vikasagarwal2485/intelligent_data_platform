@@ -143,3 +143,60 @@ def test_train_lake_path_errors_without_labels(tmp_path):
     to_gold(cfg, silver=to_silver(cfg, frames))   # Gold exists but NO labels seeded
     with pytest.raises(RuntimeError, match="labels"):
         train(cfg)
+
+
+def test_train_errors_clearly_on_empty_label_join(tmp_path):
+    # SCN-ML-06.4 — labels seeded with different params don't join Gold features
+    import pytest
+    from idp.pipeline import ENTITIES, to_bronze, to_gold, to_labels, to_silver, train
+    from idp.synthetic.generator import generate_for_tenants
+    cfg = _local_cfg(tmp_path)
+    ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
+    frames = {e: getattr(ds, e) for e in ENTITIES}
+    to_bronze(cfg, frames)
+    to_gold(cfg, silver=to_silver(cfg, frames))
+    other = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=99)
+    to_labels(cfg, dataset=other)                    # mismatched synthetic params
+    with pytest.raises(RuntimeError, match="empty"):
+        train(cfg)
+
+
+def test_score_skips_missing_model(tmp_path, silver, credit_labeled):
+    # SCN-ML-07.3 — no fraud model in the store -> credit_scores only, no error
+    cfg = _local_cfg(tmp_path)
+    cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
+    storage.save_model(cm, storage.model_uri(cfg, "credit_model.joblib"), cfg)
+    result = to_scores(cfg, gold=to_gold(cfg, silver=silver, persist=False), persist=False)
+    assert result["score_tables"] == ["credit_scores"]
+
+
+def test_score_runs_are_timestamped_and_accumulate(tmp_path, silver, credit_labeled):
+    # SCN-ML-07.4 — each run stamps one scored_at; both runs are readable from Gold
+    cfg = _local_cfg(tmp_path)
+    cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
+    gold = to_gold(cfg, silver=silver, persist=False)
+    for _ in range(2):
+        out = to_scores(cfg, gold=gold, models={"credit": cm}, persist=True)
+        assert out["credit_scores"]["scored_at"].nunique() == 1
+    stored = storage.read_parquet(f"{storage.lake_uri(cfg, 'gold')}/credit_scores", cfg)
+    assert stored["scored_at"].nunique() == 2
+    assert len(stored) == 2 * len(gold["credit_features"])
+
+
+def test_duplicate_labels_do_not_fan_out(tmp_path):
+    # SCN-ML-06.5 — re-seeding stacks labels; training still sees one row per subscriber
+    from idp.pipeline import ENTITIES, _read_labels, to_bronze, to_gold, to_labels, to_silver, train
+    from idp.synthetic.generator import generate_for_tenants
+    cfg = _local_cfg(tmp_path)
+    ds = generate_for_tenants(["tenant_a"], subscribers=60, days=30, fraud_rate=0.2, seed=7)
+    frames = {e: getattr(ds, e) for e in ENTITIES}
+    to_bronze(cfg, frames)
+    gold = to_gold(cfg, silver=to_silver(cfg, frames))
+    to_labels(cfg, dataset=ds)
+    to_labels(cfg, dataset=ds)                       # second seeding appends a copy
+
+    labels = _read_labels(cfg)
+    assert not labels.duplicated(["tenant_id", "service_id"]).any()
+    joined = gold["credit_features"].merge(labels, on=["tenant_id", "service_id"])
+    assert len(joined) == len(gold["credit_features"])   # one training row per subscriber
+    train(cfg, persist=False)                            # and training succeeds on it

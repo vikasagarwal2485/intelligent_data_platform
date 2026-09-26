@@ -44,7 +44,7 @@ serve: ## Start the FastAPI scoring service on :8000
 	$(PY) -m idp.cli serve
 
 .PHONY: mcp
-mcp: ## Start the MCP analytics server (stdio): 5 read-only, tenant-scoped Silver tools
+mcp: ## Start the MCP analytics server (stdio): 7 read-only, tenant-scoped tools (5 Silver, 2 Gold scores)
 	$(PY) -m idp.cli mcp
 
 .PHONY: mcp-smoke
@@ -266,7 +266,9 @@ timescale-verify: ## Verify the publish stage: list every gold.* serving table w
 	  -c "\dt+ gold.*" \
 	  -c "SELECT schemaname, relname AS table, n_live_tup AS approx_rows FROM pg_stat_user_tables WHERE schemaname='gold' ORDER BY relname;" \
 	  -c "SELECT tenant_id, count(*) AS rows FROM gold.credit_features GROUP BY tenant_id ORDER BY tenant_id;" \
-	  -c "SELECT * FROM gold.credit_features LIMIT 3;"
+	  -c "SELECT * FROM gold.credit_features LIMIT 3;" \
+      -c "SELECT tenant_id, count(*) AS rows FROM gold.credit_scores GROUP BY tenant_id ORDER BY tenant_id;" \
+	  -c "SELECT * FROM gold.credit_scores LIMIT 3;"
 
 # --- Airflow orchestration (production Silver/Gold) -------------------------
 .PHONY: airflow-wire

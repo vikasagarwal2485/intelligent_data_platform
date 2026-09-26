@@ -56,3 +56,30 @@ def test_missing_model_returns_503(tmp_path):
     client = TestClient(create_app(artifacts_dir=tmp_path / "empty"))
     resp = client.post("/credit-limit", json={"tenant_id": "a", "service_id": "x", "features": {}})
     assert resp.status_code == 503
+
+
+# --- REQ-SRV-04: precomputed serving lookup ---------------------------------
+def test_serving_lookup_503_when_store_disabled(monkeypatch):
+    monkeypatch.delenv("IDP_TS_HOST", raising=False)
+    client = TestClient(create_app())
+    assert client.get("/serving/credit_scores/tenant_a/tok_x").status_code == 503
+
+
+def test_serving_lookup_404_for_unknown_table_or_row(monkeypatch):
+    from idp.serving import timescale
+
+    monkeypatch.setenv("IDP_TS_HOST", "localhost")
+    monkeypatch.setattr(timescale, "read_score", lambda *a, **k: None)
+    client = TestClient(create_app())
+    assert client.get("/serving/labels/tenant_a/tok_x").status_code == 404
+    assert client.get("/serving/credit_scores/tenant_a/tok_missing").status_code == 404
+
+
+def test_serving_lookup_returns_published_row(monkeypatch):
+    from idp.serving import timescale
+
+    row = {"tenant_id": "tenant_a", "service_id": "tok_x", "recommended_limit": 42.0}
+    monkeypatch.setenv("IDP_TS_HOST", "localhost")
+    monkeypatch.setattr(timescale, "read_score", lambda *a, **k: row)
+    resp = TestClient(create_app()).get("/serving/credit_scores/tenant_a/tok_x")
+    assert resp.status_code == 200 and resp.json() == row

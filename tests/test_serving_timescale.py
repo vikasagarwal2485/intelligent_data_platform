@@ -51,3 +51,18 @@ def test_read_missing_returns_none(tmp_path):
     timescale.publish_gold(cfg, {"credit_scores": pd.DataFrame([
         {"tenant_id": "tenant_a", "service_id": "tok_x", "pd": 0.1}])}, engine=engine)
     assert timescale.read_score(cfg, "credit_scores", "tenant_a", "nope", engine=engine) is None
+
+
+def test_publish_without_gold_tables_fails_clearly(tmp_path):
+    # SCN-SRV-01.4 — nothing to publish -> clear error pointing at the Gold stage
+    import pytest
+
+    from idp.common.config import StorageConfig
+    from idp.pipeline import publish_serving
+    cfg = load_config()
+    cfg.storage = StorageConfig(
+        root=str(tmp_path), landing=str(tmp_path / "l"), bronze=str(tmp_path / "b"),
+        silver=str(tmp_path / "s"), gold=str(tmp_path / "g"), ml_artifacts=str(tmp_path / "ml"),
+    )
+    with pytest.raises(RuntimeError, match="Gold"):
+        publish_serving(cfg)

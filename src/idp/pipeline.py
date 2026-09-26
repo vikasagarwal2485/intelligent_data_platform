@@ -3,14 +3,17 @@
 Each stage is an INDEPENDENT step that reads its input layer and writes its
 output layer, so the concerns stay separated (no consumer->silver->gold chaining):
 
-    to_bronze : raw frames                -> Bronze  (s3://idp-bronze / local)
-    to_silver : Bronze  -> canonical      -> Silver  (s3://idp-silver / local)
-    to_gold   : Silver  -> features/score -> Gold    (s3://idp-gold   / local)
-    train     : labelled features -> models (offline ML; labels not in the lake)
+    to_bronze      : raw frames              -> Bronze   (s3://idp-bronze / local)
+    to_silver      : Bronze  -> canonical    -> Silver   (s3://idp-silver / local)
+    to_gold        : Silver  -> features     -> Gold     (s3://idp-gold   / local; features ONLY)
+    to_scores      : Gold features + models  -> Gold score tables (inference)
+    publish_serving: Gold    -> TimescaleDB serving copy
+    to_labels      : ground-truth outcomes   -> labels store (s3://idp-ml/labels)
+    train          : Gold features + labels  -> models (offline ML; labels not in the lake)
 
-Each of to_silver/to_gold reads its input from storage by default, or accepts an
-in-memory frame set (used by the local `run` orchestrator and by tests). The
-`idp` CLI exposes them as `consume` (Bronze), `silver`, `gold`, `train`; `run`
+Each stage reads its input from storage by default, or accepts in-memory frames
+(used by the local `run` orchestrator and by tests). The `idp` CLI exposes them as
+`consume` (Bronze), `silver`, `gold`, `score`, `publish`, `labels`, `train`; `run`
 composes them locally for dev/testing.
 """
 from __future__ import annotations
@@ -55,12 +58,16 @@ def _read_layer(cfg: PlatformConfig, layer: str, tables) -> dict[str, pd.DataFra
 
 # --- Stage 1: Bronze --------------------------------------------------------
 def to_bronze(cfg: PlatformConfig, frames: dict[str, pd.DataFrame], *, persist: bool = True) -> dict:
-    """Persist raw per-entity frames to the Bronze layer (tenant-partitioned)."""
+    """Persist raw per-entity frames to the Bronze layer (tenant-partitioned).
+
+    Bronze is an append-only raw log: each consumed batch adds to what is there
+    (Silver de-duplicates), so it never replaces earlier batches.
+    """
     if persist:
         for name, df in frames.items():
             if df is not None and not df.empty:
                 storage.write_parquet(df, f"{storage.lake_uri(cfg, 'bronze')}/{name}", cfg,
-                                      partition_cols=["tenant_id"])
+                                      partition_cols=["tenant_id"], mode="append")
     return {"bronze_tables": [n for n, d in frames.items() if d is not None and not d.empty]}
 
 
@@ -155,21 +162,37 @@ def to_scores(cfg: PlatformConfig, gold: dict | None = None, *, models: dict | N
         df["scored_at"] = scored_at
 
     if persist:
+        # Append: score tables are the run-by-run history (one snapshot per scored_at).
         for name, df in outputs.items():
             storage.write_parquet(df, f"{storage.lake_uri(cfg, 'gold')}/{name}", cfg,
-                                  partition_cols=["tenant_id"])
+                                  partition_cols=["tenant_id"], mode="append")
     return {"score_tables": list(outputs), **outputs}
 
 
 # --- Stage 4: Serving (Gold -> TimescaleDB) ---------------------------------
 GOLD_SERVING_TABLES = ("credit_scores", "fraud_scores", "credit_features", "fraud_features")
+SCORE_TABLES = ("credit_scores", "fraud_scores")
+
+
+def latest_score_run(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only each tenant's latest ``scored_at`` run of a score table.
+
+    Score tables accumulate one snapshot per `idp score` run; serving wants just
+    the current one. Frames without ``scored_at`` (legacy) are returned as-is.
+    """
+    if df is None or df.empty or "scored_at" not in df.columns or df["scored_at"].isna().all():
+        return df
+    ts = pd.to_datetime(df["scored_at"], utc=True, errors="coerce")
+    latest = ts.groupby(df["tenant_id"]).transform("max")
+    return df[ts == latest].reset_index(drop=True)
 
 
 def publish_serving(cfg: PlatformConfig, gold: dict | None = None) -> dict:
     """Publish Gold tables to the TimescaleDB serving layer (plan Q4/Q6).
 
-    Reads the Gold tables from storage if not given, then upserts them into
-    TimescaleDB indexed by (tenant_id, service_id) for low-latency serving.
+    Reads the Gold tables from storage if not given, reduces the score tables to
+    each tenant's latest run, then replaces the serving tables in TimescaleDB,
+    uniquely indexed by (tenant_id, service_id), for low-latency serving.
     """
     from idp.serving import timescale
 
@@ -177,6 +200,8 @@ def publish_serving(cfg: PlatformConfig, gold: dict | None = None) -> dict:
         gold = _read_layer(cfg, "gold", GOLD_SERVING_TABLES)
     if not gold:
         raise RuntimeError("No Gold tables found to publish. Run the Gold stage ('idp gold') first.")
+    gold = {name: latest_score_run(df) if name in SCORE_TABLES else df
+            for name, df in gold.items()}
     published = timescale.publish_gold(cfg, gold)
     return {"published": published, "target": cfg.timescale.get("host")}
 

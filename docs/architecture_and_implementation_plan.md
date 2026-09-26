@@ -75,14 +75,10 @@ events link to a subscriber via `service-id` (MSISDN) and to `agreements/product
 
 ```mermaid
 flowchart TB
-    subgraph SRC["Sources (data_samples/)"]
-        E1["Entities: parties, accounts,<br/>agreements, products (JSON:API)"]
-        E2["Events: voice, data usage,<br/>recharge (JSON:API)"]
-    end
 
     subgraph ING["Ingestion"]
         NIFI["Apache NiFi<br/>file land + route + validate"]
-        KAFKA["Kafka topics<br/>tmf.parties / tmf.accounts /<br/>tmf.usage.voice / tmf.usage.data /<br/>tmf.recharge / *.dlq"]
+        KAFKA["Kafka topics<br/>customers / accounts / products /<br/>usage-events /<br/>recharges / *.dlq"]
         SR["Schema Registry (Avro)"]
     end
 
@@ -91,21 +87,20 @@ flowchart TB
     end
 
     subgraph SILVER["Silver (curated, Iceberg)"]
-        S["Iceberg tables:<br/>dim_party, dim_account, dim_agreement,<br/>dim_product, fact_usage, fact_recharge"]
+        S["Iceberg tables:<br/>dim_subscriber, fact_fee_charge <br/> fact_usage, fact_recharge"]
     end
 
     subgraph GOLD["Gold (serving)"]
-        G1["Feature tables (Iceberg + TimescaleDB)<br/>subscriber_features_daily"]
+        G1["Feature tables (Iceberg + TimescaleDB)<br/>subscriber_features_daily, credit_features"]
         G2["Aggregates / KPIs"]
     end
 
     subgraph ML["ML / Serving"]
-        FS["Feature Store (Feast)<br/>offline=Iceberg, online=Redis/Timescale"]
-        M1["Credit-Limit model (LightGBM)"]
-        M2["Fraud model (XGBoost + IsolationForest)"]
-        REG["MLflow registry"]
+        FS["Feature Store (Feast)<br/>offline=Iceberg, online=Timescale"]
+        M1["Credit risk model"]
+        M2["Fraud model"]
+        REG["MLflow registry S3/MinIO"]
         API["FastAPI scoring service (batch + on-demand)"]
-        RT["Flink real-time fraud scoring<br/>(DEFERRED — later phase)"]
     end
 
     subgraph OPS["Orchestration, Governance & Observability"]
@@ -115,24 +110,21 @@ flowchart TB
         GOV["Multi-tenancy + RBAC + GDPR<br/>(Keycloak/OPA, tenant_id isolation)"]
     end
 
-    SYN["Synthetic data generator"] --> E1 & E2
-    E1 --> NIFI --> KAFKA
-    E2 --> NIFI --> KAFKA
+    SYN["Operator data"] --> |Batch files| NIFI --> KAFKA
+    SYN["Operator data"] --> |Streaming| KAFKA
     KAFKA <--> SR
     KAFKA -->|S3 sink| B
-    KAFKA --> SPARK[Spark batch curate] --> S
-    B -.backfill.-> S
+    B --> S
+    AF --> |Spark batch| S
+    AF --> |Spark batch| G1
+    AF --> M1 & M2
     S --> G1 & G2
     G1 --> FS
     FS --> M1 & M2
     M1 & M2 --> REG --> API
-    KAFKA -.deferred.-> RT
-    FS -.deferred.-> RT
-    AF --> SPARK & S & G1 & M1 & M2
     S --> TR
     G1 --> TR
     GOV -.enforces.-> S & G1 & TR & API
-    SPARK -.metrics.-> MON
     API -.metrics.-> MON
 ```
 
