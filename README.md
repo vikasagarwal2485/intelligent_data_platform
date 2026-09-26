@@ -175,13 +175,16 @@ flowchart TB
 src/idp/                     # the platform package
   common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage
   synthetic/generator.py     #   synthetic data generator (labelled, multi-tenant)
-  ingestion/bronze.py        #   Bronze: raw, immutable, tenant-partitioned Parquet
-  curation/                  #   Silver: JSON:API unwrap (jsonapi.py) + canonical tables (silver.py)
-  features/                  #   Gold features: credit_features.py, fraud_features.py, base.py
+  ingestion/                 #   Bronze: landing + raw, tenant-partitioned Parquet (bronze.py);
+                             #   TM Forum JSON:API source adapter (jsonapi.py)
+  transforms/                #   Spark Silver/Gold (single engine): silver.py, features.py,
+                             #   tokens.py, session.py, lake.py
+  features/                  #   the model feature contract (CREDIT_FEATURES / FRAUD_FEATURES)
   ml/                        #   credit_model.py (PD + limit), fraud_model.py (rules+GBM+iforest)
   streaming/                 #   Kafka producer.py + consumer.py
   serving/api.py             #   FastAPI scoring service
-  pipeline.py                #   batch run() + streaming process_bronze()
+  mcp/                       #   MCP analytics server + tools
+  pipeline.py                #   stage functions (to_silver/to_gold/to_scores/train/...) + local run()
   cli.py                     #   `idp` entrypoint
 config/                      # platform.yaml + Avro schema contracts (config/avro)
 data_samples/                # reference TM Forum JSON:API documents
@@ -423,8 +426,10 @@ transforms in `transforms/silver.py:curate()`, and **writes Silver**
 and the Spark master differ.
 
 **Transformations:**
-- **JSON:API unwrap** (`curation/jsonapi.py`): flatten `data.attributes`, strip
-  `UUID(...)` wrappers, normalize money.
+- **Id canonicalization:** strip `UUID(...)` wrappers from entity and relationship
+  ids so relationships join their targets. (Unwrapping whole TM Forum JSON:API
+  envelopes is the ingestion adapter's job, `ingestion/jsonapi.py`; Silver curates
+  canonical records.)
 - **Money normalization:** `gross_amount = net_amount + tax_amount`.
 - **GDPR PII tokenization** (`common/pii.py`): MSISDN/IMSI/IMEI/other-party →
   `tok_<sha256(per-tenant-salt + value)>`. Deterministic per tenant, so tokens

@@ -100,3 +100,12 @@ def test_curate_requires_core_entities(spark, entities):
     parties, accounts, _, _ = entities
     with pytest.raises(RuntimeError, match="Populate Bronze first"):
         silver.curate({"parties": parties, "accounts": accounts}, SALTS)
+
+
+def test_uuid_wrapped_relationship_ids_join_their_target(spark, entities):
+    # SCN-SLV-02.2 — agreement g1 references its account as "UUID(a1)" (as in the real
+    # TM Forum samples); Silver strips the wrapper so the agreement joins account a1.
+    rows = {r["service_id"]: r for r in silver.build_dim_subscriber(*entities, SALTS).collect()}
+    row = rows[tokenize_value("4670001", "salt-a")]
+    assert row["account_id"] == "a1"
+    assert (row["account_type"], row["account_segment"]) == ("salaried", "B2C")   # a1's attributes

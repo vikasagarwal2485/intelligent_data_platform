@@ -1,6 +1,7 @@
-"""JSON:API unwrap helpers (plan section 3.3).
+"""JSON:API source adapter for ingestion (REQ-BRZ-04; plan section 3.2/3.3).
 
-The source documents in ``data_samples/`` are TM Forum JSON:API envelopes:
+Real operator source documents (see ``data_samples/``) are TM Forum JSON:API
+envelopes:
 ``{"data": {"type", "id", "attributes": {...}, "relationships": {...}}}`` with
 quirks this module normalizes:
 
@@ -8,8 +9,9 @@ quirks this module normalizes:
 * money split into ``tax-free-amount`` + ``tax-amounts`` -> net / tax / gross
 * nested ``attributes``/``event-details`` flattened
 
-These are the transformations NiFi/Spark perform when promoting raw envelopes
-into the canonical Bronze/Silver schema.
+The adapter turns one envelope into one canonical record, ready to land in Bronze,
+at the point where data enters the platform. Silver never sees envelopes; it
+curates canonical records (REQ-SLV-02).
 """
 from __future__ import annotations
 

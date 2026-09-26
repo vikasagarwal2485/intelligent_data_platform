@@ -95,7 +95,7 @@ def test_spark_tokens_equal_python_tokens(spark):
 def test_strip_uuid_matches_python(spark):
     from pyspark.sql import functions as F
 
-    from idp.curation.jsonapi import strip_uuid_wrapper
+    from idp.ingestion.jsonapi import strip_uuid_wrapper
     from idp.transforms.tokens import strip_uuid
     vals = ["UUID(116100030984920447)", "plain-id", "UUID()"]
     df = spark.createDataFrame([(v,) for v in vals], "v string")
