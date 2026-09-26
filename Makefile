@@ -5,6 +5,11 @@ PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 NAMESPACE_PLATFORM := idp-platform
 TENANTS := tenant-a tenant-b
+# MinIO client image. Pulled from quay.io (not Docker Hub) to match the MinIO
+# server chart: the Docker Hub `minio/mc` repo now returns "pull access denied /
+# repository does not exist", so quay.io/minio/mc is the freely-pullable mirror.
+# Override on the CLI if you mirror it elsewhere:  make minio-ls MC_IMAGE=...
+MC_IMAGE ?= quay.io/minio/mc
 
 # ---------------------------------------------------------------------------
 # Local development (Python)
@@ -152,7 +157,7 @@ kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schema
 
 .PHONY: minio-ls
 minio-ls: ## List the lake objects in MinIO (idp-bronze / idp-silver / idp-gold)
-	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+	kubectl -n idp-platform run mc --rm -i --restart=Never --image=$(MC_IMAGE) --command -- /bin/sh -c \
 	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold; do echo "== $$b =="; mc ls -r m/$$b/; done'
 
 .PHONY: minio-reset
@@ -163,17 +168,17 @@ minio-reset: ## Empty the lake buckets (idp-bronze/silver/gold) for a clean re-r
 	# fraud_features/) that then SHADOW new writes to those same keys — the object
 	# PUTs succeed but list/get return nothing. `mc rb --force` drops the bucket and
 	# ALL versions/markers/ILM; `mc mb` recreates it clean (unversioned by default).
-	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+	kubectl -n idp-platform run mc --rm -i --restart=Never --image=$(MC_IMAGE) --command -- /bin/sh -c \
 	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold idp-ml; do echo "recreating $$b"; mc rb --force m/$$b/ 2>/dev/null || true; mc mb --ignore-existing m/$$b; done; echo done'
 
 .PHONY: minio-versions
 minio-versions: ## Diagnose hidden bucket state (versioning, delete markers, ILM) — a plain `ls` hides these
-	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+	kubectl -n idp-platform run mc --rm -i --restart=Never --image=$(MC_IMAGE) --command -- /bin/sh -c \
 	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && for b in idp-bronze idp-silver idp-gold idp-ml; do echo "== $$b =="; echo "-- versioning:"; mc version info m/$$b; echo "-- ILM rules:"; mc ilm rule ls m/$$b 2>/dev/null || echo "(none)"; echo "-- versions/delete-markers:"; mc ls --versions -r m/$$b/; done'
 
 .PHONY: minio-mkbuckets
 minio-mkbuckets: ## Create the lake buckets if missing (idp-bronze/silver/gold/ml) — idempotent repair
-	kubectl -n idp-platform run mc --rm -i --restart=Never --image=minio/mc --command -- /bin/sh -c \
+	kubectl -n idp-platform run mc --rm -i --restart=Never --image=$(MC_IMAGE) --command -- /bin/sh -c \
 	  'mc alias set m http://minio:9000 minioadmin minioadmin123 >/dev/null && mc mb --ignore-existing m/idp-bronze m/idp-silver m/idp-gold m/idp-ml && echo "buckets:" && mc ls m/'
 
 .PHONY: minio-console
