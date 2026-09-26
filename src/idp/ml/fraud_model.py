@@ -24,7 +24,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier, IsolationForest
 from sklearn.metrics import average_precision_score
 from sklearn.utils.class_weight import compute_sample_weight
 
-from idp.features.fraud_features import FRAUD_FEATURES
+from idp.features import FRAUD_FEATURES
 
 DEFAULT_RULES = {
     "originating_ratio": 0.9,

@@ -106,8 +106,7 @@ def _cmd_silver(args: argparse.Namespace) -> None:
     from idp.pipeline import to_silver
 
     cfg = load_config(args.config)
-    silver = to_silver(cfg, persist=True)
-    print(json.dumps({"silver_tables": {k: len(v) for k, v in silver.items()}}, indent=2))
+    print(json.dumps(to_silver(cfg), indent=2))
     print("Next: 'idp gold' to build Gold from Silver.")
 
 
@@ -116,7 +115,7 @@ def _cmd_gold(args: argparse.Namespace) -> None:
     from idp.pipeline import to_gold
 
     cfg = load_config(args.config)
-    result = to_gold(cfg, persist=True)
+    result = to_gold(cfg)
     print(json.dumps({"gold_tables": result["gold_tables"], "counts": result["counts"]},
                      indent=2, default=str))
     print("Next: 'idp score' to write credit/fraud scores from these features.")
@@ -183,7 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("generate", help="Generate synthetic data into the landing zone").set_defaults(func=_cmd_generate)
 
     p_run = sub.add_parser("run", help="Run the end-to-end batch pipeline")
-    p_run.add_argument("--no-persist", action="store_true", help="Run in-memory (skip writing the lake)")
+    p_run.add_argument("--no-persist", action="store_true",
+                       help="Run against a temporary local lake that is removed afterwards")
     p_run.set_defaults(func=_cmd_run)
 
     p_prod = sub.add_parser("produce", help="Publish synthetic data to Kafka topics")

@@ -21,7 +21,8 @@ Kubernetes Job in `idp-app`:
 - `idp labels`: seed the labels store
 - `idp train`
 
-The Silver and Gold stages SHALL also be runnable as Spark Jobs.
+The Silver and Gold stages SHALL run on the single transformation engine
+(REQ-ORC-05), whether started from the CLI, a Kubernetes Job or Airflow.
 
 #### Scenario: SCN-ORC-01.1 — Independent Silver run
 - **WHEN** `idp silver` runs against a populated Bronze
@@ -47,11 +48,10 @@ Airflow **Datasets**:
   without a manual re-trigger.
 
 Each stage runs as a pod the DAG launches; Airflow itself needs neither the `idp`
-package nor Spark. The Silver and Gold tasks SHALL each have an independent
-execution-engine switch (`pandas` or `spark`), set by an Airflow Variable or an env
-var and defaulting to `pandas`. Switching engines SHALL leave the DAG shape and task
-ids unchanged. PySpark jobs SHALL implement the Silver and Gold stages for
-production scale.
+package nor Spark. The Silver and Gold tasks SHALL run the single Spark
+implementation of their stage (REQ-ORC-05). There SHALL be no per-stage engine
+selection. The features DAG SHALL run at most one DAG run at a time, so a Silver
+rewrite never overlaps another run's Gold read of the same tables.
 
 #### Scenario: SCN-ORC-02.1 — Inference re-runs on a new model
 - **WHEN** the training DAG completes and updates the model dataset
@@ -59,57 +59,67 @@ production scale.
   update and scores the latest Gold features — no manual re-run
 
 #### Scenario: SCN-ORC-02.2 — Spark Gold parity
-- **WHEN** the Spark Gold job runs against Silver
+- **WHEN** the features DAG's `gold` task runs against Silver
 - **THEN** it writes `credit_features`/`fraud_features` to the Gold bucket,
-  partitioned by `tenant_id`
+  partitioned by `tenant_id`, with the `(tenant_id, service_id)` keys followed by
+  the full credit and fraud model feature sets (the Gold feature contract the
+  models score against)
 
 #### Scenario: SCN-ORC-02.3 — Engine switch keeps DAG shape
-- **WHEN** `idp_gold_engine` is set to `spark`
-- **THEN** the features DAG still has tasks `silver >> gold`, and the `gold` task
-  runs the Spark Gold job instead of `idp gold`
+- **WHEN** the features DAG is parsed with the former `idp_silver_engine` /
+  `idp_gold_engine` Variables or `IDP_*_ENGINE` env vars set to any value
+- **THEN** the setting has no effect: the tasks are still `silver >> gold`, and
+  both run the same `idp` stage commands as the CLI and the Kubernetes Jobs
+
+#### Scenario: SCN-ORC-02.4 — Feature refreshes never overlap
+- **WHEN** several features DAG runs are due at once (e.g. a backlog released by
+  unpausing the DAG, or a manual trigger during a scheduled run)
+- **THEN** they execute one after another, and no Silver task runs while another
+  run's Silver or Gold task is running
 
 ### Requirement: REQ-ORC-03 — Local composition remains available
 The system SHALL keep a local `run` orchestrator that composes the same stage
 functions (generate → bronze → silver → labels → gold → train → score) for
-development and testing and for offline model training.
+development, testing and offline model training. Each stage SHALL read its input
+from the lake written by the previous stage (a local lake directory when object
+storage is not configured), exactly as in the cluster, and the Silver and Gold
+stages SHALL run on a local Spark session. Stages SHALL NOT hand data to each other
+in memory.
 
 #### Scenario: SCN-ORC-03.1 — Local end-to-end
-- **WHEN** `idp run` executes locally
+- **WHEN** `idp run` executes locally with a JDK available and no object storage
+  configured
 - **THEN** all layers and trained models are produced under `data/lake` and
   `ml/artifacts` without a cluster
 
-### Requirement: REQ-ORC-04 — Engine output parity (pandas ↔ Spark)
-For the same input layer, the Spark implementation of a stage SHALL produce the
-same tables, with the same column names, order and logical types, as the pandas
-implementation. Specifically:
+#### Scenario: SCN-ORC-03.2 — Stages compose through the lake
+- **WHEN** `idp run` completes
+- **THEN** every layer it produced can be read back from the local lake, and the
+  Gold feature tables equal those produced by running `idp silver` then `idp gold`
+  separately on the same Bronze
 
-- **Spark Silver** SHALL produce `dim_subscriber`, `fact_usage`, `fact_recharge` and
-  `fact_fee_charge` (REQ-SLV-01/05), with identical tokenized identifiers.
-- **Spark Gold** SHALL produce `credit_features` and `fraud_features` with the
-  `(tenant_id, service_id)` keys followed by the full credit and fraud model feature
-  sets, using the configured lookback windows.
+### Requirement: REQ-ORC-05 — Single transformation engine; pandas confined to ML
+The Silver and Gold transforms SHALL have exactly one implementation, on Apache
+Spark, shared by the CLI stages, the Kubernetes Jobs, the Airflow tasks and the
+tests. The execution environment SHALL only select the Spark master and its
+resources. It SHALL default to a local master (`local[*]`) and be overridable by
+configuration. The Silver and Gold stages SHALL NOT materialize a whole table into
+single-process (pandas) memory. pandas SHALL be used only for ML: training on the
+labelled Gold feature set, scoring, and the synthetic data generator. The Bronze
+landing, publish and MCP reads are unchanged for now.
 
-Integer-valued columns (counts, days) SHALL match exactly. Real-valued columns SHALL
-match within an absolute tolerance of 1e-6 (rounded columns: within their rounding
-unit). Spark writes SHALL replace only the partitions of the tenants being written.
+#### Scenario: SCN-ORC-05.1 — Same code in every entrypoint
+- **WHEN** Silver is built once with `idp silver` locally and once by the Silver
+  Kubernetes Job in the cluster, from equal Bronze
+- **THEN** both run the same transform code and produce equal Silver tables; only
+  the Spark master and resources differ
 
-#### Scenario: SCN-ORC-04.1 — Silver parity
-- **WHEN** the pandas and Spark Silver stages run on the same Bronze with the same
-  tenant salts
-- **THEN** both produce the four Silver tables with identical schemas, identical
-  `service_id` tokens, and equal row counts per tenant
+#### Scenario: SCN-ORC-05.2 — Master from configuration
+- **WHEN** no Spark master is configured
+- **THEN** the stages run on `local[*]`; **AND WHEN** a master is configured
+  (e.g. via `IDP_SPARK_MASTER`) **THEN** the stages use it
 
-#### Scenario: SCN-ORC-04.2 — Gold parity
-- **WHEN** the pandas and Spark Gold stages run on the same Silver
-- **THEN** both `credit_features` tables have the same columns in the same order,
-  one row per `(tenant_id, service_id)`, and matching values within tolerance, and
-  likewise for `fraud_features`
-
-#### Scenario: SCN-ORC-04.3 — Spark-built Gold is scoreable
-- **WHEN** Gold was produced by the Spark engine and `idp score` then runs with
-  trained models
-- **THEN** scoring succeeds and writes `credit_scores` and `fraud_scores`
-
-#### Scenario: SCN-ORC-04.4 — Spark replaces per tenant
-- **WHEN** a Spark stage writes output containing only `tenant_a`
-- **THEN** the `tenant_b` partitions of that table are unchanged
+#### Scenario: SCN-ORC-05.3 — No whole-table pandas in Silver/Gold
+- **WHEN** the Silver or Gold stage runs
+- **THEN** it completes without converting any input or output table to a pandas
+  DataFrame

@@ -16,8 +16,7 @@ from pydantic import BaseModel, Field
 
 from idp.common import storage
 from idp.common.config import load_config
-from idp.features.credit_features import CREDIT_FEATURES
-from idp.features.fraud_features import FRAUD_FEATURES
+from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
 

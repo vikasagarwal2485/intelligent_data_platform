@@ -11,21 +11,26 @@ output layer, so the concerns stay separated (no consumer->silver->gold chaining
     to_labels      : ground-truth outcomes   -> labels store (s3://idp-ml/labels)
     train          : Gold features + labels  -> models (offline ML; labels not in the lake)
 
-Each stage reads its input from storage by default, or accepts in-memory frames
-(used by the local `run` orchestrator and by tests). The `idp` CLI exposes them as
+Stages exchange data ONLY through the lake (object storage, or a local lake
+directory): each reads its input layer and writes its output layer, locally and in
+the cluster alike. Silver and Gold run on Spark — the single transformation engine
+(``idp.transforms``, REQ-ORC-05); pandas is used for ML (labels, training,
+scoring), the Bronze landing and serving. The `idp` CLI exposes the stages as
 `consume` (Bronze), `silver`, `gold`, `score`, `publish`, `labels`, `train`; `run`
 composes them locally for dev/testing.
 """
 from __future__ import annotations
+
+import shutil
+import tempfile
+from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from idp.common import pii, storage
 from idp.common.config import PlatformConfig, load_config
-from idp.curation.silver import curate
-from idp.features.credit_features import build_credit_features
-from idp.features.fraud_features import build_fraud_features
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
 from idp.synthetic.generator import SyntheticDataset, generate, generate_for_tenants
@@ -71,71 +76,78 @@ def to_bronze(cfg: PlatformConfig, frames: dict[str, pd.DataFrame], *, persist: 
     return {"bronze_tables": [n for n, d in frames.items() if d is not None and not d.empty]}
 
 
-# --- Stage 2: Silver --------------------------------------------------------
-def to_silver(cfg: PlatformConfig, bronze: dict | None = None, *, persist: bool = True) -> dict[str, pd.DataFrame]:
-    """Bronze -> canonical Silver tables. Reads Bronze from storage if not given."""
-    if bronze is None:
-        bronze = _read_layer(cfg, "bronze", ENTITIES)
-    required = ["parties", "accounts", "agreements"]
-    missing = [t for t in required if t not in bronze or bronze[t].empty]
-    if missing:
-        raise RuntimeError(
-            f"Bronze is missing entity tables {missing}. Populate Bronze first "
-            "('idp produce' then 'idp consume')."
-        )
-    silver = curate(bronze, _salts(cfg))
-    if persist:
-        for name, df in silver.items():
-            storage.write_parquet(df, f"{storage.lake_uri(cfg, 'silver')}/{name}", cfg,
-                                  partition_cols=["tenant_id"])
-    return silver
+# --- Stage 2: Silver (Spark) -----------------------------------------------
+def _table_count(spark, cfg: PlatformConfig, layer: str, table: str) -> int:
+    """Row count of a written table (Parquet footer metadata; no table scan)."""
+    from idp.transforms import lake
+    df = lake.read_table(spark, cfg, layer, table)
+    return 0 if df is None else int(df.count())
 
 
-# --- Stage 3: Gold ----------------------------------------------------------
+def to_silver(cfg: PlatformConfig) -> dict:
+    """Bronze (lake) -> canonical Silver tables (lake), on Spark.
+
+    Always reads Bronze from the lake (REQ-SLV-04) and replaces the Silver
+    partitions of the tenants it writes (REQ-SLV-06). Returns ``{"silver_tables":
+    {table: row_count}}``; no table is materialized in driver memory.
+    """
+    from idp.transforms import lake, silver
+    from idp.transforms.session import get_spark
+
+    spark = get_spark(cfg, app_name="idp-silver")
+    bronze = {}
+    for entity in ENTITIES:
+        df = lake.read_table(spark, cfg, "bronze", entity)
+        bronze[entity] = None if df is None or df.isEmpty() else df
+    tables = silver.curate(bronze, _salts(cfg))
+    for name, df in tables.items():
+        lake.write_table(df, cfg, "silver", name)
+    return {"silver_tables": {name: _table_count(spark, cfg, "silver", name) for name in tables}}
+
+
+# --- Stage 3: Gold (Spark) --------------------------------------------------
 GOLD_FEATURE_TABLES = ("credit_features", "fraud_features")
 
 
-def to_gold(cfg: PlatformConfig, silver: dict | None = None, *, persist: bool = True) -> dict:
-    """Silver -> Gold **feature tables only** (credit_features, fraud_features).
+def to_gold(cfg: PlatformConfig) -> dict:
+    """Silver (lake) -> Gold **feature tables only** (lake), on Spark.
 
-    Reads Silver from storage if not given. Scoring is a SEPARATE stage
+    Always reads Silver from the lake (REQ-GLD-05). Scoring is a SEPARATE stage
     (``to_scores`` / ``idp score``) so feature-build and inference are decoupled:
     Gold never needs a model to exist, and training/scoring run on their own cadence.
     """
-    if silver is None:
-        silver = _read_layer(cfg, "silver", SILVER_TABLES)
-    if "dim_subscriber" not in silver or silver["dim_subscriber"].empty:
+    from idp.transforms import features, lake
+    from idp.transforms.session import get_spark
+
+    spark = get_spark(cfg, app_name="idp-gold")
+    silver = {t: lake.read_table(spark, cfg, "silver", t) for t in SILVER_TABLES}
+    silver = {t: df for t, df in silver.items() if df is not None}
+    dim = silver.get("dim_subscriber")
+    if dim is None or dim.isEmpty():
         raise RuntimeError("Silver is empty. Run the Silver stage ('idp silver') first.")
+    missing = [t for t in ("fact_usage", "fact_recharge") if t not in silver]
+    if missing:
+        raise RuntimeError(f"Silver is missing {missing}. Run the Silver stage ('idp silver') first.")
 
-    windows = tuple(cfg.features.get("windows", [30, 90]))
-    outputs: dict[str, pd.DataFrame] = {
-        "credit_features": build_credit_features(silver, windows),
-        "fraud_features": build_fraud_features(silver, windows),
-    }
-    if persist:
-        for name, df in outputs.items():
-            storage.write_parquet(df, f"{storage.lake_uri(cfg, 'gold')}/{name}", cfg,
-                                  partition_cols=["tenant_id"])
-
+    windows = tuple(int(w) for w in cfg.features.get("windows", [30, 90]))
+    lake.write_table(features.build_credit_features(silver, windows), cfg, "gold", "credit_features")
+    lake.write_table(features.build_fraud_features(silver, windows), cfg, "gold", "fraud_features")
     return {
-        "gold_tables": list(outputs),
-        "counts": {"subscribers": int(len(silver["dim_subscriber"]))},
-        **outputs,
+        "gold_tables": list(GOLD_FEATURE_TABLES),
+        "counts": {"subscribers": _table_count(spark, cfg, "gold", "credit_features")},
     }
 
 
 # --- Stage 3b: Scoring / inference (Gold features -> scores) ----------------
-def to_scores(cfg: PlatformConfig, gold: dict | None = None, *, models: dict | None = None,
-              persist: bool = True) -> dict:
-    """Gold features -> ML scores (batch inference).
+def to_scores(cfg: PlatformConfig, *, models: dict | None = None, persist: bool = True) -> dict:
+    """Gold features -> ML scores (batch inference; pandas is the ML boundary).
 
-    Reads the Gold feature tables from storage (unless given) and the trained
-    models from the model store, applies them, and writes ``credit_scores`` /
-    ``fraud_scores`` back to Gold. Graceful: a model absent from the store means
-    that score table is simply skipped (Gold keeps its features).
+    Reads the Gold feature tables from the lake and the trained models from the
+    model store (or ``models``, for tests), applies them, and appends
+    ``credit_scores`` / ``fraud_scores`` to Gold. Graceful: a model absent from
+    the store means that score table is simply skipped (Gold keeps its features).
     """
-    if gold is None:
-        gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
+    gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
     if "credit_features" not in gold or gold["credit_features"].empty:
         raise RuntimeError("Gold features are missing. Run the Gold stage ('idp gold') first.")
 
@@ -287,48 +299,25 @@ def _safe_split(df: pd.DataFrame, target: str):
     return train_test_split(df, test_size=0.25, random_state=42, stratify=stratify)
 
 
-def train(
-    cfg: PlatformConfig,
-    *,
-    dataset: SyntheticDataset | None = None,
-    silver: dict | None = None,
-    persist: bool = True,
-) -> dict:
-    """Offline model training. Two feature/label sources:
+def train(cfg: PlatformConfig, *, persist: bool = True) -> dict:
+    """Offline model training on the lake (REQ-ML-03/06).
 
-    * **LAKE (default, the `idp train` job):** read historical Gold **features**
-      + the **labels store** from storage, join, fit — *no synthetic regeneration*.
-    * **IN-MEMORY (local `run`/tests):** when `dataset`/`silver` are passed, build
-      features from them and use their labels.
-
-    Fits the credit and fraud models, evaluates out-of-sample, and saves them to
-    the model store (MLflow in production).
+    Reads historical Gold **features** + the **labels store** from the lake (a
+    local lake in dev/tests), joins them, fits the credit and fraud models,
+    evaluates out-of-sample, and saves them to the model store. Never builds
+    features from Silver and never regenerates synthetic data.
     """
     cfg = cfg or load_config()
-    salts = _salts(cfg)
-    windows = tuple(cfg.features.get("windows", [30, 90]))
-
-    if dataset is None and silver is None:
-        # historical lake path: Gold features + labels store (no regeneration)
-        gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
-        labels = _read_labels(cfg)
-        credit_feats = gold.get("credit_features")
-        fraud_feats = gold.get("fraud_features")
-        if credit_feats is None or credit_feats.empty or fraud_feats is None or fraud_feats.empty \
-                or labels.empty:
-            raise RuntimeError(
-                "Training needs Gold features and a populated labels store. Run "
-                "'idp gold' and seed labels ('idp labels' / make labels) first."
-            )
-    else:
-        # in-memory path (local dev / tests)
-        if dataset is None:
-            dataset = _gen_dataset(cfg)
-        if silver is None:
-            silver = curate({e: getattr(dataset, e) for e in ENTITIES}, salts)
-        labels = _tokenize_labels(dataset.labels, salts)
-        credit_feats = build_credit_features(silver, windows)
-        fraud_feats = build_fraud_features(silver, windows)
+    gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
+    labels = _read_labels(cfg)
+    credit_feats = gold.get("credit_features")
+    fraud_feats = gold.get("fraud_features")
+    if credit_feats is None or credit_feats.empty or fraud_feats is None or fraud_feats.empty \
+            or labels.empty:
+        raise RuntimeError(
+            "Training needs Gold features and a populated labels store. Run "
+            "'idp gold' and seed labels ('idp labels' / make labels) first."
+        )
 
     credit_df = credit_feats.merge(labels, on=["tenant_id", "service_id"])
     fraud_df = fraud_feats.merge(labels, on=["tenant_id", "service_id"])
@@ -366,41 +355,48 @@ def train(
         "credit_metrics": credit_metrics,
         "fraud_metrics": fraud_metrics,
         "models": {"credit": credit_model, "fraud": fraud_model},
-        "silver": silver,
     }
 
 
 # --- Local orchestrator (dev/testing): compose the stages -------------------
 def run(cfg: PlatformConfig | None = None, *, persist: bool = True) -> dict:
-    """Local end-to-end composition (generate -> bronze -> silver -> labels ->
-    gold(features) -> train -> score). The dev/test harness; the individual stages
-    above are what run standalone / in the two orchestration DAGs.
+    """Local end-to-end composition through the lake: generate -> bronze ->
+    silver -> labels -> gold (features) -> train -> score (REQ-ORC-03).
+
+    Every stage reads what the previous one wrote, exactly as the separate
+    CLI stages / DAG tasks do. ``persist=False`` runs against a temporary local
+    lake that is removed afterwards (not supported with S3 enabled).
     """
     cfg = cfg or load_config()
-    dataset = _gen_dataset(cfg)
-    frames = {e: getattr(dataset, e) for e in ENTITIES}
-
-    to_bronze(cfg, frames, persist=persist)
-    silver = to_silver(cfg, frames, persist=persist)
-    to_labels(cfg, dataset=dataset, persist=persist)              # seed the outcomes store
-    gold = to_gold(cfg, silver=silver, persist=persist)           # features only
-    trained = train(cfg, dataset=dataset, silver=silver, persist=persist)
-    scores = to_scores(                                           # inference on Gold features
-        cfg,
-        gold={"credit_features": gold["credit_features"], "fraud_features": gold["fraud_features"]},
-        models=trained["models"], persist=persist,
-    )
-
-    return {
-        "tenants": cfg.tenant_ids,
-        "counts": {
-            "subscribers": int(len(silver["dim_subscriber"])),
-            "usage_events": int(len(silver["fact_usage"])),
-            "recharge_events": int(len(silver["fact_recharge"])),
-        },
-        "credit_metrics": trained["credit_metrics"],
-        "fraud_metrics": trained["fraud_metrics"],
-        "credit_scores": scores.get("credit_scores"),
-        "fraud_scores": scores.get("fraud_scores"),
-        "silver": silver,
-    }
+    tmp = None
+    if not persist:
+        if cfg.s3.get("enabled"):
+            raise RuntimeError("run(persist=False) uses a temporary LOCAL lake; unset IDP_S3_ENDPOINT.")
+        tmp = Path(tempfile.mkdtemp(prefix="idp-lake-"))
+        cfg = replace(cfg, storage=replace(
+            cfg.storage, root=str(tmp), landing=str(tmp / "landing"), bronze=str(tmp / "bronze"),
+            silver=str(tmp / "silver"), gold=str(tmp / "gold"), ml_artifacts=str(tmp / "ml")))
+    try:
+        dataset = _gen_dataset(cfg)
+        to_bronze(cfg, {e: getattr(dataset, e) for e in ENTITIES})
+        silver = to_silver(cfg)
+        to_labels(cfg, dataset=dataset)                    # seed the outcomes store
+        to_gold(cfg)                                       # features only
+        trained = train(cfg)
+        scores = to_scores(cfg, models=trained["models"])  # inference on Gold features
+        counts = silver["silver_tables"]
+        return {
+            "tenants": cfg.tenant_ids,
+            "counts": {
+                "subscribers": counts.get("dim_subscriber", 0),
+                "usage_events": counts.get("fact_usage", 0),
+                "recharge_events": counts.get("fact_recharge", 0),
+            },
+            "credit_metrics": trained["credit_metrics"],
+            "fraud_metrics": trained["fraud_metrics"],
+            "credit_scores": scores.get("credit_scores"),
+            "fraud_scores": scores.get("fraud_scores"),
+        }
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)

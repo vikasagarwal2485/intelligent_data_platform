@@ -12,7 +12,6 @@ import pytest
 
 from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
-from idp.curation.silver import build_fact_fee_charge, curate
 from idp.mcp import tools as mcp_tools
 from idp.pipeline import ENTITIES, to_bronze, to_silver
 from idp.synthetic.generator import generate, generate_for_tenants
@@ -52,8 +51,7 @@ def test_generation_is_deterministic_for_fees():
 # --------------------------------------------------------------------------- #
 # REQ-SLV-05 — fact_fee_charge                                                 #
 # --------------------------------------------------------------------------- #
-def test_fact_fee_charge_enriched_from_products(bronze_frames):
-    silver = curate(bronze_frames, SALTS)
+def test_fact_fee_charge_enriched_from_products(silver):
     assert "fact_fee_charge" in silver
     fee = silver["fact_fee_charge"]
     assert not fee.empty
@@ -64,15 +62,16 @@ def test_fact_fee_charge_enriched_from_products(bronze_frames):
     assert fee["category"].notna().all()
 
 
-def test_build_fact_fee_charge_empty_is_safe():
-    assert build_fact_fee_charge({}, SALTS).empty
+def test_build_fact_fee_charge_absent_is_safe():
+    from idp.transforms.silver import build_fact_fee_charge
+    assert build_fact_fee_charge(None, None) is None      # no fee_charges in Bronze -> no table
 
 
 # --------------------------------------------------------------------------- #
 # Local Silver lake fixture for the MCP tools                                  #
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def local_cfg(tmp_path_factory):
+def local_cfg(spark, tmp_path_factory):
     tmp = tmp_path_factory.mktemp("lake")
     storage = StorageConfig(
         root=str(tmp), landing=str(tmp / "landing"), bronze=str(tmp / "bronze"),
@@ -88,7 +87,7 @@ def local_cfg(tmp_path_factory):
     ds = generate_for_tenants(["tenant_a", "tenant_b"], subscribers=60, days=40, fraud_rate=0.2, seed=7)
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames, persist=True)
-    to_silver(cfg, frames, persist=True)
+    to_silver(cfg)
     return cfg
 
 

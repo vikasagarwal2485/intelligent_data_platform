@@ -6,7 +6,7 @@ The medallion stages can be triggered three ways. Pick per situation:
 |---|---|---|
 | **On-demand job** | `make silver` / `make gold` / `make publish` | quickest; runs the `idp` image as a one-off K8s Job |
 | **Airflow DAG** | `make airflow-trigger` (or the UI) | scheduled/orchestrated Silver → Gold → publish |
-| **Spark jobs** | `make spark-silver` / `make spark-gold` | the distributed Silver/Gold engines (spark-submit) |
+| **spark-submit** | `spark-submit pipelines/spark/{silver,gold}_job.py` | a future Spark cluster / Spark Operator (same code) |
 
 The `idp_silver_gold` DAG runs `silver >> gold >> publish` — the last task
 (`idp publish`) mirrors Gold into **TimescaleDB** for serving. On-demand, run
@@ -64,72 +64,39 @@ DAGs provided (`pipelines/airflow/dags/idp_medallion_dag.py`):
 - **`idp_silver_gold`** — `silver >> gold >> publish`, hourly.
 - **`idp_train`** — offline model training, daily.
 
-### Choosing the execution engine per stage (pandas vs Spark)
+### One engine for Silver and Gold (Spark)
 
-Airflow **orchestrates**; **Silver and Gold each have an independent execution
-engine** — the DAG shape (`silver >> gold >> publish`) is identical either way:
-
-- **`pandas`** (default) — the task launches `idp silver` / `idp gold` in the
-  scoring-api image (single node).
-- **`spark`** — the task launches `spark-submit` of `pipelines/spark/{silver,gold}_job.py`
-  in an `apache/spark` pod (distributed). The Spark Silver job reproduces the
-  **same per-tenant salted-SHA-256 tokenization**, so `service_id` tokens are
-  identical whether Silver ran on pandas or Spark.
-
-Select each independently with `idp_silver_engine` / `idp_gold_engine` (Airflow
-Variables, or env `IDP_SILVER_ENGINE` / `IDP_GOLD_ENGINE`):
-
-```bash
-make spark-configmap                  # once: provide the Spark job scripts (idp-app)
-make silver-engine ENGINE=spark       # Bronze->Silver on Spark
-make gold-engine   ENGINE=spark       # Silver->Gold on Spark
-make airflow-trigger
-make silver-engine ENGINE=pandas      # switch either back independently
-```
+Silver and Gold always run on **Spark** — one implementation (`src/idp/transforms`)
+shared by `make silver` / `make gold`, the Airflow tasks, `idp run` and the tests
+(ADR-0027). Each stage pod runs the `idp` image with Spark as `local[*]` inside the
+pod, a fixed driver heap (`IDP_SPARK_DRIVER_MEMORY`, default `1g`) and Spark-sized
+pod resources (request 1.5 Gi / limit 3 Gi). The image bundles the JRE, pyspark
+and the S3A jars, so nothing is downloaded at run time. There is no engine
+switch; the former `idp_silver_engine` / `idp_gold_engine` Variables have no effect
+and can be deleted.
 
 `publish` (Gold -> TimescaleDB) is always a **separate, independent task** — it is
 never folded into Gold. (Next step: migrate its target to Iceberg via Nessie.)
-Flip the variables in the Airflow UI (Admin -> Variables) too; effective on the
-next DAG parse, no redeploy.
 
 ---
 
-## B. Spark pipeline (production Silver / Gold)
+## B. spark-submit entrypoints (future Spark cluster)
 
-`pipelines/spark/silver_job.py` reads Bronze and writes canonical Silver (with the
-same PII tokenization as the pandas path); `pipelines/spark/gold_job.py` reads
-Silver and writes Gold. Both use the S3A connector to MinIO. Run either as a
-one-off Spark pod:
-
-```bash
-make spark-silver     # Bronze -> Silver on Spark
-make spark-gold       # Silver -> Gold on Spark
-```
-
-Original one-liner (Gold shown; Silver is the same with `silver_job.py --salts ...`):
+`pipelines/spark/silver_job.py` and `pipelines/spark/gold_job.py` are thin wrappers
+over the same `idp` stages (`idp.pipeline.to_silver` / `to_gold`), for running on a
+real Spark cluster later (Spark Operator `SparkApplication`, or
+`--master k8s://…`). They need the `idp` package in the Spark runtime — the `idp`
+image already has it:
 
 ```bash
-make spark-gold
-```
-This:
-1. packages `gold_job.py` into a ConfigMap,
-2. runs a Job (`deploy/app/jobs/spark-gold-job.yaml`) on the `apache/spark:3.5.3`
-   image in `local[*]` mode with the S3A config pointed at MinIO,
-3. waits and prints the driver logs.
-
-Verify:
-```bash
-kubectl -n idp-app logs job/idp-spark-gold      # Spark driver output
-make minio-ls                                   # gold tables in idp-gold
+spark-submit pipelines/spark/silver_job.py [--config config/platform.yaml]
+spark-submit pipelines/spark/gold_job.py   [--config config/platform.yaml]
 ```
 
-**Notes / caveats**
-- The job fetches `hadoop-aws:3.3.4` via `--packages` on first run, so it needs
-  egress; `hadoop-aws` must match the image's Hadoop version (3.3.4 for Spark 3.5.x).
-- `local[*]` runs a single-pod Spark. For a real cluster use the **Spark Operator**
-  (`SparkApplication` CR) or `--master k8s://…`; the same `gold_job.py` applies.
-- On EKS the target reads/writes **Iceberg** via the Nessie catalog instead of raw
-  Parquet — the job structure is unchanged.
+Lake location, tenant salts, lookback windows and the Spark master/memory come
+from `config/platform.yaml` + `IDP_*` env, exactly as for `idp silver` / `idp gold`.
+On EKS the target reads/writes **Iceberg** via the Nessie catalog instead of raw
+Parquet (roadmap) — the stage code is unchanged.
 
 ---
 
@@ -137,6 +104,8 @@ make minio-ls                                   # gold tables in idp-gold
 
 - **Developing / a quick refresh:** `make silver` / `make gold` (the `idp` Jobs).
 - **Scheduled, dependency-managed runs:** the **Airflow** DAG.
-- **Scale-out Gold on large Silver:** the **Spark** job.
+- **Scale-out on large data:** the same stages on a Spark cluster (roadmap:
+  distributed Spark runtime) — set `IDP_SPARK_MASTER`, no code change.
 
-All three run the *same* medallion logic; they differ only in the runtime/engine.
+All of them run the *same* Spark code; they differ only in the trigger and the
+Spark master/resources.

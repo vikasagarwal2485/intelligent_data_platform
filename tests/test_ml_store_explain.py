@@ -5,12 +5,15 @@ and REQ-ML-01/03.2 adverse-action reason codes.
 """
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
-from idp.features.credit_features import CREDIT_FEATURES, build_credit_features
+from idp.features import CREDIT_FEATURES
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
-from idp.pipeline import to_gold, to_scores
+from idp.pipeline import to_scores
 
 
 def _local_cfg(tmp_path):
@@ -20,6 +23,14 @@ def _local_cfg(tmp_path):
     )
     return PlatformConfig(raw={"s3": {"enabled": False}, "features": {"windows": [30, 90]}},
                           tenants=[Tenant("tenant_a", "A", "eu", "salt-a")], storage=sc)
+
+
+def _cfg_with_gold(tmp_path, lake):
+    """A fresh local lake holding a copy of the shared Gold feature tables."""
+    cfg = _local_cfg(tmp_path)
+    for table in ("credit_features", "fraud_features"):
+        shutil.copytree(Path(lake.storage.gold) / table, Path(cfg.storage.gold) / table)
+    return cfg
 
 
 # --- REQ-ML-04: model store -------------------------------------------------
@@ -42,8 +53,8 @@ def test_model_uri_is_s3_bucket_when_enabled():
 
 
 # --- fee-charge features fed to the credit model (ADR-0023) ------------------
-def test_fee_features_present_and_attributed(silver):
-    feats = build_credit_features(silver)
+def test_fee_features_present_and_attributed(credit_features):
+    feats = credit_features
     for c in ("fee_total", "fee_recurring_total", "fee_overage_count",
               "fee_charge_count", "fee_total_30d"):
         assert c in feats.columns
@@ -67,17 +78,16 @@ def test_reason_codes_are_adverse_and_labelled(credit_labeled):
 
 
 # --- end-to-end: Score stage loads models from the store and emits scores ----
-def test_score_loads_models_from_store(tmp_path, silver, credit_labeled, fraud_labeled):
-    cfg = _local_cfg(tmp_path)
+def test_score_loads_models_from_store(tmp_path, lake, credit_labeled, fraud_labeled):
+    cfg = _cfg_with_gold(tmp_path, lake)
     cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
     fm = FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])
     storage.save_model(cm, storage.model_uri(cfg, "credit_model.joblib"), cfg)
     storage.save_model(fm, storage.model_uri(cfg, "fraud_model.joblib"), cfg)
 
-    gold = to_gold(cfg, silver=silver, persist=False)   # features only, no scores
-    assert "credit_scores" not in gold["gold_tables"]
+    assert not (Path(cfg.storage.gold) / "credit_scores").exists()   # Gold is features only
     # to_scores gets NO models in-memory -> must load them from the store
-    result = to_scores(cfg, gold=gold, persist=False)
+    result = to_scores(cfg, persist=False)
     assert "credit_scores" in result["score_tables"]
     assert "fraud_scores" in result["score_tables"]
 
@@ -102,8 +112,8 @@ def test_train_reads_gold_and_labels_from_lake(tmp_path):
     ds = generate_for_tenants(["tenant_a"], subscribers=80, days=40, fraud_rate=0.2, seed=7)
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames)
-    silver = to_silver(cfg, frames)
-    to_gold(cfg, silver=silver)        # persist Gold features to the (local) lake
+    to_silver(cfg)
+    to_gold(cfg)                       # persist Gold features to the (local) lake
     to_labels(cfg, dataset=ds)         # seed the labels store
 
     # LAKE path: no dataset/silver -> train reads Gold features + labels from storage
@@ -123,7 +133,8 @@ def test_labels_from_config_join_gold_features(tmp_path):
     ds = _gen_dataset(cfg)                       # build the lake from cfg.synthetic
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames)
-    to_gold(cfg, silver=to_silver(cfg, frames))
+    to_silver(cfg)
+    to_gold(cfg)
     to_labels(cfg)                              # NO dataset -> per-tenant regen from cfg
 
     labels = _read_labels(cfg)
@@ -140,7 +151,8 @@ def test_train_lake_path_errors_without_labels(tmp_path):
     ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames)
-    to_gold(cfg, silver=to_silver(cfg, frames))   # Gold exists but NO labels seeded
+    to_silver(cfg)
+    to_gold(cfg)                                  # Gold exists but NO labels seeded
     with pytest.raises(RuntimeError, match="labels"):
         train(cfg)
 
@@ -154,33 +166,33 @@ def test_train_errors_clearly_on_empty_label_join(tmp_path):
     ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames)
-    to_gold(cfg, silver=to_silver(cfg, frames))
+    to_silver(cfg)
+    to_gold(cfg)
     other = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=99)
     to_labels(cfg, dataset=other)                    # mismatched synthetic params
     with pytest.raises(RuntimeError, match="empty"):
         train(cfg)
 
 
-def test_score_skips_missing_model(tmp_path, silver, credit_labeled):
+def test_score_skips_missing_model(tmp_path, lake, credit_labeled):
     # SCN-ML-07.3 — no fraud model in the store -> credit_scores only, no error
-    cfg = _local_cfg(tmp_path)
+    cfg = _cfg_with_gold(tmp_path, lake)
     cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
     storage.save_model(cm, storage.model_uri(cfg, "credit_model.joblib"), cfg)
-    result = to_scores(cfg, gold=to_gold(cfg, silver=silver, persist=False), persist=False)
+    result = to_scores(cfg, persist=False)
     assert result["score_tables"] == ["credit_scores"]
 
 
-def test_score_runs_are_timestamped_and_accumulate(tmp_path, silver, credit_labeled):
+def test_score_runs_are_timestamped_and_accumulate(tmp_path, lake, credit_labeled, credit_features):
     # SCN-ML-07.4 — each run stamps one scored_at; both runs are readable from Gold
-    cfg = _local_cfg(tmp_path)
+    cfg = _cfg_with_gold(tmp_path, lake)
     cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
-    gold = to_gold(cfg, silver=silver, persist=False)
     for _ in range(2):
-        out = to_scores(cfg, gold=gold, models={"credit": cm}, persist=True)
+        out = to_scores(cfg, models={"credit": cm}, persist=True)
         assert out["credit_scores"]["scored_at"].nunique() == 1
     stored = storage.read_parquet(f"{storage.lake_uri(cfg, 'gold')}/credit_scores", cfg)
     assert stored["scored_at"].nunique() == 2
-    assert len(stored) == 2 * len(gold["credit_features"])
+    assert len(stored) == 2 * len(credit_features)
 
 
 def test_duplicate_labels_do_not_fan_out(tmp_path):
@@ -191,7 +203,10 @@ def test_duplicate_labels_do_not_fan_out(tmp_path):
     ds = generate_for_tenants(["tenant_a"], subscribers=60, days=30, fraud_rate=0.2, seed=7)
     frames = {e: getattr(ds, e) for e in ENTITIES}
     to_bronze(cfg, frames)
-    gold = to_gold(cfg, silver=to_silver(cfg, frames))
+    to_silver(cfg)
+    to_gold(cfg)
+    gold = {"credit_features": storage.read_parquet(f"{storage.lake_uri(cfg, 'gold')}/credit_features", cfg)}
+    gold["credit_features"]["tenant_id"] = gold["credit_features"]["tenant_id"].astype(str)
     to_labels(cfg, dataset=ds)
     to_labels(cfg, dataset=ds)                       # second seeding appends a copy
 

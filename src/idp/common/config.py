@@ -100,6 +100,15 @@ class PlatformConfig:
         return t
 
     @property
+    def spark(self) -> dict[str, Any]:
+        """Spark runtime settings for the Silver/Gold stages (REQ-ORC-05)."""
+        s = dict(self.raw.get("spark", {}))
+        env = os.environ
+        s["master"] = env.get("IDP_SPARK_MASTER", s.get("master", "local[*]"))
+        s["driver_memory"] = env.get("IDP_SPARK_DRIVER_MEMORY", s.get("driver_memory", "1g"))
+        return s
+
+    @property
     def s3(self) -> dict[str, Any]:
         s = dict(self.raw.get("s3", {}))
         env = os.environ

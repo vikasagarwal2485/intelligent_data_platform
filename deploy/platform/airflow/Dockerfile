@@ -14,4 +14,6 @@
 # already bundles the cncf.kubernetes provider the DAGs need.
 FROM apache/airflow:2.9.3
 
-COPY . /opt/airflow/dags/
+# Owned by the image's `airflow` user so the DAGs are readable regardless of the
+# host checkout's file modes (e.g. a 077 umask leaves them 0600).
+COPY --chown=airflow:root . /opt/airflow/dags/

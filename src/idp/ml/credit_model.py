@@ -27,7 +27,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from idp.features.credit_features import CREDIT_FEATURES
+from idp.features import CREDIT_FEATURES
 
 
 def heuristic_limit(

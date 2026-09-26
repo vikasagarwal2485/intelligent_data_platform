@@ -1,7 +1,7 @@
 # On-demand Silver stage (idp-app): reads Bronze from MinIO, writes Silver.
 # Independent of the consumer — run it whenever Bronze has new data.
 #
-# Apply:  kubectl -n idp-app apply -f deploy/jobs/silver-job.yaml
+# Apply:  kubectl -n idp-app apply -f deploy/app/jobs/silver-job.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -30,6 +30,12 @@ spec:
               value: "minioadmin123"
             - name: IDP_S3_BUCKET_PREFIX
               value: "idp"
+            # Spark (single engine, REQ-ORC-05): local master in this pod. The JVM
+            # heap is fixed; the pod limit leaves headroom for off-heap + Python.
+            - name: IDP_SPARK_MASTER
+              value: "local[*]"
+            - name: IDP_SPARK_DRIVER_MEMORY
+              value: "1g"
           resources:
-            requests: { cpu: "250m", memory: 1Gi }
-            limits: { cpu: "1", memory: 2Gi }
+            requests: { cpu: "500m", memory: 1536Mi }
+            limits: { cpu: "2", memory: 3Gi }

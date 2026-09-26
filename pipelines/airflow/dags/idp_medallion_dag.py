@@ -1,20 +1,11 @@
 """Airflow DAGs that orchestrate the medallion stages (production mode).
 
 Airflow is the ORCHESTRATOR (schedule / order / retries); each stage runs as a
-POD it launches. Silver AND Gold each have an EXECUTION-ENGINE switch, so either
-stage can run single-node (pandas) or distributed (Spark) independently — the DAG
-shape is identical regardless:
-
-  * pandas — launches `idp silver` / `idp gold` in the scoring-api image.
-  * spark  — launches `spark-submit` of pipelines/spark/{silver,gold}_job.py in an
-             apache/spark pod (script mounted from the idp-{silver,gold}-spark CM).
-
-Engines (independent):
-  * idp_silver_engine  (Variable, else env IDP_SILVER_ENGINE)  default `pandas`
-  * idp_gold_engine    (Variable, else env IDP_GOLD_ENGINE)    default `pandas`
-Set them with `make silver-engine ENGINE=...` / `make gold-engine ENGINE=...`, or
-in the Airflow UI (Admin -> Variables). Spark paths need the script ConfigMaps
-(`make spark-configmap`).
+POD it launches, all from the one `idp` image (`idp <stage>`). Silver and Gold run
+on Spark — the single transformation engine (REQ-ORC-05) — in that same image, as
+a local Spark master inside the pod with a fixed driver heap and Spark-sized pod
+resources. There is no engine switch: the DAG, the CLI and the Kubernetes Jobs all
+run the same code.
 
 Publish is a SEPARATE, independent task (Gold -> TimescaleDB) — never folded into
 Gold. Next step: migrate its target from TimescaleDB to Iceberg tables via the
@@ -24,8 +15,8 @@ This is the correct decoupling: Airflow only needs permission to launch pods —
 does NOT need the `idp` package or Spark installed. The pods carry code + deps.
 
 Prerequisites:
-  * `idp/scoring-api:dev` on the node (`make image`) for the pandas paths
-  * for spark: the idp-silver-spark / idp-gold-spark ConfigMaps (`make spark-configmap`)
+  * `idp/scoring-api:dev` on the node (`make image`; bundles the JRE, pyspark and
+    the S3A jars)
   * the Airflow SA may create pods in `idp-app` (deploy/platform/airflow/rbac.yaml)
 
 DAGs (three, decoupled by cadence and wired via Airflow Datasets):
@@ -40,7 +31,6 @@ features auto-re-score — no manual second pass. Requires Airflow >= 2.9 for th
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -49,7 +39,6 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from kubernetes.client import models as k8s
 
 IMAGE = "idp/scoring-api:dev"
-SPARK_IMAGE = "apache/spark:3.5.3"
 APP_NS = "idp-app"
 BUCKET_PREFIX = "idp"
 MINIO_ENDPOINT = "http://minio.idp-platform.svc:9000"
@@ -61,23 +50,9 @@ MINIO_ENDPOINT = "http://minio.idp-platform.svc:9000"
 # identifiers, not fetched by Airflow.)
 GOLD_FEATURES = Dataset("s3://idp-gold/credit_features")
 MODEL = Dataset("s3://idp-ml/credit_model.joblib")
-# Per-tenant PII salts for the Spark Silver job (DEV values; match config/platform.yaml
-# and the pandas path so tokens are identical). Source from a Secret on EKS.
-SPARK_SALTS = "tenant_a=salt-a-CHANGE-ME,tenant_b=salt-b-CHANGE-ME"
 
 
-def _engine(variable: str, env: str) -> str:
-    """Resolve a stage engine: Airflow Variable, else env var, else 'pandas'.
-    Wrapped so a metadata-DB hiccup at parse time can't break DAG import."""
-    try:
-        from airflow.models import Variable
-        val = Variable.get(variable, default_var=os.environ.get(env, "pandas"))
-    except Exception:
-        val = os.environ.get(env, "pandas")
-    return (val or "pandas").strip().lower()
-
-
-# S3/MinIO env every pandas stage pod needs (platform services are in idp-platform).
+# S3/MinIO env every stage pod needs (platform services are in idp-platform).
 S3_ENV = [
     k8s.V1EnvVar(name="IDP_S3_ENDPOINT", value=MINIO_ENDPOINT),
     k8s.V1EnvVar(name="IDP_S3_ACCESS_KEY", value="minioadmin"),
@@ -101,11 +76,23 @@ TS_ENV = [
     k8s.V1EnvVar(name="IDP_TS_PASSWORD", value="idp-dev-password"),
 ]
 
+# Spark runtime for the Silver/Gold pods: local master in the pod, fixed JVM heap,
+# and a pod limit with headroom above it for off-heap + Python memory (matches
+# deploy/app/jobs/{silver,gold}-job.yaml).
+SPARK_ENV = [
+    k8s.V1EnvVar(name="IDP_SPARK_MASTER", value="local[*]"),
+    k8s.V1EnvVar(name="IDP_SPARK_DRIVER_MEMORY", value="1g"),
+]
+SPARK_RESOURCES = k8s.V1ResourceRequirements(
+    requests={"cpu": "500m", "memory": "1536Mi"},
+    limits={"cpu": "2", "memory": "3Gi"},
+)
+
 default_args = {"owner": "idp", "retries": 1, "retry_delay": timedelta(minutes=3)}
 
 
-def _stage(task_id: str, arg: str, *, extra_env=None) -> KubernetesPodOperator:
-    """A medallion stage on the pandas `idp` image (single-node execution)."""
+def _stage(task_id: str, arg: str, *, extra_env=None, resources=None) -> KubernetesPodOperator:
+    """A medallion stage: `idp <arg>` in the idp image (Silver/Gold run Spark inside it)."""
     return KubernetesPodOperator(
         task_id=task_id,
         name=f"idp-{arg}",
@@ -115,64 +102,16 @@ def _stage(task_id: str, arg: str, *, extra_env=None) -> KubernetesPodOperator:
         cmds=["idp"],
         arguments=[arg],
         env_vars=S3_ENV + (extra_env or []),
+        container_resources=resources,
         get_logs=True,
         on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
         in_cluster=True,
     )
 
 
-def _spark_stage(task_id: str, name: str, script: str, configmap: str,
-                 *, extra_args=None) -> KubernetesPodOperator:
-    """A medallion stage on Spark: spark-submit pipelines/spark/<script> in an
-    apache/spark pod (mirrors deploy/app/jobs/spark-<stage>-job.yaml). Same
-    task_id as the pandas variant, so the DAG shape is unchanged."""
-    return KubernetesPodOperator(
-        task_id=task_id,
-        name=name,
-        namespace=APP_NS,
-        image=SPARK_IMAGE,
-        image_pull_policy="IfNotPresent",
-        cmds=["/opt/spark/bin/spark-submit"],
-        arguments=[
-            "--master", "local[*]",
-            "--packages", "org.apache.hadoop:hadoop-aws:3.3.4",
-            "--conf", "spark.jars.ivy=/tmp/.ivy2",
-            "--conf", f"spark.hadoop.fs.s3a.endpoint={MINIO_ENDPOINT}",
-            "--conf", "spark.hadoop.fs.s3a.access.key=minioadmin",
-            "--conf", "spark.hadoop.fs.s3a.secret.key=minioadmin123",
-            "--conf", "spark.hadoop.fs.s3a.path.style.access=true",
-            "--conf", "spark.hadoop.fs.s3a.connection.ssl.enabled=false",
-            f"/opt/idp/{script}", "--prefix", BUCKET_PREFIX, *(extra_args or []),
-        ],
-        env_vars=[k8s.V1EnvVar(name="HOME", value="/tmp")],  # writable Ivy cache home
-        volumes=[k8s.V1Volume(
-            name="job-script",
-            config_map=k8s.V1ConfigMapVolumeSource(name=configmap),
-        )],
-        volume_mounts=[k8s.V1VolumeMount(name="job-script", mount_path="/opt/idp")],
-        container_resources=k8s.V1ResourceRequirements(
-            requests={"cpu": "500m", "memory": "1500Mi"},
-            limits={"cpu": "2", "memory": "2500Mi"},
-        ),
-        get_logs=True,
-        on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
-        in_cluster=True,
-    )
-
-
-def _silver_task() -> KubernetesPodOperator:
-    """Bronze -> Silver on the configured engine (pandas | spark) — same task_id."""
-    if _engine("idp_silver_engine", "IDP_SILVER_ENGINE") == "spark":
-        return _spark_stage("silver", "idp-spark-silver", "silver_job.py",
-                            "idp-silver-spark", extra_args=["--salts", SPARK_SALTS])
-    return _stage("silver", "silver")
-
-
-def _gold_task() -> KubernetesPodOperator:
-    """Silver -> Gold on the configured engine (pandas | spark) — same task_id."""
-    if _engine("idp_gold_engine", "IDP_GOLD_ENGINE") == "spark":
-        return _spark_stage("gold", "idp-spark-gold", "gold_job.py", "idp-gold-spark")
-    return _stage("gold", "gold")
+def _spark_stage(task_id: str, arg: str) -> KubernetesPodOperator:
+    """Silver/Gold: the same `idp` stage pod, with the Spark runtime env + resources."""
+    return _stage(task_id, arg, extra_env=SPARK_ENV, resources=SPARK_RESOURCES)
 
 
 # DAG 1 — FEATURES (refresh): Silver -> Gold (features only), on the data cadence.
@@ -183,12 +122,16 @@ with DAG(
     schedule="0 * * * *",                   # hourly (data cadence)
     start_date=datetime(2026, 1, 1),
     catchup=False,
+    # One feature refresh at a time: overlapping runs would rewrite Silver while
+    # another run's Gold is reading it (plain Parquet has no snapshot isolation
+    # until Iceberg), and stack several Spark pods on the node.
+    max_active_runs=1,
     default_args=default_args,
     tags=["idp", "medallion", "features"],
 ) as dag_features:
-    _gold = _gold_task()
+    _gold = _spark_stage("gold", "gold")
     _gold.outlets = [GOLD_FEATURES]          # updating features triggers inference
-    _silver_task() >> _gold
+    _spark_stage("silver", "silver") >> _gold
 
 
 # DAG 2 — INFERENCE (serve): Score -> Publish. DATASET-DRIVEN — it runs whenever

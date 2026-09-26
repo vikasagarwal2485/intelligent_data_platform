@@ -88,7 +88,7 @@ def test_silver_gold_labels_rerun_do_not_duplicate(tmp_path, frames, dataset):
     to_bronze(cfg, frames)
     counts = []
     for _ in range(2):
-        silver = to_silver(cfg)
+        silver = to_silver(cfg)["silver_tables"]
         to_gold(cfg)
         to_labels(cfg, dataset=dataset)
         counts.append({
@@ -110,33 +110,40 @@ def test_bronze_stays_append_only(tmp_path, frames):
     to_bronze(cfg, frames)
     to_bronze(cfg, frames)
     assert len(_read(cfg, "bronze", "parties")) == 2 * len(frames["parties"])
-    assert not to_silver(cfg, persist=False)["dim_subscriber"].duplicated(KEY).any()
+    to_silver(cfg)
+    assert not _read(cfg, "silver", "dim_subscriber").duplicated(KEY).any()
 
 
 def test_score_runs_append_one_row_per_subscriber(tmp_path, frames, dataset):
     # SCN-ML-08.2
     from idp.pipeline import train
     cfg = _cfg(tmp_path)
-    silver = to_silver(cfg, frames, persist=False)
-    gold = to_gold(cfg, silver=silver, persist=False)
-    models = train(cfg, dataset=dataset, silver=silver, persist=False)["models"]
+    to_bronze(cfg, frames)
+    to_silver(cfg)
+    to_gold(cfg)
+    to_labels(cfg, dataset=dataset)
+    models = train(cfg, persist=False)["models"]
     for _ in range(2):
-        to_scores(cfg, gold=gold, models=models)
+        to_scores(cfg, models=models)
+    n_subscribers = len(_read(cfg, "gold", "credit_features"))
     scores = _read(cfg, "gold", "credit_scores")
     assert scores["scored_at"].nunique() == 2
     for _, run in scores.groupby("scored_at"):
-        assert len(run) == len(gold["credit_features"])
+        assert len(run) == n_subscribers
         assert not run.duplicated(KEY).any()
 
 
 def test_gold_refresh_after_changed_silver_leaves_no_stale_rows(tmp_path, frames):
     # SCN-GLD-04.2
     cfg = _cfg(tmp_path)
-    silver = to_silver(cfg, frames, persist=False)
-    to_gold(cfg, silver=silver)
-    dim = silver["dim_subscriber"]
+    to_bronze(cfg, frames)
+    to_silver(cfg)
+    to_gold(cfg)
+    dim = _read(cfg, "silver", "dim_subscriber")
     keep = dim.groupby("tenant_id").head(10)          # a smaller Silver for the refresh
-    to_gold(cfg, silver={**silver, "dim_subscriber": keep})
+    storage.write_parquet(keep, f"{storage.lake_uri(cfg, 'silver')}/dim_subscriber", cfg,
+                          partition_cols=["tenant_id"])   # replace mode: tenants' partitions swapped
+    to_gold(cfg)
     gold = _read(cfg, "gold", "credit_features")
     assert set(map(tuple, gold[KEY].values)) == set(map(tuple, keep[KEY].values))
 

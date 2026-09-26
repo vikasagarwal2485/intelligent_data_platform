@@ -4,8 +4,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from idp.common.config import StorageConfig, load_config
-from idp.features.credit_features import CREDIT_FEATURES
-from idp.features.fraud_features import FRAUD_FEATURES
+from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.pipeline import run
 from idp.serving.api import create_app
 

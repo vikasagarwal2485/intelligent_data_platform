@@ -5,8 +5,9 @@ the topic<->table mapping and the independent Silver/Gold stage functions.
 """
 from __future__ import annotations
 
-from idp.common.config import load_config
-from idp.pipeline import to_gold, to_scores, to_silver, train
+from pathlib import Path
+
+from idp.pipeline import to_scores
 from idp.streaming import SUFFIX_TO_TABLE, TABLE_TO_SUFFIX
 
 
@@ -17,32 +18,33 @@ def test_topic_table_mapping_roundtrip():
     assert TABLE_TO_SUFFIX["recharge_events"] == "recharge"
 
 
-def test_silver_stage_from_bronze_frames(bronze_frames):
-    """Silver stage builds canonical tables from Bronze frames."""
-    cfg = load_config()
-    silver = to_silver(cfg, bronze=bronze_frames, persist=False)
+def test_silver_stage_from_bronze(silver):
+    """Silver stage builds the canonical tables from the landed Bronze (conftest `lake`)."""
     assert set(silver) == {"dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge"}
     assert len(silver["dim_subscriber"]) > 0
     assert set(silver["dim_subscriber"]["tenant_id"]) == {"tenant_a", "tenant_b"}
 
 
-def test_gold_stage_builds_features(bronze_frames):
-    """Gold stage builds feature tables from Silver (no models -> no scores)."""
-    cfg = load_config()
-    silver = to_silver(cfg, bronze=bronze_frames, persist=False)
-    result = to_gold(cfg, silver=silver, persist=False)
-    assert "credit_features" in result["gold_tables"]
-    assert "fraud_features" in result["gold_tables"]
+def test_gold_stage_builds_features(lake):
+    """Gold stage builds feature tables only from the persisted Silver (no scores)."""
+    gold = Path(lake.storage.gold)
+    assert (gold / "credit_features").is_dir() and (gold / "fraud_features").is_dir()
+    assert not (gold / "credit_scores").exists()
 
 
-def test_score_stage_scores_gold_features(bronze_frames, multi_tenant_dataset):
-    """The Score stage applies trained models to Gold features -> score tables."""
-    cfg = load_config()
-    silver = to_silver(cfg, bronze=bronze_frames, persist=False)
-    gold = to_gold(cfg, silver=silver, persist=False)   # features only
-    # train on the SAME dataset the silver was built from (labels must align)
-    trained = train(cfg, dataset=multi_tenant_dataset, silver=silver, persist=False)
-    result = to_scores(cfg, gold=gold, models=trained["models"], persist=False)
+def test_score_stage_scores_gold_features(tmp_path, lake, credit_labeled, fraud_labeled):
+    """The Score stage applies trained models to the Gold features read from the lake."""
+    import shutil
+
+    from idp.ml.credit_model import CreditLimitModel
+    from idp.ml.fraud_model import FraudModel
+    from conftest import lake_cfg
+    cfg = lake_cfg(tmp_path)
+    for table in ("credit_features", "fraud_features"):
+        shutil.copytree(Path(lake.storage.gold) / table, Path(cfg.storage.gold) / table)
+    models = {"credit": CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"]),
+              "fraud": FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])}
+    result = to_scores(cfg, models=models, persist=False)
     assert "credit_scores" in result["score_tables"]
     assert "fraud_scores" in result["score_tables"]
 

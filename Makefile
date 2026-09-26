@@ -27,7 +27,8 @@ $(VENV): ## Create the virtualenv
 	python3 -m venv $(VENV)
 
 .PHONY: install
-install: $(VENV) ## Install the package and dev dependencies
+install: $(VENV) ## Install the package and dev dependencies (needs a JDK 11/17 for Spark)
+	@java -version >/dev/null 2>&1 || { echo "ERROR: a JDK 11/17 is required (Silver/Gold run on Spark). Install e.g. Temurin 17 and set JAVA_HOME."; exit 1; }
 	$(PIP) install -q --upgrade pip
 	$(PIP) install -q -e ".[dev]"
 
@@ -313,39 +314,6 @@ airflow-trigger: ## Unpause the 3 DAGs + trigger features & training (inference 
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_features
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_training
 	@echo ">> idp_inference is dataset-driven: it auto-runs when gold features refresh OR a new model lands."
-
-# --- Spark (production Silver / Gold) ---------------------------------------
-.PHONY: spark-configmap
-spark-configmap: ## (Re)create the idp-silver-spark + idp-gold-spark ConfigMaps (Spark job scripts)
-	kubectl -n idp-app delete configmap idp-silver-spark idp-gold-spark --ignore-not-found
-	kubectl -n idp-app create configmap idp-silver-spark --from-file=silver_job.py=pipelines/spark/silver_job.py
-	kubectl -n idp-app create configmap idp-gold-spark --from-file=gold_job.py=pipelines/spark/gold_job.py
-
-.PHONY: spark-silver
-spark-silver: spark-configmap ## Run the Silver stage as a Spark job (spark-submit, reads Bronze -> writes Silver)
-	kubectl -n idp-app delete job idp-spark-silver --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/spark-silver-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-spark-silver --timeout=900s
-	kubectl -n idp-app logs job/idp-spark-silver
-
-.PHONY: spark-gold
-spark-gold: spark-configmap ## Run the Gold stage as a Spark job (spark-submit, reads Silver -> writes Gold)
-	kubectl -n idp-app delete job idp-spark-gold --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/spark-gold-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-spark-gold --timeout=900s
-	kubectl -n idp-app logs job/idp-spark-gold
-
-.PHONY: silver-engine
-silver-engine: ## Set the Airflow Silver engine: make silver-engine ENGINE=spark|pandas
-	@test -n "$(ENGINE)" || { echo "usage: make silver-engine ENGINE=spark|pandas"; exit 1; }
-	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables set idp_silver_engine "$(ENGINE)"
-	@echo ">> idp_silver_engine=$(ENGINE). For spark, ensure the script CM exists: make spark-configmap"
-
-.PHONY: gold-engine
-gold-engine: ## Set the Airflow Gold engine: make gold-engine ENGINE=spark|pandas
-	@test -n "$(ENGINE)" || { echo "usage: make gold-engine ENGINE=spark|pandas"; exit 1; }
-	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables set idp_gold_engine "$(ENGINE)"
-	@echo ">> idp_gold_engine=$(ENGINE). For spark, ensure the script CM exists: make spark-configmap"
 
 .PHONY: topics
 topics: ## Create/update Kafka topics (KafkaTopic CRs; 7-day retention, RETENTION_DAYS=N to change)

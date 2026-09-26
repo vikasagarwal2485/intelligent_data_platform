@@ -44,9 +44,10 @@ into a single fused fraud score in [0, 1].
 The `train` stage SHALL run separately from the ELT and offline. It SHALL fit both
 models on labelled Gold features (REQ-ML-06) with an out-of-sample split, report
 hold-out metrics (credit: AUC/KS/Gini; fraud: PR-AUC and precision@k), and persist
-the models to the shared model store (REQ-ML-04). A local in-memory path, which
-builds features from generated Silver and uses the generator's labels, SHALL remain
-available for cluster-free dev and tests only.
+the models to the shared model store (REQ-ML-04). Training SHALL always read Gold
+features and labels from the lake. For cluster-free dev and tests, that is a local
+lake built by the same stages; there SHALL be no path that builds features in
+memory for training.
 
 #### Scenario: SCN-ML-03.1 — Models persisted
 - **WHEN** `train` runs with `persist=True`
@@ -61,9 +62,14 @@ available for cluster-free dev and tests only.
   the `/credit-limit` response
 
 #### Scenario: SCN-ML-03.3 — Train job does not read Silver
-- **WHEN** `idp train` runs with no in-memory dataset
+- **WHEN** `idp train` runs
 - **THEN** it reads only the Gold feature tables and the labels store, and never
   builds features from Silver or regenerates synthetic events
+
+#### Scenario: SCN-ML-03.4 — Local training uses the local lake
+- **WHEN** training runs without object storage configured
+- **THEN** it reads Gold features and labels from the local lake, the same way the
+  cluster job reads them from object storage
 
 ### Requirement: REQ-ML-04 — Shared model artifact store
 Trained models SHALL be persisted to a store shared by the separate train, score

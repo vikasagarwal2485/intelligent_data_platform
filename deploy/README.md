@@ -25,7 +25,7 @@ deploy/
     deployment/             #   scoring-api base (Deployment/Service + kustomization)
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
     overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
-    jobs/                   #   produce/consume/silver/gold/publish/spark-gold Jobs
+    jobs/                   #   produce/consume/silver/gold/score/labels/train/publish Jobs
 ```
 
 ## What the platform base provides
@@ -155,6 +155,21 @@ fix is to reset its volume: `kubectl -n idp-platform delete deploy timescaledb &
 kubectl -n idp-platform delete pvc timescaledb-data && kubectl apply -n idp-platform
 -f deploy/platform/timescaledb/timescaledb.yaml`. Give the node more memory to
 avoid repeat OOMs (`minikube start --memory=20480`).
+
+**Upgrading to the single Spark engine (ADR-0027)** — the Silver/Gold stages now
+run Spark inside the `idp` image (JRE + pyspark + S3A jars baked in); the
+`pandas|spark` engine switch, the `apache/spark` pods and the script ConfigMaps are
+gone. After `make image && make app-deploy && make airflow-reload`, remove the
+leftovers once:
+```bash
+kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables delete idp_silver_engine
+kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow variables delete idp_gold_engine
+kubectl -n idp-app delete configmap idp-silver-spark idp-gold-spark --ignore-not-found
+```
+Then verify with `make silver gold score publish` and `make timescale-verify`. The
+Silver/Gold pods request 1.5 Gi / limit 3 Gi with a 1 g Spark driver heap
+(`IDP_SPARK_DRIVER_MEMORY`); raise both together for bigger data. No lake
+migration is needed — table names, layout and schemas are unchanged.
 
 **Duplicate rows in Silver/Gold/labels after upgrading, or `publish` failing on
 a UNIQUE index** (`UNIQUE constraint failed` / `could not create unique index

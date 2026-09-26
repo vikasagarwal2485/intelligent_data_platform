@@ -9,11 +9,12 @@ production **AWS EKS**).
 - Full design: [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
 - Deployment details: [`deploy/README.md`](deploy/README.md) · Kafka setup: [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md)
 
-> **Prototype scope.** The pipeline *logic* (`src/idp`) is implemented in Python
-> (pandas + scikit-learn) so the whole flow is unit-testable and runnable without
-> a cluster. The production engines from the plan (Spark, Flink, Iceberg) are
-> represented by the deployed services and the design docs; scikit-learn
-> `HistGradientBoosting*` stands in for LightGBM/XGBoost.
+> **Engines.** Silver and Gold run on **Apache Spark** — one implementation
+> (`src/idp/transforms`) used by the CLI, the Kubernetes Jobs, Airflow and the tests;
+> locally and in CI it runs as `local[*]` (ADR-0027). pandas + scikit-learn are
+> used for ML (training, scoring) only; scikit-learn `HistGradientBoosting*` stands
+> in for LightGBM/XGBoost. Iceberg, Flink and a distributed Spark cluster are
+> represented by the deployed services and the design docs.
 
 ---
 
@@ -54,7 +55,8 @@ entity/event records into two decisioning products:
 Data flows through a **medallion lakehouse**: **Bronze** (raw, immutable) →
 **Silver** (clean, canonical, tenant-isolated, PII-tokenized) → **Gold**
 (per-subscriber feature tables + ML scores). Two execution paths produce the same
-layers: a **batch** path (local pandas) and a **streaming** path (Kafka → in-cluster jobs).
+layers with the same code: a **batch** path (local, Spark `local[*]`) and a
+**streaming** path (Kafka → in-cluster jobs).
 
 ### 1.2 Platform services
 
@@ -76,7 +78,7 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | Optional (`make kafka-ui`) |
 
 > "Provisioned" = installed and part of the target architecture, but not yet
-> wired into the runnable pandas prototype. This is called out honestly so you
+> wired into the runnable prototype. This is called out honestly so you
 > know what's exercised end-to-end today.
 
 ### 1.3 Applications
@@ -98,7 +100,7 @@ Workloads that use the platform, deployed into the **`idp-app`** namespace.
 flowchart LR
     SYN["Synthetic data generator<br/>(src/idp/synthetic)"]
 
-    subgraph BATCH["Batch path (local pandas)"]
+    subgraph BATCH["Batch path (local Spark)"]
       direction TB
       B_ALL["idp run: synthetic → Bronze → Silver → Gold + ML"]
       B_OUT["data/lake/ (local Parquet)"]
@@ -194,7 +196,7 @@ deploy/                      # split by owning team (ADR-0018)
   app/                       #   APPLICATION TEAM — workloads on the platform
     deployment/              #     scoring-api base (Deployment/Service)
     overlays/local|aws/      #     env patches for scoring-api (dev image / ECR+IRSA)
-    jobs/                    #     produce/consume/silver/gold/publish/spark-gold Jobs
+    jobs/                    #     produce/consume/silver/gold/score/labels/train/publish Jobs
 pipelines/airflow/dags/      # Airflow DAG for the batch pipeline
 tests/                       # 63 pytest tests across every layer
 docs/                        # architecture & implementation plan
@@ -246,8 +248,9 @@ Run `make help` to list every target with a description.
 
 ## 3. Installation & deployment
 
-**Prerequisites (local):** Python 3.10+, Docker, `minikube`, `kubectl`, `helm`,
-`kustomize`. A comfortable minikube is `--cpus=8 --memory=16384` — the full stack
+**Prerequisites (local):** Python 3.10+, a **JDK 11 or 17** (Silver/Gold run on
+Spark; e.g. Temurin 17 with `JAVA_HOME` set — `make install` checks for it),
+Docker, `minikube`, `kubectl`, `helm`, `kustomize`. A comfortable minikube is `--cpus=8 --memory=16384` — the full stack
 is heavy; under-provisioning causes pods to OOM/crashloop.
 
 There are **two execution modes**. Batch is the simplest and always works;
@@ -344,15 +347,11 @@ make minio-reset                                # empty the lake buckets for a c
 **Production (orchestrated Silver/Gold):**
 - **Airflow** — three dataset-driven DAGs (`idp_features`: `silver >> gold`;
   `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) that
-  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; Silver
-  and Gold each have an independent execution-engine switch** (`idp_silver_engine`
-  / `idp_gold_engine` = `pandas` | `spark`) — same DAG shape either way. The Spark
-  Silver job reproduces the same PII tokenization, so `service_id` tokens match.
-  `publish` (Gold→TimescaleDB) stays a **separate** task (next step: Iceberg via Nessie):
-  ```bash
-  make spark-configmap            # once: Spark job scripts into idp-app
-  make silver-engine ENGINE=spark # and/or: make gold-engine ENGINE=spark  (back: ENGINE=pandas)
-  ```
+  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; every
+  stage pod runs the `idp` image.** Silver and Gold run on Spark inside that pod
+  (`local[*]`, fixed driver heap, Spark-sized resources) — the same code as
+  `idp silver` / `idp gold`; there is no engine switch (ADR-0027). `publish`
+  (Gold→TimescaleDB) stays a **separate** task (next step: Iceberg via Nessie).
   Wire + trigger:
   ```bash
   make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
@@ -369,10 +368,13 @@ make minio-reset                                # empty the lake buckets for a c
     PostgreSQL/Redis — the retired Bitnami images no longer pull, which otherwise
     leaves `run-airflow-migrations` hanging and the init containers in
     `CrashLoopBackOff`.
-- **Spark** Gold job (`pipelines/spark/gold_job.py`), reading Silver → writing Gold:
-  ```bash
-  make spark-gold         # spark-submit as a one-off Spark pod (S3A -> MinIO)
-  ```
+- **spark-submit entrypoints** (`pipelines/spark/{silver,gold}_job.py`) are thin
+  wrappers over the same `idp` stages, for a future Spark cluster / Spark Operator;
+  `make silver` / `make gold` already run the Spark implementation.
+- **Upgrading from the engine switch:** remove the old Airflow Variables and script
+  ConfigMaps once (`airflow variables delete idp_silver_engine` / `idp_gold_engine`
+  in the scheduler; `kubectl -n idp-app delete configmap idp-silver-spark
+  idp-gold-spark`) — see [`deploy/README.md`](deploy/README.md).
 - **Full step-by-step (both):** [`docs/triggering.md`](docs/triggering.md).
 - EKS: `deploy/platform/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
   Spark job targets Iceberg via Nessie. See plan §2B.
@@ -413,11 +415,12 @@ only thing the consumer does** — it does not chain into Silver/Gold.
 ### 4.2 Silver pipeline (batch vs stream)
 
 **Purpose:** turn raw per-entity records into clean, canonical, joinable,
-PII-safe tables. The stage is `pipeline.to_silver()`: it **reads Bronze from
-storage** (`s3://idp-bronze`, or the in-memory frames in local `run`), applies
-`curation/silver.py:curate()`, and **writes Silver** (`s3://idp-silver`). The
-transformation logic is identical for on-demand (`idp silver`), orchestrated
-(Airflow), and local (`idp run`) — only the trigger differs.
+PII-safe tables. The stage is `pipeline.to_silver()`: it **reads Bronze from the
+lake** (`s3a://idp-bronze`, or the local `data/lake/bronze`), applies the Spark
+transforms in `transforms/silver.py:curate()`, and **writes Silver**
+(`s3://idp-silver` / `data/lake/silver`). The code is identical for on-demand
+(`idp silver`), orchestrated (Airflow), and local (`idp run`) — only the trigger
+and the Spark master differ.
 
 **Transformations:**
 - **JSON:API unwrap** (`curation/jsonapi.py`): flatten `data.attributes`, strip
@@ -432,7 +435,7 @@ transformation logic is identical for on-demand (`idp silver`), orchestrated
 
 | Table | Grain | Built by | Notable columns |
 |---|---|---|---|
-| `dim_subscriber` | 1 row / MSISDN | `build_subscriber_dim` | account_type, segment, tenure_days, num_products, has_device_agreement, consent flags |
+| `dim_subscriber` | 1 row / MSISDN | `build_dim_subscriber` | account_type, segment, tenure_days, num_products, has_device_agreement, consent flags |
 | `fact_usage` | 1 row / usage event | `build_fact_usage` | event_type, started_at, gross_amount, qty, is_roaming, traffic_case, other_party_number |
 | `fact_recharge` | 1 row / recharge | `build_fact_recharge` | created_at, amount, payment_method, status, failure_reason_code |
 
@@ -442,23 +445,20 @@ Production target: Iceberg tables (ACID/upsert/schema-evolution) via Nessie + Sp
 ### 4.3 Gold pipeline (batch vs stream)
 
 **Purpose:** analytics-ready, per-subscriber tables for ML and serving. The stage
-is `pipeline.to_gold()`: it **reads Silver** (`s3://idp-silver`), builds the
-feature tables (`features/`), and **writes Gold** (`s3://idp-gold`).
+is `pipeline.to_gold()`: it **reads Silver from the lake**, builds the feature
+tables on Spark (`transforms/features.py`), and **writes Gold** (`s3://idp-gold` /
+`data/lake/gold`). Gold is **features only**; scores are written by the separate
+Score stage (`idp score`, REQ-ML-07). The same code runs for `idp gold`, the
+Airflow `gold` task and `idp run`.
 
-- **On-demand / orchestrated** (`idp gold` job, or the Airflow `gold` task, or the
-  Spark `gold_job.py`): builds the feature tables. If trained models are available
-  it also emits `credit_scores` / `fraud_scores`; otherwise Gold = feature tables
-  only (the streaming lake has **no labels** to train from).
-- **Local** (`idp run`): the same `to_gold`, but it receives the just-trained
-  models in-process so scores are always produced.
-
-**Features** (`features/`, aggregated per `(tenant_id, service_id)` over 7/30/90-day
-windows in `features/base.py`):
+**Features** (`transforms/features.py`, aggregated per `(tenant_id, service_id)`
+over the configured 7/30/90-day windows; the ordered model feature lists are
+`idp.features.CREDIT_FEATURES` / `FRAUD_FEATURES`):
 
 | Feature set | Signals |
 |---|---|
-| **Credit** (`credit_features.py`) | recharge success rate, avg/total/max recharge, windowed recharge totals, `days_since_last_recharge`, `share_credit_card`, ARPU, `spend_to_recharge_ratio`, tenure, products |
-| **Fraud** (`fraud_features.py`) | `calls_per_active_day`, `originating_ratio` (SIM-box), `unique_called_numbers`, `roaming_share`, `failed_recharge_count`, per-tenant `recharge_amount_zscore` |
+| **Credit** (`build_credit_features`) | recharge success rate, avg/total/max recharge, windowed recharge totals, `days_since_last_recharge`, `share_credit_card`, ARPU, `spend_to_recharge_ratio`, tenure, products |
+| **Fraud** (`build_fraud_features`) | `calls_per_active_day`, `originating_ratio` (SIM-box), `unique_called_numbers`, `roaming_share`, `failed_recharge_count`, per-tenant `recharge_amount_zscore` |
 
 The join that makes this work: the tokenized `service_id` is identical in
 `dim_subscriber` and the facts (same tenant salt), so facts aggregate back onto

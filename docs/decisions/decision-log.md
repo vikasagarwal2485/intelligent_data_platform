@@ -84,7 +84,7 @@ Consequences. Status: `Accepted` unless noted.
   Airflow orchestrates Silver→Gold; Spark implements production Gold.
 
 ### ADR-0010 — Prototype in pandas/scikit-learn; document the production engines
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0027 (2026-09-26)
 - **Context:** The platform must be unit-testable without a cluster while staying
   faithful to the production design.
 - **Decision:** Implement stage/ML logic in pandas + scikit-learn. Use
@@ -288,3 +288,31 @@ Consequences. Status: `Accepted` unless noted.
   dataset conditions, but the cold-start double pass is gone, new models propagate
   to serving automatically, and the three cadences are independent. `publish` stays
   in the inference DAG (re-pushes features + scores each run — a harmless replace).
+
+### ADR-0027 — Spark for data transforms; pandas and scikit-learn for ML only
+- **Status:** Accepted (2026-09-26) — supersedes ADR-0010
+- **Context:** ADR-0010 put the Silver/Gold logic in pandas so the prototype was
+  testable without a cluster, with PySpark jobs as the "production" port. That
+  left every business rule implemented twice (`curation/silver.py` +
+  `features/*` vs `pipelines/spark/*_job.py`), kept in step only by a parity test,
+  and the pandas path loads whole tables into one process — infeasible at telecom
+  scale (a 5 M-subscriber operator needs ~22 B usage events for a 90-day window).
+  The Spark jobs were proven equal to pandas (max |diff| ~1e-13) and run locally in
+  CI, so the testability argument no longer holds.
+- **Decision:** One implementation of the Silver and Gold transforms, on Apache
+  Spark (`src/idp/transforms/`), used by the CLI stages, the Kubernetes Jobs,
+  Airflow and the tests. The execution environment only selects the Spark master
+  and resources (`local[*]` locally/in CI/in a single pod; a cluster later —
+  `IDP_SPARK_MASTER`, `IDP_SPARK_DRIVER_MEMORY`); there is no engine switch.
+  Stages exchange data only through the lake. pandas and scikit-learn are confined
+  to ML (training on the labelled Gold feature set, scoring) plus the synthetic
+  generator; the Bronze landing, publish and the MCP reads stay on pandas until
+  their roadmap changes (Iceberg/incremental ingestion, distributed runtime, MCP
+  over Trino). The pandas outputs were frozen as golden files
+  (`tests/golden/`) before the pandas code was removed.
+- **Consequences:** No duplicated business logic; the transforms scale out once a
+  cluster master is configured. A JDK is a prerequisite for dev and CI, the `idp`
+  image carries a JRE + pyspark + the S3A jars (one image for every stage; the
+  `apache/spark` pods and script ConfigMaps are gone), and the test suite starts a
+  local Spark session. Small runs pay JVM start-up. REQ-ORC-04 (engine parity) is
+  retired; the golden-file tests guard behaviour instead.

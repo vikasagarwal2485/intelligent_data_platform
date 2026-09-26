@@ -1,9 +1,13 @@
-"""Silver curation layer (plan section 3.3)."""
-from idp.curation.silver import (
-    build_fact_recharge,
-    build_fact_usage,
-    build_subscriber_dim,
-    curate,
+"""JSON:API source-record helpers (plan section 3.3).
+
+Row-level parsing of TM Forum JSON:API envelopes (``jsonapi``). The Silver table
+transforms themselves live in ``idp.transforms.silver`` (Spark, REQ-ORC-05).
+"""
+from idp.curation.jsonapi import (
+    normalize_money,
+    strip_uuid_wrapper,
+    unwrap_recharge_event,
+    unwrap_usage_event,
 )
 
-__all__ = ["build_fact_recharge", "build_fact_usage", "build_subscriber_dim", "curate"]
+__all__ = ["normalize_money", "strip_uuid_wrapper", "unwrap_recharge_event", "unwrap_usage_event"]
