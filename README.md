@@ -173,13 +173,13 @@ flowchart TB
 
 ```
 src/idp/                     # the platform package
-  common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage
+  common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage,
+                             #   model feature contract (feature_contract.py)
   synthetic/generator.py     #   synthetic data generator (labelled, multi-tenant)
   ingestion/                 #   Bronze: landing + raw, tenant-partitioned Parquet (bronze.py);
                              #   TM Forum JSON:API source adapter (jsonapi.py)
   transforms/                #   Spark Silver/Gold (single engine): silver.py, features.py,
                              #   tokens.py, session.py, lake.py
-  features/                  #   the model feature contract (CREDIT_FEATURES / FRAUD_FEATURES)
   ml/                        #   credit_model.py (PD + limit), fraud_model.py (rules+GBM+iforest)
   streaming/                 #   Kafka producer.py + consumer.py
   serving/api.py             #   FastAPI scoring service
@@ -458,7 +458,7 @@ Airflow `gold` task and `idp run`.
 
 **Features** (`transforms/features.py`, aggregated per `(tenant_id, service_id)`
 over the configured 7/30/90-day windows; the ordered model feature lists are
-`idp.features.CREDIT_FEATURES` / `FRAUD_FEATURES`):
+`idp.common.feature_contract.CREDIT_FEATURES` / `FRAUD_FEATURES`):
 
 | Feature set | Signals |
 |---|---|

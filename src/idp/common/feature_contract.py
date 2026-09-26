@@ -1,8 +1,10 @@
 """Model feature contract (plan section 4).
 
-The ordered feature columns the credit and fraud models are trained and scored on.
-The Gold feature tables (``idp.transforms.features``) are keyed by
-``(tenant_id, service_id)`` followed by exactly these columns.
+The ordered feature columns shared by three layers: the Gold feature tables
+(written by ``idp.transforms.features``) are keyed by ``(tenant_id, service_id)``
+followed by exactly these columns; the credit and fraud models are trained and
+scored on them (``idp.ml``); and the scoring API builds its request frames from
+them (``idp.serving.api``).
 """
 
 # Numeric features consumed by the credit model.

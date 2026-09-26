@@ -10,7 +10,7 @@ from pathlib import Path
 
 from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
-from idp.features import CREDIT_FEATURES
+from idp.common.feature_contract import CREDIT_FEATURES
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
 from idp.pipeline import to_scores

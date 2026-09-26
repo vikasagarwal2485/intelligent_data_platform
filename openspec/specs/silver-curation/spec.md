@@ -22,18 +22,27 @@ carrying `tenant_id`.
 - **WHEN** `dim_subscriber` is built
 - **THEN** it has one row per `(tenant_id, service_id)` with no duplicates
 
-### Requirement: REQ-SLV-02 — JSON:API unwrap and normalization
-The system SHALL unwrap JSON:API envelopes, strip `UUID(...)` wrappers from
-relationship ids, normalize money as `gross_amount = net_amount + tax_amount`,
-normalize timestamps to UTC, and deduplicate on natural keys.
+### Requirement: REQ-SLV-02 — Id canonicalization and normalization
+The Silver stage SHALL:
+- strip `UUID(...)` wrappers from entity and relationship ids
+- normalize money as `gross_amount = net_amount + tax_amount`
+- normalize timestamps to UTC
+- de-duplicate on natural keys
+
+Silver curates canonical Bronze records; it does not parse JSON:API envelopes.
+Unwrapping envelopes into canonical records is the ingestion adapter's job
+(REQ-BRZ-04).
 
 #### Scenario: SCN-SLV-02.1 — Money normalization
 - **WHEN** a usage/recharge record with net + tax amounts is curated
 - **THEN** `gross_amount` equals net + tax
 
 #### Scenario: SCN-SLV-02.2 — UUID unwrap from real samples
-- **WHEN** a `data_samples/` JSON:API document with `"UUID(123...)"` is unwrapped
-- **THEN** the resolved relationship id is the inner value without the wrapper
+- **WHEN** a Bronze record carries a relationship id wrapped as `"UUID(123...)"`,
+  as in the real TM Forum documents in `data_samples/`, and is curated
+- **THEN** the Silver id is the inner value without the wrapper, so the
+  relationship joins its target (e.g. an agreement's `account_id` joins
+  `accounts`)
 
 ### Requirement: REQ-SLV-03 — PII tokenization at Silver
 The Silver stage SHALL tokenize PII columns per tenant so raw identifiers never

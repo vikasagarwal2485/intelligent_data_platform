@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
+from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.transforms import features
 
 DIM_SCHEMA = ("tenant_id string, service_id string, agreement_id string, account_tenure_days long, "

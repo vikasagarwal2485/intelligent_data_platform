@@ -2,7 +2,7 @@
 Spark Gold stage (conftest `lake`)."""
 from __future__ import annotations
 
-from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
+from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 
 
 def test_credit_features_shape_and_columns(silver, credit_features):

@@ -2,7 +2,7 @@
 
 Pure DataFrame functions. Each feature table is keyed by ``(tenant_id,
 service_id)`` — one row per subscriber in ``dim_subscriber`` who granted analytics
-consent (REQ-FND-05) — followed by exactly the model feature contract (``idp.features.CREDIT_FEATURES`` /
+consent (REQ-FND-05) — followed by exactly the model feature contract (``idp.common.feature_contract.CREDIT_FEATURES`` /
 ``FRAUD_FEATURES``).
 
 Lookback windows use one reference time per source table: that table's latest
@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from idp.common.pii import ConsentError
-from idp.features import CREDIT_FEATURES, FRAUD_FEATURES
+from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 
 KEY = ["tenant_id", "service_id"]
 DAY_US = 86_400 * 1_000_000
