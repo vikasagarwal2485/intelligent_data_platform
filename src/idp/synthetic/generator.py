@@ -78,6 +78,15 @@ class SyntheticDataset:
         }
 
 
+# The source entity tables of a SyntheticDataset (every field but ``labels``), in
+# landing order. This is the one definition: the landing zone, Bronze
+# (``pipeline.ENTITIES``) and the Kafka topic map all cover exactly these.
+ENTITIES = (
+    "parties", "accounts", "agreements", "products",
+    "voice_events", "data_events", "recharge_events", "fee_charges",
+)
+
+
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 

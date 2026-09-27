@@ -33,12 +33,7 @@ from idp.common import pii, storage
 from idp.common.config import PlatformConfig, load_config
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
-from idp.synthetic.generator import SyntheticDataset, generate, generate_for_tenants
-
-ENTITIES = (
-    "parties", "accounts", "agreements", "products",
-    "voice_events", "data_events", "recharge_events", "fee_charges",
-)
+from idp.synthetic.generator import ENTITIES, SyntheticDataset, generate, generate_for_tenants
 SILVER_TABLES = ("dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge")
 
 

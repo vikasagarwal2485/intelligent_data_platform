@@ -26,7 +26,7 @@ from idp.common.config import load_config
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
-    from idp.ingestion.bronze import write_landing
+    from idp.ingestion.landing import write_landing
     from idp.synthetic.generator import generate_for_tenants
 
     cfg = load_config(args.config)

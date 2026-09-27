@@ -1,38 +1,26 @@
-"""Tests for Bronze ingestion (plan 3.2)."""
+"""Tests for the file landing zone (REQ-BRZ-03) and the shared entity list.
+
+Bronze itself (Iceberg, `pipeline.to_bronze`) is covered by test_bronze_iceberg.py.
+"""
 from __future__ import annotations
 
-from idp.ingestion import bronze
+from idp.ingestion import landing
+from idp.synthetic.generator import ENTITIES
 
 
 def test_write_landing_partitions_by_tenant(multi_tenant_dataset, tmp_path):
-    written = bronze.write_landing(multi_tenant_dataset, tmp_path)
+    written = landing.write_landing(multi_tenant_dataset, tmp_path)
     assert "parties" in written
     assert (tmp_path / "tenant=tenant_a" / "parties.json").exists()
     assert (tmp_path / "tenant=tenant_b" / "parties.json").exists()
 
 
-def test_ingest_and_reload_roundtrip(small_dataset, tmp_path):
-    frames = bronze.ingest(small_dataset, tmp_path / "bronze")
-    reloaded = bronze.load_bronze(tmp_path / "bronze")
-    assert set(reloaded) >= {"parties", "voice_events", "recharge_events"}
-    assert len(reloaded["parties"]) == len(frames["parties"])
-
-
-def test_bronze_is_partitioned_by_tenant(multi_tenant_dataset, tmp_path):
-    bronze.ingest(multi_tenant_dataset, tmp_path / "bronze")
-    # tenant partition directories exist on disk
-    party_dir = tmp_path / "bronze" / "parties"
-    parts = {p.name for p in party_dir.glob("tenant_id=*")}
-    assert parts == {"tenant_id=tenant_a", "tenant_id=tenant_b"}
-
-
-# --- REQ-BRZ-03: file landing zone (`idp generate`) -------------------------
 def test_landing_has_one_file_per_tenant_entity(multi_tenant_dataset, tmp_path):
     import json
 
-    bronze.write_landing(multi_tenant_dataset, tmp_path)
+    landing.write_landing(multi_tenant_dataset, tmp_path)
     for tenant_id in ("tenant_a", "tenant_b"):
-        for entity in bronze.ENTITIES:
+        for entity in ENTITIES:
             if getattr(multi_tenant_dataset, entity).empty:
                 continue
             path = tmp_path / f"tenant={tenant_id}" / f"{entity}.json"
@@ -56,3 +44,17 @@ def test_generate_command_writes_landing_not_bronze(tmp_path):
     assert main(["--config", str(cfg_path), "generate"]) == 0
     assert (tmp_path / "landing" / "tenant=tenant_a" / "parties.json").exists()
     assert not (tmp_path / "bronze").exists()
+
+
+# --- one entity list ----------------------------------------------------------
+def test_entities_defined_once_and_cover_dataset_and_topics():
+    from dataclasses import fields
+
+    from idp import pipeline
+    from idp.streaming import TABLE_TO_SUFFIX
+    from idp.synthetic import generator
+    from idp.synthetic.generator import ENTITIES, SyntheticDataset
+
+    assert pipeline.ENTITIES is generator.ENTITIES                 # a re-export, not a copy
+    assert ENTITIES == tuple(f.name for f in fields(SyntheticDataset) if f.name != "labels")
+    assert set(TABLE_TO_SUFFIX) == set(ENTITIES)

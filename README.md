@@ -177,8 +177,9 @@ src/idp/                     # the platform package
   common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage,
                              #   model feature contract (feature_contract.py)
   synthetic/generator.py     #   synthetic data generator (labelled, multi-tenant)
-  ingestion/                 #   Bronze landing helpers (bronze.py);
-                             #   TM Forum JSON:API source adapter (jsonapi.py)
+  ingestion/                 #   source side: file landing zone for `idp generate` (landing.py);
+                             #   TM Forum JSON:API source adapter (jsonapi.py). Bronze itself
+                             #   is written by pipeline.to_bronze (Iceberg), not here
   transforms/                #   Spark Silver/Gold (single engine): silver.py, features.py,
                              #   tokens.py, session.py, lake.py (Iceberg writes),
                              #   incremental.py (incremental Silver facts)

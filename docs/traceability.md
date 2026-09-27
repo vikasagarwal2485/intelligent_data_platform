@@ -82,7 +82,7 @@
 - Spec: [`../openspec/specs/bronze-ingestion/spec.md`](../openspec/specs/bronze-ingestion/spec.md)
 - Scenarios: `SCN-BRZ-01.1` Write and reload Bronze · `SCN-BRZ-01.2` Physical tenant partitioning · `SCN-BRZ-01.3` Append-only history
 - Implemented in: [P1](../openspec/changes/archive/2026-09-26-phase-1-bronze/proposal.md)
-- Code: `ingestion/bronze.py`, `s3://<prefix>-bronze`
+- Code: `ingestion/bronze.py` (removed), `s3://<prefix>-bronze`
 
 #### `REQ-BRZ-02` — Bronze is a standalone stage
 - Spec: [`../openspec/specs/bronze-ingestion/spec.md`](../openspec/specs/bronze-ingestion/spec.md)
@@ -141,13 +141,13 @@
 - Spec: [`../openspec/specs/gold-features/spec.md`](../openspec/specs/gold-features/spec.md)
 - Scenarios: `SCN-GLD-01.1` Feature tables produced · `SCN-GLD-01.2` Bounded ratios
 - Implemented in: [P3](../openspec/changes/archive/2026-09-26-phase-3-gold/proposal.md)
-- Code: `features/fraud_features.py`
+- Code: `features/fraud_features.py` (removed)
 
 #### `REQ-GLD-02` — Tokenized join integrity
 - Spec: [`../openspec/specs/gold-features/spec.md`](../openspec/specs/gold-features/spec.md)
 - Scenarios: `SCN-GLD-02.1` Join coverage
 - Implemented in: [P3](../openspec/changes/archive/2026-09-26-phase-3-gold/proposal.md)
-- Code: `features/fraud_features.py`
+- Code: `features/fraud_features.py` (removed)
 
 #### `REQ-GLD-04` — Idempotent Gold feature writes
 - Spec: [`../openspec/specs/gold-features/spec.md`](../openspec/specs/gold-features/spec.md)
@@ -261,7 +261,7 @@
 - Spec: [`../openspec/specs/orchestration/spec.md`](../openspec/specs/orchestration/spec.md)
 - Scenarios: `SCN-ORC-02.1` Inference re-runs on a new model · `SCN-ORC-02.2` Spark Gold parity · `SCN-ORC-02.3` Engine switch keeps DAG shape · `SCN-ORC-02.4` Feature refreshes never overlap · `SCN-ORC-02.5` Maintenance runs daily
 - Implemented in: [P8](../openspec/changes/archive/2026-09-26-phase-8-platform/proposal.md), [P9](../openspec/changes/archive/2026-09-26-phase-9-deploy-restructure/proposal.md), [P13](../openspec/changes/archive/2026-09-26-phase-13-training-inference-split/proposal.md), [P14](../openspec/changes/archive/2026-09-26-phase-14-dataset-driven-dags/proposal.md)
-- Code: `spark-gold-job.yaml`
+- Code: `spark-gold-job.yaml` (removed)
 
 #### `REQ-ORC-03` — Local composition remains available
 - Spec: [`../openspec/specs/orchestration/spec.md`](../openspec/specs/orchestration/spec.md)
@@ -368,7 +368,7 @@
 - Spec: [`../openspec/specs/silver-curation/spec.md`](../openspec/specs/silver-curation/spec.md)
 - Scenarios: `SCN-SLV-02.1` Money normalization · `SCN-SLV-02.2` UUID unwrap from real samples
 - Implemented in: [P2](../openspec/changes/archive/2026-09-26-phase-2-silver/proposal.md)
-- Code: `curation/jsonapi.py`
+- Code: `curation/jsonapi.py` (removed)
 
 #### `REQ-SLV-03` — PII tokenization at Silver
 - Spec: [`../openspec/specs/silver-curation/spec.md`](../openspec/specs/silver-curation/spec.md)

@@ -3,7 +3,8 @@
 
 Traceability chain: Scenario (SCN-*) <- Requirement (REQ-*) in specs, linked to
 the phase(s) whose proposal 'What Changes' cite the REQ id, and the code paths
-named in those items.
+named in those items. The phase proposals are the historical record, so a cited
+path that no longer exists is kept but marked "(removed)".
 
 Phase proposals are read from active (`openspec/changes/phase-*`) and archived
 (`openspec/changes/archive/<date>-phase-*`) changes.
@@ -54,6 +55,31 @@ def parse_specs():
             elif s and cur:
                 reqs[cur]["scenarios"].append((s.group(1), s.group(2)))
     return reqs
+
+
+FILEISH_RE = re.compile(r"^[\w.*\-]+(?:/[\w.*\-{}<>]+)*/?$")
+_SKIP_DIRS = {".venv", ".git", "node_modules", "archive", "__pycache__"}
+
+
+def _exists(path: str) -> bool | None:
+    """Whether a cited code path still exists: True/False, or None when the token
+    isn't a plain repository path (a URL, an s3:// location, an API route, prose)."""
+    p = path
+    if not p or p != p.strip() or "://" in p or p.startswith("/") or "REQ-" in p or not FILEISH_RE.match(p):
+        return None
+    if "<" in p or "{" in p:
+        return None                                   # templated, e.g. <prefix>
+    for base in (REPO, REPO / "src" / "idp"):         # repo-relative or package-relative
+        if any(base.glob(p.rstrip("/"))):
+            return True
+    if "/" not in p.rstrip("/"):                      # a bare file name: anywhere in the repo
+        return any(f for f in REPO.rglob(p)
+                   if not _SKIP_DIRS.intersection(f.relative_to(REPO).parts))
+    return False
+
+
+def _code(path: str) -> str:
+    return f"`{path}` (removed)" if _exists(path) is False else f"`{path}`"
 
 
 def parse_proposals():
@@ -124,7 +150,7 @@ def main():
             paths = sorted({p for _, _, ps in entries for p in ps})
             lines.append(f"- Implemented in: {phs}")
             if paths:
-                lines.append("- Code: " + ", ".join(f"`{p}`" for p in paths))
+                lines.append("- Code: " + ", ".join(_code(p) for p in paths))
         else:
             lines.append("- Implemented in: **(unmapped — no proposal references this id)**")
         lines.append("")
