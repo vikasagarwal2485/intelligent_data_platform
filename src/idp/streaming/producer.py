@@ -23,7 +23,7 @@ def _key_for(table: str, row: dict) -> bytes:
     return str(key).encode("utf-8")
 
 
-def produce(
+def produce_to_kafka(
     dataset: SyntheticDataset,
     bootstrap: str,
     *,

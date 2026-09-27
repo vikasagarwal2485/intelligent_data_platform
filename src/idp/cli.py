@@ -54,7 +54,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 
 def _cmd_produce(args: argparse.Namespace) -> None:
-    from idp.streaming.producer import produce
+    from idp.streaming.producer import produce_to_kafka
     from idp.synthetic.generator import generate
 
     cfg = load_config(args.config)
@@ -72,7 +72,7 @@ def _cmd_produce(args: argparse.Namespace) -> None:
             default_rate=float(syn.get("default_rate", 0.12)),
             seed=int(syn.get("seed", 42)),
         )
-        counts = produce(dataset, bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+        counts = produce_to_kafka(dataset, bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
         for k, v in counts.items():
             totals[k] = totals.get(k, 0) + v
         del dataset

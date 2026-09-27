@@ -1,7 +1,7 @@
 """Tests for the Kafka streaming bridge and the decoupled medallion stages.
 
-The producer/consumer need a live Kafka, so here we test the parts that don't:
-the topic<->table mapping and the independent Silver/Gold stage functions.
+No live Kafka: the topic<->table mapping, the independent Silver/Gold stage
+functions, and the producer/consumer entry points against fake Kafka clients.
 """
 from __future__ import annotations
 
@@ -129,3 +129,48 @@ def test_consume_appends_to_iceberg_bronze(monkeypatch, tmp_path):
     consume_to_bronze("x:9092", ["tenant_a"], land=lambda f: to_bronze(cfg, f))
     assert catalog.read_table(cfg, "bronze", "parties")["id"].tolist() == ["p1"]
     assert not catalog.table_exists(cfg, "silver", "dim_subscriber")
+
+
+# --- synthetic data -> Kafka (REQ-STR-01) -----------------------------------------
+class _FakeProducer:
+    instances: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs, self.sent, self.flushed, self.closed = kwargs, [], False, False
+        _FakeProducer.instances.append(self)
+
+    def send(self, topic, key=None, value=None):
+        self.sent.append((topic, key, value))
+
+    def flush(self):
+        self.flushed = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_produce_to_kafka_publishes_per_tenant_topics_with_natural_keys(monkeypatch):
+    # SCN-STR-01.1 / 01.2 through the entry point itself, with no broker
+    import sys
+    import types
+
+    import pandas as pd
+
+    from idp.streaming import produce_to_kafka
+    _FakeProducer.instances = []
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(KafkaProducer=_FakeProducer))
+    frames = {t: pd.DataFrame() for t in TABLE_TO_SUFFIX}
+    frames["voice_events"] = pd.DataFrame({"tenant_id": ["tenant_a", "tenant_a"], "id": ["v1", "v2"],
+                                           "service_id": ["s1", "s2"]})
+    frames["fee_charges"] = pd.DataFrame({"tenant_id": ["tenant_b"], "id": ["f1"]})
+
+    counts = produce_to_kafka(types.SimpleNamespace(**frames), "broker:9092")
+
+    assert counts == {"t.tenant_a.usage.voice": 2, "t.tenant_b.fees": 1}
+    [producer] = _FakeProducer.instances
+    assert producer.kwargs["bootstrap_servers"] == "broker:9092"
+    assert [(t, k) for t, k, _ in producer.sent] == [
+        ("t.tenant_a.usage.voice", b"s1"), ("t.tenant_a.usage.voice", b"s2"),   # subscriber key
+        ("t.tenant_b.fees", b"f1"),                                           # else the record id
+    ]
+    assert producer.flushed and producer.closed
