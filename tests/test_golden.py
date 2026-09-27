@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from golden_data import GOLDEN_GOLD, GOLDEN_KEYS, GOLDEN_SILVER, golden_cfg, land_golden_bronze
+from idp.common import catalog
 from idp.pipeline import to_gold, to_silver
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
@@ -35,9 +36,16 @@ def _family(s: pd.Series) -> str:
     return "other"
 
 
+def _tenant_first(df: pd.DataFrame) -> pd.DataFrame:
+    """The golden files were written as Hive-partitioned Parquet, which moves the
+    partition column last; Iceberg keeps schema order. Compare with tenant_id first."""
+    return df[["tenant_id", *[c for c in df.columns if c != "tenant_id"]]]
+
+
 def assert_same_table(expected: pd.DataFrame, actual: pd.DataFrame, key: list[str],
                       atol: float = 1e-6) -> None:
     """Same columns (and order), same logical types, same rows, values within atol."""
+    expected, actual = _tenant_first(expected), _tenant_first(actual)
     assert list(actual.columns) == list(expected.columns)
     assert len(actual) == len(expected)
     expected = expected.sort_values(key).reset_index(drop=True)
@@ -72,10 +80,10 @@ def golden_lake(tmp_path_factory):
 @pytest.mark.parametrize("table", GOLDEN_SILVER)
 def test_silver_matches_golden(golden_lake, table):
     assert_same_table(_read(GOLDEN / "silver" / table),
-                      _read(Path(golden_lake.storage.silver) / table), GOLDEN_KEYS[table])
+                      catalog.read_table(golden_lake, "silver", table), GOLDEN_KEYS[table])
 
 
 @pytest.mark.parametrize("table", GOLDEN_GOLD)
 def test_gold_matches_golden(golden_lake, table):
     assert_same_table(_read(GOLDEN / "gold" / table),
-                      _read(Path(golden_lake.storage.gold) / table), GOLDEN_KEYS[table])
+                      catalog.read_table(golden_lake, "gold", table), GOLDEN_KEYS[table])

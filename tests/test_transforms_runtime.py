@@ -39,10 +39,11 @@ def test_s3a_settings_when_s3_enabled(monkeypatch):
     assert conf["spark.hadoop.fs.s3a.endpoint"] == "http://minio:9000"
     assert conf["spark.hadoop.fs.s3a.path.style.access"] == "true"
     assert conf["spark.hadoop.fs.s3a.connection.ssl.enabled"] == "false"
+    assert conf["spark.hadoop.fs.s3.impl"] == "org.apache.hadoop.fs.s3a.S3AFileSystem"   # s3:// table locations
 
 
 def test_spark_and_pandas_resolve_the_same_layer(monkeypatch):
-    # SCN-FND-04.3
+    # layer roots (used for non-table data such as stream checkpoints)
     monkeypatch.setenv("IDP_S3_ENDPOINT", "http://minio:9000")
     monkeypatch.setenv("IDP_S3_BUCKET_PREFIX", "idp")
     cfg = load_config()
@@ -54,26 +55,44 @@ def test_spark_and_pandas_resolve_the_same_layer(monkeypatch):
 
 
 def test_read_missing_table_is_none(spark, tmp_path):
-    cfg = load_config()
-    from idp.common.config import StorageConfig
-    cfg.storage = StorageConfig(root=str(tmp_path), landing=str(tmp_path), bronze=str(tmp_path / "b"),
-                                silver=str(tmp_path / "s"), gold=str(tmp_path / "g"),
-                                ml_artifacts=str(tmp_path / "ml"))
-    assert lake.read_table(spark, cfg, "silver", "nope") is None
+    from conftest import lake_cfg
+    assert lake.read_table(spark, lake_cfg(tmp_path), "silver", "nope") is None
 
 
-def test_write_replaces_only_present_tenants(spark, tmp_path, monkeypatch):
-    monkeypatch.delenv("IDP_S3_ENDPOINT", raising=False)
-    from idp.common.config import StorageConfig
-    cfg = load_config()
-    cfg.storage = StorageConfig(root=str(tmp_path), landing=str(tmp_path), bronze=str(tmp_path / "b"),
-                                silver=str(tmp_path / "s"), gold=str(tmp_path / "g"),
-                                ml_artifacts=str(tmp_path / "ml"))
-    lake.write_table(spark.createDataFrame([("tenant_a", 1), ("tenant_b", 2)], ["tenant_id", "x"]),
-                     cfg, "silver", "t")
-    lake.write_table(spark.createDataFrame([("tenant_a", 9)], ["tenant_id", "x"]), cfg, "silver", "t")
+def test_overwrite_replaces_only_present_tenants(spark, tmp_path):
+    from conftest import lake_cfg
+    cfg = lake_cfg(tmp_path)
+    lake.overwrite_tenants(spark.createDataFrame([("tenant_a", 1), ("tenant_b", 2)], ["tenant_id", "x"]),
+                           cfg, "silver", "t")
+    lake.overwrite_tenants(spark.createDataFrame([("tenant_a", 9)], ["tenant_id", "x"]), cfg, "silver", "t")
     rows = {r["tenant_id"]: r["x"] for r in lake.read_table(spark, cfg, "silver", "t").collect()}
     assert rows == {"tenant_a": 9, "tenant_b": 2}
+
+
+def test_spark_and_python_see_each_others_commits(spark, tmp_path):
+    # SCN-FND-04.3 — one catalog: Spark and pyiceberg read each other's commits
+    import pandas as pd
+
+    from conftest import lake_cfg
+    from idp.common import catalog
+    cfg = lake_cfg(tmp_path)
+    catalog.append_table(cfg, "bronze", "t", pd.DataFrame({"tenant_id": ["tenant_a"], "id": ["1"]}))
+    assert lake.read_table(spark, cfg, "bronze", "t").count() == 1          # Python -> Spark
+    lake.merge_insert_new(spark.createDataFrame([("tenant_a", "1"), ("tenant_b", "2")], ["tenant_id", "id"]),
+                          cfg, "bronze", "t", keys=["tenant_id", "id"])
+    assert sorted(catalog.read_table(cfg, "bronze", "t")["id"]) == ["1", "2"]  # Spark -> Python (no dup)
+    catalog.append_table(cfg, "bronze", "t", pd.DataFrame({"tenant_id": ["tenant_a"], "id": ["3"]}))
+    assert lake.read_table(spark, cfg, "bronze", "t").count() == 3          # same session sees it
+
+
+def test_ensure_table_adds_new_columns(spark, tmp_path):
+    from conftest import lake_cfg
+    cfg = lake_cfg(tmp_path)
+    lake.overwrite_tenants(spark.createDataFrame([("tenant_a", 1)], ["tenant_id", "x"]), cfg, "silver", "t")
+    lake.merge_insert_new(spark.createDataFrame([("tenant_a", 2, "new")], ["tenant_id", "x", "extra"]),
+                          cfg, "silver", "t", keys=["tenant_id", "x"])
+    got = {r["x"]: r["extra"] for r in lake.read_table(spark, cfg, "silver", "t").collect()}
+    assert got == {1: None, 2: "new"}
 
 
 def test_spark_tokens_equal_python_tokens(spark):

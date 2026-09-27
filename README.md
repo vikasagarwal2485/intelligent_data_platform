@@ -13,8 +13,9 @@ production **AWS EKS**).
 > (`src/idp/transforms`) used by the CLI, the Kubernetes Jobs, Airflow and the tests;
 > locally and in CI it runs as `local[*]` (ADR-0027). pandas + scikit-learn are
 > used for ML (training, scoring) only; scikit-learn `HistGradientBoosting*` stands
-> in for LightGBM/XGBoost. Iceberg, Flink and a distributed Spark cluster are
-> represented by the deployed services and the design docs.
+> in for LightGBM/XGBoost. The lake is **Apache Iceberg** in a JDBC catalog: the
+> platform Postgres in the cluster, a local SQLite file in dev/CI (ADR-0028). Flink and a distributed
+> Spark cluster are represented by the deployed services and the design docs.
 
 ---
 
@@ -68,7 +69,7 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **MinIO** | S3-compatible object store; holds the lake (`idp-bronze` / `idp-silver` / `idp-gold`) | **Active** |
 | **Apache Kafka** (Strimzi) | Event streaming backbone for the ingestion path | **Active** (streaming mode) |
 | **Apicurio Schema Registry** | Avro schema management, Confluent-compatible API | **Active** (schemas registered) |
-| **Nessie** | Git-like Iceberg catalog | Provisioned (Iceberg is the prod target; prototype writes plain Parquet) |
+| **Nessie** | Git-like Iceberg catalog | Provisioned (not the lake's catalog: its REST catalog keeps only the current snapshot; ADR-0028) |
 | **Trino** | Distributed SQL over the lake for ad-hoc queries | **Active** (query Silver/Gold) |
 | **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
 | **Keycloak** | OIDC identity for multi-tenant RBAC | Provisioned (RBAC design, §1.5) |
@@ -103,7 +104,7 @@ flowchart LR
     subgraph BATCH["Batch path (local Spark)"]
       direction TB
       B_ALL["idp run: synthetic → Bronze → Silver → Gold + ML"]
-      B_OUT["data/lake/ (local Parquet)"]
+      B_OUT["data/lake/ (local Iceberg, SQLite catalog)"]
       B_ALL --> B_OUT
     end
 
@@ -176,10 +177,11 @@ src/idp/                     # the platform package
   common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage,
                              #   model feature contract (feature_contract.py)
   synthetic/generator.py     #   synthetic data generator (labelled, multi-tenant)
-  ingestion/                 #   Bronze: landing + raw, tenant-partitioned Parquet (bronze.py);
+  ingestion/                 #   Bronze landing helpers (bronze.py);
                              #   TM Forum JSON:API source adapter (jsonapi.py)
   transforms/                #   Spark Silver/Gold (single engine): silver.py, features.py,
-                             #   tokens.py, session.py, lake.py
+                             #   tokens.py, session.py, lake.py (Iceberg writes),
+                             #   incremental.py (incremental Silver facts)
   ml/                        #   credit_model.py (PD + limit), fraud_model.py (rules+GBM+iforest)
   streaming/                 #   Kafka producer.py + consumer.py
   serving/api.py             #   FastAPI scoring service
@@ -278,7 +280,7 @@ make serve        # scoring API at http://localhost:8000
 
 **Production:** the medallion is run as **separate stages** (not one monolith) —
 Silver/Gold orchestrated by Airflow (`pipelines/airflow/dags/idp_medallion_dag.py`)
-and Spark (`pipelines/spark/gold_job.py`), writing Iceberg via Nessie. `idp run`
+and Spark, reading and writing Iceberg tables in the lake's JDBC catalog. `idp run`
 (below) is for local dev/testing and offline model training, not production ELT.
 
 > **Is batch mode obsolete?** No — its role changes. The *medallion transforms*
@@ -300,7 +302,7 @@ make image                              # build the idp/scoring-api:dev image in
 make platform-base                      # namespaces (idp-platform, idp-app, tenants), RBAC, isolation
 make platform-services                  # install platform services (MinIO, Kafka operator, Trino, ...)
 make app-deploy                         # deploy/redeploy scoring-api into idp-app (rolls pods to the new image)
-make nessie-fix                         # ensure Nessie is healthy (in-memory store)
+make lake-catalog                       # the lake's Iceberg catalog database (`iceberg` in TimescaleDB)
 make kafka                              # Kafka cluster + Schema Registry + topics + Avro schemas
 ```
 Health checks & fixes if a component is unhappy:
@@ -349,12 +351,14 @@ make minio-reset                                # empty the lake buckets for a c
 
 **Production (orchestrated Silver/Gold):**
 - **Airflow** — three dataset-driven DAGs (`idp_features`: `silver >> gold`;
-  `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) that
+  `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) plus the
+  daily `idp_maintenance` DAG (`idp maintain`: compaction, snapshot expiry, orphan
+  cleanup; it triggers nothing), all of which
   launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; every
   stage pod runs the `idp` image.** Silver and Gold run on Spark inside that pod
   (`local[*]`, fixed driver heap, Spark-sized resources) — the same code as
   `idp silver` / `idp gold`; there is no engine switch (ADR-0027). `publish`
-  (Gold→TimescaleDB) stays a **separate** task (next step: Iceberg via Nessie).
+  (Gold→TimescaleDB) stays a **separate** task.
   Wire + trigger:
   ```bash
   make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
@@ -380,7 +384,7 @@ make minio-reset                                # empty the lake buckets for a c
   idp-gold-spark`) — see [`deploy/README.md`](deploy/README.md).
 - **Full step-by-step (both):** [`docs/triggering.md`](docs/triggering.md).
 - EKS: `deploy/platform/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
-  Spark job targets Iceberg via Nessie. See plan §2B.
+  stages use the same Iceberg JDBC catalog (on RDS Postgres). See plan §2B.
 
 ---
 
@@ -393,7 +397,7 @@ distinct CLI command / job:
 | Stage | Function | CLI / Job | Reads | Writes |
 |---|---|---|---|---|
 | Bronze | `to_bronze` | `idp consume` | Kafka | `s3://idp-bronze` |
-| Silver | `to_silver` | `idp silver` | `s3://idp-bronze` | `s3://idp-silver` |
+| Silver | `to_silver` | `idp silver [--full-refresh]` | new Bronze snapshots | `s3://idp-silver` |
 | Gold | `to_gold` | `idp gold` | `s3://idp-silver` | `s3://idp-gold` |
 | Serving | `publish_serving` | `idp publish` | `s3://idp-gold` | **TimescaleDB** (`gold.*` tables) |
 | ML train | `train` | `idp train` | labelled data | `ml/artifacts` (MLflow target) |
@@ -409,9 +413,11 @@ only thing the consumer does** — it does not chain into Silver/Gold.
 - `streaming/consumer.py:consume_to_bronze()` subscribes to all
   `t.<tenant>.<entity>` topics, deserializes JSON, and **returns** per-entity
   frames (read-only — no writes here).
-- `idp consume` (`cli.py`) then calls `pipeline.to_bronze()`, which writes the
-  frames to `s3://idp-bronze/<entity>/` partitioned by `tenant_id`. That's the end
-  of the Bronze job.
+- `idp consume` (`cli.py`) then calls `pipeline.to_bronze()`, which appends each
+  entity to the Iceberg table `bronze.<entity>` as one snapshot. The table is
+  partitioned by `(tenant_id, ingest_date)`, and every record carries
+  `_ingested_at`. Kafka offsets are committed only after the append, so a crash
+  replays and never loses records. That's the end of the Bronze job.
 - Every record is **tenant-stamped** at ingestion (`common/tenancy.py`), the
   leading partition column that guarantees physical isolation.
 
@@ -424,6 +430,14 @@ transforms in `transforms/silver.py:curate()`, and **writes Silver**
 (`s3://idp-silver` / `data/lake/silver`). The code is identical for on-demand
 (`idp silver`), orchestrated (Airflow), and local (`idp run`) — only the trigger
 and the Spark master differ.
+
+**Incremental.** The event facts (`fact_usage`, `fact_recharge`,
+`fact_fee_charge`) process only the Bronze snapshots appended since the last
+run. This uses Structured Streaming with `Trigger.Once` and a checkpoint per
+fact/source under `<silver>/_checkpoints/`, and each batch is `MERGE`d
+insert-if-absent on `(tenant_id, id)`. A failed run resumes without loss or
+duplicates. `dim_subscriber` is rebuilt in full each run.
+`idp silver --full-refresh` resets the checkpoints and replays all of Bronze.
 
 **Transformations:**
 - **Id canonicalization:** strip `UUID(...)` wrappers from entity and relationship
@@ -444,8 +458,10 @@ and the Spark master differ.
 | `fact_usage` | 1 row / usage event | `build_fact_usage` | event_type, started_at, gross_amount, qty, is_roaming, traffic_case, other_party_number |
 | `fact_recharge` | 1 row / recharge | `build_fact_recharge` | created_at, amount, payment_method, status, failure_reason_code |
 
-Output: batch → `data/lake/silver/`; stream → `s3://idp-silver/`, both partitioned by `tenant_id`.
-Production target: Iceberg tables (ACID/upsert/schema-evolution) via Nessie + Spark/Flink.
+Output: Iceberg tables `silver.*`, locally under `data/lake/silver/tables/` and in
+the cluster under `s3://idp-silver/tables/`. The facts are partitioned by
+`(tenant_id, day(event time))`, and `dim_subscriber` by `tenant_id`. Each run
+commits atomically, so readers never see a partial write.
 
 ### 4.3 Gold pipeline (batch vs stream)
 

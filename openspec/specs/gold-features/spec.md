@@ -32,10 +32,11 @@ tenant-tokenized `service_id`, without exposing raw identifiers.
 - **THEN** the vast majority of fact subjects map to a subscriber in the dimension
 
 ### Requirement: REQ-GLD-04 — Idempotent Gold feature writes
-Persisting `credit_features` and `fraud_features` SHALL replace the partitions of
-the tenants present in the new output. Each feature table SHALL then contain exactly
-one row per `(tenant_id, service_id)`, however many times the Gold stage has run.
-Partitions of other tenants SHALL be left untouched.
+Persisting `credit_features` and `fraud_features` SHALL atomically replace the
+partitions of the tenants present in the new output. Each feature table SHALL then
+contain exactly one row per `(tenant_id, service_id)`, however many times the Gold
+stage has run. Partitions of other tenants SHALL be left untouched. Gold SHALL be
+recomputed in full from Silver on every run.
 
 #### Scenario: SCN-GLD-04.1 — Hourly refresh keeps one row per subscriber
 - **WHEN** the Gold stage runs repeatedly against the same lake (as the hourly

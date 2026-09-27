@@ -86,6 +86,9 @@ kubectl -n "${NS}" exec -i deploy/minio -- sh -c \
 echo ">> serving DB (TimescaleDB, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/timescaledb/timescaledb.yaml"
 
+echo ">> lake catalog (Iceberg JDBC catalog: database 'iceberg' in TimescaleDB)"
+bash "${HERE}/timescaledb/lake-catalog.sh" "${NS}"
+
 echo ">> identity (Keycloak, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/keycloak/keycloak.yaml"
 

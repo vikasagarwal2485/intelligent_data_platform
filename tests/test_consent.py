@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 
+from conftest import rewrite_table
 from golden_data import golden_cfg
 from idp.common import storage
 from idp.common.pii import ConsentError
@@ -24,9 +25,8 @@ KEY = ["tenant_id", "service_id"]
 
 
 def _read(cfg, layer, table) -> pd.DataFrame:
-    df = storage.read_parquet(f"{storage.lake_uri(cfg, layer)}/{table}", cfg)
-    df["tenant_id"] = df["tenant_id"].astype(str)
-    return df
+    from idp.common import catalog
+    return catalog.read_table(cfg, layer, table)
 
 
 def _keys(df: pd.DataFrame) -> set[tuple[str, str]]:
@@ -59,10 +59,12 @@ def _serving(cfg, tmp_path, monkeypatch):
 
 def test_gold_without_consent_column_fails_and_writes_nothing(lake):
     # SCN-FND-05.4
-    _rewrite_dim(lake, _read(lake, "silver", "dim_subscriber").drop(columns=["consent_analytics"]))
+    rewrite_table(lake, "silver", "dim_subscriber", _read(lake, "silver", "dim_subscriber"),
+                  drop_columns=("consent_analytics",))
     with pytest.raises(ConsentError, match="consent_analytics"):
         to_gold(lake)
-    assert not Path(lake.storage.gold).exists()
+    from idp.common import catalog
+    assert not catalog.load_catalog(lake).list_tables("gold")
 
 
 def test_non_consenting_never_trained_scored_or_served(lake, tmp_path, monkeypatch):
@@ -106,7 +108,7 @@ def test_revocation_takes_effect_on_refresh(lake, tmp_path, monkeypatch):
     assert key in _keys(_read(lake, "gold", "credit_features"))
 
     dim.loc[(dim["tenant_id"] == key[0]) & (dim["service_id"] == key[1]), "consent_analytics"] = False
-    _rewrite_dim(lake, dim)                                    # the subscriber revokes consent
+    rewrite_table(lake, "silver", "dim_subscriber", dim)      # the subscriber revokes consent
     to_gold(lake)
     to_scores(lake, models=models)
     engine = _serving(lake, tmp_path, monkeypatch)

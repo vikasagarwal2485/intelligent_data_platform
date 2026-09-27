@@ -15,15 +15,18 @@ This is the correct decoupling: Airflow only needs permission to launch pods —
 does NOT need the `idp` package or Spark installed. The pods carry code + deps.
 
 Prerequisites:
-  * `idp/scoring-api:dev` on the node (`make image`; bundles the JRE, pyspark and
-    the S3A jars)
+  * `idp/scoring-api:dev` on the node (`make image`; bundles the JRE, pyspark, the
+    S3A jars and the Iceberg jars)
+  * the lake's Iceberg catalog database (`iceberg` on TimescaleDB, `make lake-catalog`)
   * the Airflow SA may create pods in `idp-app` (deploy/platform/airflow/rbac.yaml)
 
-DAGs (three, decoupled by cadence and wired via Airflow Datasets):
+DAGs (four, decoupled by cadence; the first three wired via Airflow Datasets):
   * idp_features  : silver >> gold           (hourly; PRODUCES gold-features dataset)
   * idp_inference : score  >> publish        (DATASET-DRIVEN: runs on new features
                     OR a new model; loads the current model each run)
   * idp_training  : labels >> train          (daily; PRODUCES model dataset)
+  * idp_maintenance: maintain                (daily; compaction, snapshot expiry,
+                    orphan cleanup -- produces no dataset, so it triggers nothing)
 
 So a new model auto-re-scores (inference fires on the model dataset) and fresh
 features auto-re-score — no manual second pass. Requires Airflow >= 2.9 for the
@@ -42,6 +45,8 @@ IMAGE = "idp/scoring-api:dev"
 APP_NS = "idp-app"
 BUCKET_PREFIX = "idp"
 MINIO_ENDPOINT = "http://minio.idp-platform.svc:9000"
+# The lake's Iceberg JDBC catalog: database `iceberg` on the platform Postgres.
+LAKE_CATALOG_URI = "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg"
 
 # Datasets wire the three DAGs together (Airflow data-aware scheduling). The
 # `gold` task produces GOLD_FEATURES; the `train` task produces MODEL; the
@@ -59,6 +64,12 @@ S3_ENV = [
     k8s.V1EnvVar(name="IDP_S3_SECRET_KEY", value="minioadmin123"),
     k8s.V1EnvVar(name="IDP_S3_BUCKET_PREFIX", value=BUCKET_PREFIX),
 ]
+# The lake's Iceberg catalog (REQ-FND-04), shared by pyiceberg and Spark.
+CATALOG_ENV = [
+    k8s.V1EnvVar(name="IDP_CATALOG_TYPE", value="sql"),
+    k8s.V1EnvVar(name="IDP_CATALOG_URI", value=LAKE_CATALOG_URI),
+]
+LAKE_ENV = S3_ENV + CATALOG_ENV
 # Synthetic-generation volume for the `labels` task. MUST MATCH the produce job
 # (deploy/app/jobs/produce-job.yaml) — labels are regenerated deterministically
 # from these params and must line up with the data that became Gold, or the
@@ -101,7 +112,7 @@ def _stage(task_id: str, arg: str, *, extra_env=None, resources=None) -> Kuberne
         image_pull_policy="Never",          # local image built into minikube
         cmds=["idp"],
         arguments=[arg],
-        env_vars=S3_ENV + (extra_env or []),
+        env_vars=LAKE_ENV + (extra_env or []),
         container_resources=resources,
         get_logs=True,
         on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
@@ -122,9 +133,9 @@ with DAG(
     schedule="0 * * * *",                   # hourly (data cadence)
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    # One feature refresh at a time: overlapping runs would rewrite Silver while
-    # another run's Gold is reading it (plain Parquet has no snapshot isolation
-    # until Iceberg), and stack several Spark pods on the node.
+    # One feature refresh at a time: two Silver runs would share the streaming
+    # checkpoints (Structured Streaming allows one active query per checkpoint),
+    # and overlapping runs stack several Spark pods on the node.
     max_active_runs=1,
     default_args=default_args,
     tags=["idp", "medallion", "features"],
@@ -166,3 +177,20 @@ with DAG(
     _train = _stage("train", "train")
     _train.outlets = [MODEL]                 # a new model triggers inference
     _stage("labels", "labels", extra_env=SYN_ENV) >> _train
+
+
+# DAG 4 — MAINTENANCE: compaction, snapshot expiry and orphan cleanup on every lake
+# table (REQ-ORC-06), daily in a quiet hour. It declares no outlets, so it never
+# triggers the features or inference DAGs; Iceberg's optimistic commits keep it
+# safe next to a concurrent Silver/Gold run (a conflicting commit is retried).
+with DAG(
+    dag_id="idp_maintenance",
+    description="Lake maintenance: compact, expire snapshots, remove orphan files",
+    schedule="0 3 * * *",                   # daily 03:00, after training
+    start_date=datetime(2026, 1, 1),
+    catchup=False,
+    max_active_runs=1,
+    default_args=default_args,
+    tags=["idp", "lake", "maintenance"],
+) as dag_maintenance:
+    _spark_stage("maintain", "maintain")

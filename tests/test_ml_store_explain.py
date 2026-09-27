@@ -27,10 +27,9 @@ def _local_cfg(tmp_path):
 
 def _cfg_with_gold(tmp_path, lake):
     """A fresh local lake holding a copy of the shared Gold feature tables."""
-    cfg = _local_cfg(tmp_path)
-    for table in ("credit_features", "fraud_features"):
-        shutil.copytree(Path(lake.storage.gold) / table, Path(cfg.storage.gold) / table)
-    return cfg
+    from conftest import clone_lake
+    return clone_lake(lake, tmp_path / "lake", layers=("gold",),
+                      tables={"credit_features", "fraud_features"})
 
 
 # --- REQ-ML-04: model store -------------------------------------------------
@@ -85,7 +84,8 @@ def test_score_loads_models_from_store(tmp_path, lake, credit_labeled, fraud_lab
     storage.save_model(cm, storage.model_uri(cfg, "credit_model.joblib"), cfg)
     storage.save_model(fm, storage.model_uri(cfg, "fraud_model.joblib"), cfg)
 
-    assert not (Path(cfg.storage.gold) / "credit_scores").exists()   # Gold is features only
+    from idp.common import catalog
+    assert not catalog.table_exists(cfg, "gold", "credit_scores")   # Gold is features only
     # to_scores gets NO models in-memory -> must load them from the store
     result = to_scores(cfg, persist=False)
     assert "credit_scores" in result["score_tables"]
@@ -190,7 +190,8 @@ def test_score_runs_are_timestamped_and_accumulate(tmp_path, lake, credit_labele
     for _ in range(2):
         out = to_scores(cfg, models={"credit": cm}, persist=True)
         assert out["credit_scores"]["scored_at"].nunique() == 1
-    stored = storage.read_parquet(f"{storage.lake_uri(cfg, 'gold')}/credit_scores", cfg)
+    from idp.common import catalog
+    stored = catalog.read_table(cfg, "gold", "credit_scores")
     assert stored["scored_at"].nunique() == 2
     assert len(stored) == 2 * len(credit_features)
 
@@ -205,8 +206,8 @@ def test_duplicate_labels_do_not_fan_out(tmp_path):
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)
-    gold = {"credit_features": storage.read_parquet(f"{storage.lake_uri(cfg, 'gold')}/credit_features", cfg)}
-    gold["credit_features"]["tenant_id"] = gold["credit_features"]["tenant_id"].astype(str)
+    from idp.common import catalog
+    gold = {"credit_features": catalog.read_table(cfg, "gold", "credit_features")}
     to_labels(cfg, dataset=ds)
     to_labels(cfg, dataset=ds)                       # second seeding appends a copy
 

@@ -3,7 +3,7 @@
 Usage (separated medallion stages):
     idp produce    # synthetic data -> Kafka topics
     idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
-    idp silver     # Bronze (S3) -> Silver (S3)    [Silver stage]
+    idp silver     # new Bronze -> Silver (incremental; --full-refresh replays all)  [Silver stage]
     idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
     idp score      # Gold features + models -> scores (S3)   [inference]
     idp publish    # Gold (S3) -> TimescaleDB      [serving stage]
@@ -12,6 +12,9 @@ Usage (separated medallion stages):
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (files)
     idp serve      # start the FastAPI scoring service
+    idp migrate-lake  # one-off: legacy Parquet Bronze -> Iceberg Bronze
+    idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
+    idp maintain   # compact, expire snapshots, remove orphans on every lake table
     idp mcp        # start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)
 """
 from __future__ import annotations
@@ -86,9 +89,11 @@ def _cmd_consume(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     bootstrap = args.bootstrap or cfg.kafka["bootstrap"]
     print(f"Draining topics from {bootstrap} (idle timeout {args.idle_timeout}s)...")
+    landed: dict = {}
     bronze = consume_to_bronze(
         bootstrap, cfg.tenant_ids,
         topic_prefix=cfg.kafka["topic_prefix"], idle_timeout=args.idle_timeout,
+        land=lambda frames: landed.update(to_bronze(cfg, frames)),   # commit offsets after
     )
     total = sum(len(df) for df in bronze.values())
     print(f"Consumed {total} records: { {k: len(v) for k, v in bronze.items()} }")
@@ -96,8 +101,7 @@ def _cmd_consume(args: argparse.Namespace) -> None:
         print("No messages consumed (topics empty or producer not finished). "
               "Run 'idp produce' first.")
         return
-    result = to_bronze(cfg, bronze, persist=True)
-    print(f"Wrote Bronze tables: {result['bronze_tables']}")
+    print(f"Appended to Iceberg Bronze: {landed.get('bronze_tables')}")
     print("Next: 'idp silver' to build Silver from Bronze.")
 
 
@@ -106,8 +110,31 @@ def _cmd_silver(args: argparse.Namespace) -> None:
     from idp.pipeline import to_silver
 
     cfg = load_config(args.config)
-    print(json.dumps(to_silver(cfg), indent=2))
+    print(json.dumps(to_silver(cfg, full_refresh=args.full_refresh), indent=2))
     print("Next: 'idp gold' to build Gold from Silver.")
+
+
+def _cmd_migrate_lake(args: argparse.Namespace) -> None:
+    """One-off: legacy Parquet Bronze -> Iceberg Bronze (skips migrated entities)."""
+    from idp.migration import migrate_lake
+
+    print(json.dumps(migrate_lake(load_config(args.config)), indent=2))
+    print("Next: 'idp silver --full-refresh' then 'idp gold' to rebuild Silver and Gold.")
+
+
+def _cmd_archive_policy(args: argparse.Namespace) -> None:
+    """Render the Bronze archive rule (S3 lifecycle or MinIO ILM JSON)."""
+    from idp.maintenance import archive_policy
+
+    policy = archive_policy(load_config(args.config), storage_class=args.storage_class, fmt=args.format)
+    print(json.dumps(policy, indent=2))
+
+
+def _cmd_maintain(args: argparse.Namespace) -> None:
+    """Lake maintenance: compaction, snapshot expiry, orphan cleanup (REQ-ORC-06)."""
+    from idp.maintenance import maintain
+
+    print(json.dumps(maintain(load_config(args.config)), indent=2))
 
 
 def _cmd_gold(args: argparse.Namespace) -> None:
@@ -196,7 +223,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="Stop after N seconds with no new messages")
     p_cons.set_defaults(func=_cmd_consume)
 
-    sub.add_parser("silver", help="Silver stage: Bronze (S3) -> canonical Silver (S3)").set_defaults(func=_cmd_silver)
+    p_silver = sub.add_parser("silver", help="Silver stage: new Bronze (S3) -> canonical Silver (S3)")
+    p_silver.add_argument("--full-refresh", action="store_true",
+                          help="Reset the checkpoints and rebuild the facts from all of Bronze")
+    p_silver.set_defaults(func=_cmd_silver)
+    sub.add_parser("migrate-lake", help="One-off: legacy Parquet Bronze -> Iceberg Bronze"
+                   ).set_defaults(func=_cmd_migrate_lake)
+    p_arch = sub.add_parser("archive-policy", help="Render the Bronze archive rule (S3 lifecycle / MinIO ILM)")
+    p_arch.add_argument("--format", choices=("s3", "minio"), default="s3")
+    p_arch.add_argument("--storage-class", default="GLACIER_IR",
+                        help="S3 storage class, or the MinIO remote tier name")
+    p_arch.set_defaults(func=_cmd_archive_policy)
+    sub.add_parser("maintain", help="Compact, expire snapshots and remove orphan files on every lake table"
+                   ).set_defaults(func=_cmd_maintain)
     sub.add_parser("gold", help="Gold stage: Silver (S3) -> feature tables ONLY (S3)").set_defaults(func=_cmd_gold)
     sub.add_parser("score", help="Score stage: Gold features + models -> score tables (S3)").set_defaults(func=_cmd_score)
     sub.add_parser("labels", help="Seed the labels/outcomes store (training input)").set_defaults(func=_cmd_labels)

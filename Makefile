@@ -135,6 +135,10 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/platform/trino-tune.sh idp-platform
 
+.PHONY: lake-catalog
+lake-catalog: ## Create the lake's Iceberg JDBC catalog database (`iceberg` in TimescaleDB) — idempotent
+	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform
+
 .PHONY: nessie-fix
 nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
 	bash deploy/platform/nessie-tune.sh idp-platform
@@ -182,6 +186,18 @@ minio-versions: ## Diagnose hidden bucket state (versioning, delete markers, ILM
 minio-mkbuckets: ## Create the lake buckets if missing (idp-bronze/silver/gold/ml) — idempotent repair
 	$(MC_SH) '$(MC_ENV) mc mb --ignore-existing m/idp-bronze m/idp-silver m/idp-gold m/idp-ml && echo "buckets:" && mc ls m/'
 
+.PHONY: lake-archive-policy
+lake-archive-policy: ## Render the Bronze archive rule; apply it to idp-bronze when ARCHIVE_TIER=<MinIO remote tier> is set
+	@$(PY) -m idp.cli archive-policy --format minio --storage-class "$${ARCHIVE_TIER:-WARM}" > /tmp/idp-bronze-ilm.json
+	@cat /tmp/idp-bronze-ilm.json
+	@if [ -z "$$ARCHIVE_TIER" ]; then \
+	  echo "# Rendered only: this MinIO has no remote tier, so a transition rule would be inert (MinIO rejects"; \
+	  echo "# rules naming an unknown tier). Configure one ('mc admin tier add ...') and re-run with ARCHIVE_TIER=<name>."; \
+	  echo "# On EKS apply 'idp archive-policy --format s3' with 'aws s3api put-bucket-lifecycle-configuration'."; \
+	else \
+	  $(MC_SH) '$(MC_ENV) mc ilm import m/idp-bronze && mc ilm rule ls m/idp-bronze' < /tmp/idp-bronze-ilm.json; \
+	fi
+
 .PHONY: minio-console
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
 	@echo "Open http://localhost:9001  (user: minioadmin  pass: minioadmin123)"
@@ -213,11 +229,32 @@ stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). B
 	@echo ">> Bronze ready. Next: make silver, then make gold."
 
 .PHONY: silver
-silver: ## Silver stage (idp-app): Bronze (S3) -> canonical Silver (S3)
+silver: ## Silver stage (idp-app): new Bronze (S3) -> canonical Silver (S3), incremental
 	kubectl -n idp-app delete job idp-silver --ignore-not-found
 	kubectl -n idp-app apply -f deploy/app/jobs/silver-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=600s
 	kubectl -n idp-app logs job/idp-silver
+
+.PHONY: silver-full-refresh
+silver-full-refresh: ## Silver stage with --full-refresh: reset the checkpoints, rebuild the facts from all of Bronze
+	kubectl -n idp-app delete job idp-silver --ignore-not-found
+	sed 's/command: \["idp", "silver"\]/command: ["idp", "silver", "--full-refresh"]/' deploy/app/jobs/silver-job.yaml | kubectl -n idp-app apply -f -
+	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=1200s
+	kubectl -n idp-app logs job/idp-silver
+
+.PHONY: maintain
+maintain: ## Lake maintenance (idp-app): compact, expire snapshots, remove orphan files on every table
+	kubectl -n idp-app delete job idp-maintain --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/maintain-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-maintain --timeout=1200s
+	kubectl -n idp-app logs job/idp-maintain
+
+.PHONY: migrate-lake
+migrate-lake: ## One-off (idp-app): legacy Parquet Bronze -> Iceberg Bronze; then silver-full-refresh + gold
+	kubectl -n idp-app delete job idp-migrate-lake --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/migrate-lake-job.yaml
+	kubectl -n idp-app wait --for=condition=complete job/idp-migrate-lake --timeout=1200s
+	kubectl -n idp-app logs job/idp-migrate-lake
 
 .PHONY: gold
 gold: ## Gold stage (idp-app): Silver (S3) -> feature tables ONLY (S3)
@@ -307,10 +344,11 @@ airflow-ui: ## Port-forward the Airflow web UI to http://localhost:8080 (admin/a
 	kubectl -n idp-platform port-forward svc/airflow-webserver 8080:8080
 
 .PHONY: airflow-trigger
-airflow-trigger: ## Unpause the 3 DAGs + trigger features & training (inference is dataset-driven)
+airflow-trigger: ## Unpause the 4 DAGs + trigger features & training (inference is dataset-driven)
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_features
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_inference
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_training
+	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_maintenance
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_features
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags trigger idp_training
 	@echo ">> idp_inference is dataset-driven: it auto-runs when gold features refresh OR a new model lands."

@@ -100,6 +100,31 @@ class PlatformConfig:
         return t
 
     @property
+    def catalog(self) -> dict[str, Any]:
+        """Iceberg catalog for the lake (REQ-FND-04): JDBC on SQLite (local) or Postgres (cluster)."""
+        c = dict(self.raw.get("catalog", {}))
+        env = os.environ
+        c["type"] = env.get("IDP_CATALOG_TYPE", c.get("type") or "sql").lower()
+        c["uri"] = env.get("IDP_CATALOG_URI", c.get("uri") or "")
+        c.setdefault("warehouse", "")
+        c.setdefault("branch", "main")
+        root = Path(self.storage.root).resolve()
+        if c["type"] == "sql":
+            c["uri"] = c["uri"] or f"sqlite:///{root / 'catalog.db'}"
+            # only the default for tables created without a location; every lake
+            # table is created in its own layer (catalog.table_location)
+            s3 = self.s3
+            default = f"s3://{s3['bucket_prefix']}-bronze" if s3.get("enabled") else root.as_uri()
+            c["warehouse"] = c["warehouse"] or default
+        return c
+
+    @property
+    def lake(self) -> dict[str, Any]:
+        """Lake maintenance and cost settings (REQ-ORC-06)."""
+        defaults = {"snapshot_retention_days": 7, "bronze_archive_days": 90, "target_file_size_mb": 128}
+        return {**defaults, **self.raw.get("lake", {})}
+
+    @property
     def spark(self) -> dict[str, Any]:
         """Spark runtime settings for the Silver/Gold stages (REQ-ORC-05)."""
         s = dict(self.raw.get("spark", {}))

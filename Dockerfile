@@ -1,7 +1,7 @@
 # The idp image: runs every stage (`idp <stage>`) and the scoring API (`idp serve`).
 # Silver/Gold run on Spark (single transformation engine, REQ-ORC-05), so the
-# image carries a headless JRE plus pyspark, with the S3A jars pre-installed so no
-# stage downloads anything at run time.
+# image carries a headless JRE plus pyspark, with the S3A and Iceberg jars
+# pre-installed so no stage downloads anything at run time.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -20,15 +20,22 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-# S3A (MinIO/S3) support for Spark, baked into pyspark's jars dir. Versions must
-# match pyspark 3.5's Hadoop 3.3.4 client.
+# Baked into pyspark's jars dir (idp.transforms.session then skips fetching them):
+#  * S3A (MinIO/S3) -- versions must match pyspark 3.5's Hadoop 3.3.4 client;
+#  * Iceberg runtime + AWS bundle (S3FileIO) and the JDBC drivers of the SQL
+#    catalog (SQLite locally, Postgres in the cluster) -- must match
+#    idp.transforms.session.ICEBERG_PACKAGES (tests/test_catalog.py checks this).
 RUN python - <<'PY'
 import os, urllib.request
 import pyspark
 jars = os.path.join(os.path.dirname(pyspark.__file__), "jars")
 base = "https://repo1.maven.org/maven2"
 for path in ("org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar",
-             "com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar"):
+             "com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar",
+             "org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
+             "org/apache/iceberg/iceberg-aws-bundle/1.10.0/iceberg-aws-bundle-1.10.0.jar",
+             "org/xerial/sqlite-jdbc/3.46.1.3/sqlite-jdbc-3.46.1.3.jar",
+             "org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar"):
     dest = os.path.join(jars, os.path.basename(path))
     urllib.request.urlretrieve(f"{base}/{path}", dest)
     print("installed", dest, os.path.getsize(dest))

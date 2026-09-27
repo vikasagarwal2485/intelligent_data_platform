@@ -34,9 +34,8 @@ def _cfg(tmp_path) -> PlatformConfig:
 
 
 def _read(cfg, layer, table) -> pd.DataFrame:
-    df = storage.read_parquet(f"{storage.lake_uri(cfg, layer)}/{table}", cfg)
-    df["tenant_id"] = df["tenant_id"].astype(str)
-    return df
+    from idp.common import catalog
+    return catalog.read_table(cfg, layer, table)
 
 
 @pytest.fixture(scope="module")
@@ -141,8 +140,8 @@ def test_gold_refresh_after_changed_silver_leaves_no_stale_rows(tmp_path, frames
     to_gold(cfg)
     dim = _read(cfg, "silver", "dim_subscriber")
     keep = dim.groupby("tenant_id").head(10)          # a smaller Silver for the refresh
-    storage.write_parquet(keep, f"{storage.lake_uri(cfg, 'silver')}/dim_subscriber", cfg,
-                          partition_cols=["tenant_id"])   # replace mode: tenants' partitions swapped
+    from conftest import rewrite_table
+    rewrite_table(cfg, "silver", "dim_subscriber", keep)      # a smaller Silver dimension
     to_gold(cfg)
     gold = _read(cfg, "gold", "credit_features")
     consenting = keep[keep["consent_analytics"].fillna(False).astype(bool)]   # REQ-FND-05

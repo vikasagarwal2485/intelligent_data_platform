@@ -14,12 +14,13 @@ Kubernetes Job in `idp-app`:
 
 - `idp produce`: synthetic data → Kafka
 - `idp consume`: Kafka → Bronze
-- `idp silver`
+- `idp silver`: incremental; `--full-refresh` rebuilds from all of Bronze
 - `idp gold`: features only
 - `idp score`: Gold features + models → score tables
 - `idp publish`: Gold → TimescaleDB serving
 - `idp labels`: seed the labels store
 - `idp train`
+- `idp maintain`: lake maintenance (REQ-ORC-06)
 
 The Silver and Gold stages SHALL run on the single transformation engine
 (REQ-ORC-05), whether started from the CLI, a Kubernetes Job or Airflow.
@@ -38,7 +39,7 @@ The Silver and Gold stages SHALL run on the single transformation engine
   exits successfully
 
 ### Requirement: REQ-ORC-02 — Scheduled orchestration (Airflow) and production Gold (Spark)
-The system SHALL provide **three** Airflow DAGs, decoupled by cadence and wired via
+The system SHALL provide **four** Airflow DAGs, decoupled by cadence and wired via
 Airflow **Datasets**:
 
 - **Features DAG** (`silver >> gold`, hourly): produces the gold-features dataset.
@@ -46,12 +47,15 @@ Airflow **Datasets**:
 - **Inference DAG** (`score >> publish`): dataset-driven, scheduled on
   `(gold-features | model)`, so it re-runs on a feature refresh OR a new model
   without a manual re-trigger.
+- **Maintenance DAG** (`maintain`, daily): compacts and expires the lake's tables
+  (REQ-ORC-06).
 
 Each stage runs as a pod the DAG launches; Airflow itself needs neither the `idp`
 package nor Spark. The Silver and Gold tasks SHALL run the single Spark
 implementation of their stage (REQ-ORC-05). There SHALL be no per-stage engine
 selection. The features DAG SHALL run at most one DAG run at a time, so a Silver
-rewrite never overlaps another run's Gold read of the same tables.
+run never overlaps another run's Silver or Gold. That also keeps the fact
+checkpoints single-writer.
 
 #### Scenario: SCN-ORC-02.1 — Inference re-runs on a new model
 - **WHEN** the training DAG completes and updates the model dataset
@@ -76,6 +80,11 @@ rewrite never overlaps another run's Gold read of the same tables.
   unpausing the DAG, or a manual trigger during a scheduled run)
 - **THEN** they execute one after another, and no Silver task runs while another
   run's Silver or Gold task is running
+
+#### Scenario: SCN-ORC-02.5 — Maintenance runs daily
+- **WHEN** the maintenance DAG's daily schedule fires
+- **THEN** it runs `idp maintain` as a pod, and does not trigger the features or
+  inference DAGs
 
 ### Requirement: REQ-ORC-03 — Local composition remains available
 The system SHALL keep a local `run` orchestrator that composes the same stage
@@ -123,3 +132,30 @@ landing, publish and MCP reads are unchanged for now.
 - **WHEN** the Silver or Gold stage runs
 - **THEN** it completes without converting any input or output table to a pandas
   DataFrame
+
+### Requirement: REQ-ORC-06 — Lake maintenance
+The system SHALL provide a maintenance stage (`idp maintain`) that keeps the lake's
+Iceberg tables efficient and bounded:
+- it compacts small data files, which the frequent Bronze appends and Silver merges
+  produce
+- it expires snapshots older than a configurable retention (default 7 days), always
+  keeping the current snapshot and any snapshot a checkpoint still needs
+- it removes orphan files older than the retention
+
+Maintenance SHALL NOT change any table's current contents. It SHALL NOT delete
+Bronze records: Bronze history is kept, and its cost is controlled by an archive
+policy that moves Bronze objects older than a configurable age to a colder storage
+class, where the object store supports it.
+
+#### Scenario: SCN-ORC-06.1 — Compaction preserves contents
+- **WHEN** `idp maintain` runs on a table with many small files
+- **THEN** afterwards the table has fewer data files and exactly the same rows
+
+#### Scenario: SCN-ORC-06.2 — Old snapshots expire, current data stays
+- **WHEN** `idp maintain` runs on tables with snapshots older than the retention
+- **THEN** those snapshots are removed, every table still reads its current
+  contents, and the next incremental Silver run still processes only new Bronze
+
+#### Scenario: SCN-ORC-06.3 — Bronze history is never deleted
+- **WHEN** `idp maintain` runs
+- **THEN** every Bronze record ever landed is still readable

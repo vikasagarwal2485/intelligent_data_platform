@@ -26,6 +26,9 @@ dependencies = [
     # Single transformation engine for Silver/Gold (REQ-ORC-05); matches the
     # Spark 3.5 runtime. Needs a JDK 11/17 on the host (the image bundles a JRE).
     "pyspark==3.5.3",
+    # Iceberg lake tables from Python (landing, ML/serving/analytics reads); the Spark
+    # side uses iceberg-spark-runtime 1.10.0 (config: transforms.session).
+    "pyiceberg[sql-sqlite,sql-postgres,pyarrow,s3fs,pyiceberg-core]==0.12.0",
 ]
 
 [project.optional-dependencies]

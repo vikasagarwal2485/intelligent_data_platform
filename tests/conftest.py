@@ -76,9 +76,43 @@ def lake_cfg(root) -> PlatformConfig:
 
 def read_lake(cfg: PlatformConfig, layer: str, table: str) -> pd.DataFrame:
     """A lake table as pandas (tests assert in pandas; the stages never do)."""
-    df = pd.read_parquet(Path(getattr(cfg.storage, layer)) / table)
-    df["tenant_id"] = df["tenant_id"].astype(str)
-    return df
+    from idp.common import catalog
+    return catalog.read_table(cfg, layer, table)
+
+
+def rewrite_table(cfg: PlatformConfig, layer: str, table: str, df: pd.DataFrame,
+                  drop_columns: tuple[str, ...] = ()) -> None:
+    """Replace a lake table's contents with ``df`` (tests simulating upstream changes);
+    ``drop_columns`` are first removed from the table schema."""
+    from idp.common import catalog
+    if drop_columns:
+        t = catalog.load_catalog(cfg).load_table(f"{layer}.{table}")
+        with t.update_schema() as upd:
+            for col in drop_columns:
+                upd.delete_column(col)
+        df = df.drop(columns=[c for c in drop_columns if c in df.columns])
+    catalog.replace_table(cfg, layer, table, df)
+
+
+def clone_lake(src: PlatformConfig, root: Path, *, layers=("silver",), drop_tenant: str | None = None,
+               tables: dict | None = None) -> PlatformConfig:
+    """A new local lake (own catalog) holding copies of ``src``'s tables in ``layers``.
+
+    ``drop_tenant`` names a table copied WITHOUT its tenant_id column (to test
+    isolation errors). ``tables`` optionally restricts the copied table names.
+    """
+    from idp.common import catalog
+    dst = lake_cfg(root)
+    cat = catalog.load_catalog(src)
+    for layer in layers:
+        for _, name in cat.list_tables(layer):
+            if tables is not None and name not in tables:
+                continue
+            df = catalog.read_table(src, layer, name)
+            if name == drop_tenant:
+                df = df.drop(columns=["tenant_id"])
+            catalog.append_table(dst, layer, name, df)
+    return dst
 
 
 @pytest.fixture(scope="session")

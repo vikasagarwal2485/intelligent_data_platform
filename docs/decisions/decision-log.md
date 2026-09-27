@@ -16,7 +16,7 @@ Consequences. Status: `Accepted` unless noted.
   transform is a separate stage (see ADR-0009).
 
 ### ADR-0002 — Iceberg for Silver, TimescaleDB for Gold serving
-- **Status:** Accepted (Iceberg is the production target; prototype writes Parquet)
+- **Status:** Accepted — the Parquet stand-in is superseded by ADR-0028 (all layers are Iceberg)
 - **Context:** Silver is analytical & huge; Gold serving needs low-latency lookups.
 - **Decision:** Silver = Apache Iceberg on object storage (ACID, schema/partition
   evolution, time-travel). Gold serving = TimescaleDB. Prototype uses plain
@@ -97,7 +97,9 @@ Consequences. Status: `Accepted` unless noted.
 - **Context:** Iceberg needs a catalog; options include Hive, Glue, Polaris, Nessie.
 - **Decision:** Nessie (git-like, branchable) — reviewer decision.
 - **Consequences:** Deploy Nessie (in-memory store for prototype); production uses
-  a persistent store.
+  a persistent store. *Note (ADR-0028):* the lake's tables are catalogued in an
+  Iceberg JDBC catalog, not Nessie, because Nessie's REST catalog keeps only a
+  table's current snapshot.
 
 ### ADR-0012 — Airflow for data orchestration
 - **Status:** Accepted
@@ -316,3 +318,50 @@ Consequences. Status: `Accepted` unless noted.
   `apache/spark` pods and script ConfigMaps are gone), and the test suite starts a
   local Spark session. Small runs pay JVM start-up. REQ-ORC-04 (engine parity) is
   retired; the golden-file tests guard behaviour instead.
+
+### ADR-0028 — Iceberg lake on a JDBC catalog; incremental Silver facts; Gold full recompute
+- **Status:** Accepted (2026-09-27) — supersedes ADR-0002's Parquet stand-in. Amends
+  ADR-0011: Nessie is not the lake's catalog.
+- **Context:** Bronze, Silver and Gold were plain Parquet. Every Silver run re-read
+  all of Bronze, so its cost grew with history. A rerun rewrote whole tenant
+  partitions, and readers could see a half-written table.
+- **Decision:**
+  - Bronze, Silver and Gold are **Iceberg tables** (namespaces
+    `bronze`/`silver`/`gold`), each in its layer's bucket under `tables/`.
+  - The catalog is an **Iceberg JDBC catalog** that `pyiceberg` (SqlCatalog) and
+    Spark (JdbcCatalog) share: the `iceberg` database on the platform
+    TimescaleDB/Postgres in the cluster, and a SQLite file locally and in CI
+    (`IDP_CATALOG_TYPE=sql`, `IDP_CATALOG_URI`).
+  - `idp consume` appends to Bronze through `pyiceberg`, partitioned by
+    `(tenant_id, ingest_date)`, and commits the Kafka offsets only after the append.
+  - **Silver facts are incremental.** Structured Streaming reads only the Bronze
+    snapshots appended since the last run (`Trigger.Once` plus a checkpoint per
+    fact/source), and merges them insert-if-absent on `(tenant_id, id)`.
+    `dim_subscriber` is rebuilt in full. `--full-refresh` replays all of Bronze.
+  - **Gold is a full recompute** per tenant (`overwritePartitions`). Scores are
+    appended.
+  - `idp maintain` (the daily DAG) compacts files, expires snapshots and removes
+    orphan files. Expiry never removes a Bronze snapshot that a checkpoint still
+    references. Bronze is archived by an object-store lifecycle rule
+    (`idp archive-policy`), never deleted.
+  - `idp migrate-lake` moves a legacy Parquet Bronze across as one snapshot per
+    entity.
+- **Rejected: Nessie's Iceberg REST catalog.** It was the original plan, and was
+  deployed and probed. It keeps only a table's **current** snapshot in its metadata
+  (history lives in Nessie commits: three appends left one snapshot). That breaks
+  the snapshot-referencing streaming checkpoints, leaves nothing for
+  `expire_snapshots`, and makes `remove_orphan_files` unsafe (Nessie GC would be
+  needed). It also ignores client table locations and, by default, signs S3
+  requests only under its warehouse.
+- **Consequences:**
+  - Each run commits atomically, so readers see the previous snapshot or the new
+    one.
+  - Silver cost follows new data, not history.
+  - The platform Postgres gains one database, and the image bakes the Iceberg
+    runtime, the AWS bundle, and the SQLite and Postgres JDBC drivers.
+  - `Trigger.AvailableNow` can't be used: Iceberg re-validates the stream's first
+    snapshot on every restart, which conflicts with snapshot expiry.
+  - Without a remote tier, MinIO rejects the transition rule, so on minikube the
+    archive rule is rendered only.
+  - Labels stay Parquet in `idp-ml` (ADR-0014).
+  - Nessie remains provisioned for a future branch/tag workflow.

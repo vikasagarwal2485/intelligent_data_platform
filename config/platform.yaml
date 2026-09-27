@@ -44,6 +44,28 @@ s3:
   secret_key: "minioadmin123"
   bucket_prefix: "idp"                                  # -> idp-bronze / idp-silver / idp-gold
 
+# Iceberg catalog for the lake (REQ-FND-04). Bronze/Silver/Gold are Iceberg tables
+# in namespaces bronze/silver/gold; each table's data lives in its layer's location
+# (s3://<prefix>-<layer>/tables/<table> with S3, else storage.<layer>/tables/<table>).
+#   type: sql  -> Iceberg JDBC catalog shared by pyiceberg and Spark. uri is a
+#                 SQLAlchemy URL: sqlite:///<path> locally/in tests (default:
+#                 <storage.root>/catalog.db, no services needed), or
+#                 postgresql+psycopg2://... in the cluster (the `iceberg` database on
+#                 the platform TimescaleDB). Keeps full snapshot history.
+#   type: rest -> an Iceberg REST catalog (not Nessie: it keeps only the current
+#                 snapshot, which breaks incremental Silver; ADR-0028)
+# Overridable via env: IDP_CATALOG_TYPE, IDP_CATALOG_URI.
+catalog:
+  type: sql
+  uri: ""                          # sql: sqlite under storage.root when empty
+  warehouse: ""                    # default location only; tables live in their layer
+
+# Lake table maintenance and cost controls (REQ-ORC-06).
+lake:
+  snapshot_retention_days: 7       # expire older snapshots (never the current one)
+  bronze_archive_days: 90          # move older Bronze objects to a colder tier/class
+  target_file_size_mb: 128         # compaction target
+
 # TimescaleDB (Gold serving layer). When enabled, the publish stage mirrors Gold
 # tables here for low-latency serving. Overridable via env: IDP_TS_HOST,
 # IDP_TS_PORT, IDP_TS_DB, IDP_TS_USER, IDP_TS_PASSWORD.

@@ -32,6 +32,12 @@ spec:
               value: "minioadmin123"
             - name: IDP_S3_BUCKET_PREFIX
               value: "idp"
+            # the lake's Iceberg catalog (REQ-FND-04): JDBC on the platform Postgres
+            # (database `iceberg`; dev credentials, use External Secrets on EKS)
+            - name: IDP_CATALOG_TYPE
+              value: "sql"
+            - name: IDP_CATALOG_URI
+              value: "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg"
           ports:
             - containerPort: 8000
           readinessProbe:

@@ -47,62 +47,77 @@ def _salts(cfg: PlatformConfig) -> dict[str, str]:
 
 
 def _read_layer(cfg: PlatformConfig, layer: str, tables) -> dict[str, pd.DataFrame]:
-    """Read the parquet tables of a lake layer into frames (skips absent tables)."""
+    """Read lake tables of a layer into pandas via the Iceberg catalog (the ML /
+    serving boundary); tables never written are skipped."""
+    from idp.common import catalog
+
     out: dict[str, pd.DataFrame] = {}
-    base = storage.lake_uri(cfg, layer)
     for t in tables:
-        try:
-            df = storage.read_parquet(f"{base}/{t}", cfg)
-        except Exception:  # noqa: BLE001 - missing/empty path -> skip
-            continue
-        if "tenant_id" in df.columns:
-            df["tenant_id"] = df["tenant_id"].astype(str)
-        out[t] = df
+        if catalog.table_exists(cfg, layer, t):
+            out[t] = catalog.read_table(cfg, layer, t)
     return out
 
 
 # --- Stage 1: Bronze --------------------------------------------------------
-def to_bronze(cfg: PlatformConfig, frames: dict[str, pd.DataFrame], *, persist: bool = True) -> dict:
-    """Persist raw per-entity frames to the Bronze layer (tenant-partitioned).
+BRONZE_PARTITIONS = ("tenant_id", "ingest_date")
 
-    Bronze is an append-only raw log: each consumed batch adds to what is there
-    (Silver de-duplicates), so it never replaces earlier batches.
+
+def to_bronze(cfg: PlatformConfig, frames: dict[str, pd.DataFrame], *, persist: bool = True) -> dict:
+    """Append raw per-entity frames to Iceberg Bronze (REQ-BRZ-01).
+
+    Each entity becomes one append (one snapshot) to ``bronze.<entity>``,
+    partitioned by ``(tenant_id, ingest_date)``; every record carries the batch's
+    landing time ``_ingested_at`` (UTC) and ``ingest_date``. Bronze is an
+    append-only raw log: nothing already landed is rewritten or removed (Silver
+    de-duplicates on natural keys).
     """
-    if persist:
-        for name, df in frames.items():
-            if df is not None and not df.empty:
-                storage.write_parquet(df, f"{storage.lake_uri(cfg, 'bronze')}/{name}", cfg,
-                                      partition_cols=["tenant_id"], mode="append")
-    return {"bronze_tables": [n for n, d in frames.items() if d is not None and not d.empty]}
+    from idp.common import catalog
+
+    landed = [n for n, d in frames.items() if d is not None and not d.empty]
+    if persist and landed:
+        ingested_at = catalog.now_utc()
+        for name in landed:
+            df = frames[name].assign(_ingested_at=pd.Timestamp(ingested_at),
+                                     ingest_date=ingested_at.date())
+            catalog.append_table(cfg, "bronze", name, df, partition_by=BRONZE_PARTITIONS)
+    return {"bronze_tables": landed}
 
 
 # --- Stage 2: Silver (Spark) -----------------------------------------------
 def _table_count(spark, cfg: PlatformConfig, layer: str, table: str) -> int:
-    """Row count of a written table (Parquet footer metadata; no table scan)."""
+    """Row count of a lake table (answered from Iceberg file metadata)."""
     from idp.transforms import lake
     df = lake.read_table(spark, cfg, layer, table)
     return 0 if df is None else int(df.count())
 
 
-def to_silver(cfg: PlatformConfig) -> dict:
-    """Bronze (lake) -> canonical Silver tables (lake), on Spark.
+def to_silver(cfg: PlatformConfig, *, full_refresh: bool = False) -> dict:
+    """Iceberg Bronze -> canonical Iceberg Silver, incrementally, on Spark.
 
-    Always reads Bronze from the lake (REQ-SLV-04) and replaces the Silver
-    partitions of the tenants it writes (REQ-SLV-06). Returns ``{"silver_tables":
-    {table: row_count}}``; no table is materialized in driver memory.
+    ``dim_subscriber`` is rebuilt from the Bronze reference tables; the event facts
+    process only the Bronze appended since the last run and merge it on
+    ``(tenant_id, id)`` (REQ-SLV-04/06/07). ``full_refresh`` drops the fact
+    checkpoints and rebuilds every Silver table from all of Bronze (REQ-SLV-08).
+    Returns ``{"silver_tables": {table: rows}, "processed": {fact: new_bronze_rows}}``;
+    no table is materialized in driver memory.
     """
-    from idp.transforms import lake, silver
+    from idp.transforms import incremental
     from idp.transforms.session import get_spark
 
     spark = get_spark(cfg, app_name="idp-silver")
-    bronze = {}
-    for entity in ENTITIES:
-        df = lake.read_table(spark, cfg, "bronze", entity)
-        bronze[entity] = None if df is None or df.isEmpty() else df
-    tables = silver.curate(bronze, _salts(cfg))
-    for name, df in tables.items():
-        lake.write_table(df, cfg, "silver", name)
-    return {"silver_tables": {name: _table_count(spark, cfg, "silver", name) for name in tables}}
+    salts = _salts(cfg)
+    incremental.build_dim(spark, cfg, salts, full_refresh=full_refresh)
+    if full_refresh:
+        incremental.reset_facts(spark, cfg)
+    processed = incremental.process_facts(spark, cfg, salts)
+    tables = ["dim_subscriber", *[f for f in incremental.FACTS if _exists(cfg, "silver", f)]]
+    return {"silver_tables": {name: _table_count(spark, cfg, "silver", name) for name in tables},
+            "processed": processed}
+
+
+def _exists(cfg: PlatformConfig, layer: str, table: str) -> bool:
+    from idp.common import catalog
+    return catalog.table_exists(cfg, layer, table)
 
 
 # --- Stage 3: Gold (Spark) --------------------------------------------------
@@ -130,8 +145,8 @@ def to_gold(cfg: PlatformConfig) -> dict:
         raise RuntimeError(f"Silver is missing {missing}. Run the Silver stage ('idp silver') first.")
 
     windows = tuple(int(w) for w in cfg.features.get("windows", [30, 90]))
-    lake.write_table(features.build_credit_features(silver, windows), cfg, "gold", "credit_features")
-    lake.write_table(features.build_fraud_features(silver, windows), cfg, "gold", "fraud_features")
+    lake.overwrite_tenants(features.build_credit_features(silver, windows), cfg, "gold", "credit_features")
+    lake.overwrite_tenants(features.build_fraud_features(silver, windows), cfg, "gold", "fraud_features")
     return {
         "gold_tables": list(GOLD_FEATURE_TABLES),
         "counts": {"subscribers": _table_count(spark, cfg, "gold", "credit_features")},
@@ -174,15 +189,16 @@ def to_scores(cfg: PlatformConfig, *, models: dict | None = None, persist: bool 
         df["scored_at"] = scored_at
 
     if persist:
-        # Append: score tables are the run-by-run history (one snapshot per scored_at).
+        from idp.common import catalog
+        # Append: score tables are the run-by-run history (one snapshot per run).
         for name, df in outputs.items():
-            storage.write_parquet(df, f"{storage.lake_uri(cfg, 'gold')}/{name}", cfg,
-                                  partition_cols=["tenant_id"], mode="append")
+            catalog.append_table(cfg, "gold", name, df, partition_by=SCORE_PARTITIONS)
     return {"score_tables": list(outputs), **outputs}
 
 
 # --- Stage 4: Serving (Gold -> TimescaleDB) ---------------------------------
 GOLD_SERVING_TABLES = ("credit_scores", "fraud_scores", "credit_features", "fraud_features")
+SCORE_PARTITIONS = ("tenant_id", "day:scored_at")
 SCORE_TABLES = ("credit_scores", "fraud_scores")
 
 

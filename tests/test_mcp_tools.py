@@ -158,9 +158,11 @@ def test_missing_tenant_returns_structured_not_raise(patched):
 def test_unreachable_lake_surfaces_error_not_empty(patched, monkeypatch):
     # A connectivity failure (e.g. MinIO port-forward down) must surface as an
     # explicit error, not a misleading empty "0" result.
+    from idp.common import catalog
+
     def boom(*a, **k):
         raise ConnectionError("Connection refused")
-    monkeypatch.setattr(mcp_tools.storage, "read_parquet", boom)
+    monkeypatch.setattr(catalog, "load_catalog", boom)
     out = mcp_tools.analyze_subscribers_tool("tenant_a")
     assert out["tenant_id"] == "tenant_a"
     assert "Connection refused" in out["error"]
@@ -168,11 +170,11 @@ def test_unreachable_lake_surfaces_error_not_empty(patched, monkeypatch):
     assert "subscriber_count" not in out
 
 
-def test_absent_lake_reports_no_tenants(patched, monkeypatch):
+def test_absent_lake_reports_no_tenants(tmp_path, monkeypatch):
     # A genuinely empty lake (nothing written yet) reports no tenants, not a crash.
-    def missing(*a, **k):
-        raise FileNotFoundError("no such key")
-    monkeypatch.setattr(mcp_tools.storage, "read_parquet", missing)
+    from conftest import lake_cfg
+    empty = lake_cfg(tmp_path)
+    monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: empty)
     out = mcp_tools.analyze_subscribers_tool("tenant_a")
     assert out["available_tenants"] == [] and "error" in out
 
@@ -197,14 +199,10 @@ def test_registry_has_seven_tools():
 # REQ-MCP-07/08 — fraud & credit score distributions over 7/15/30-day windows #
 # --------------------------------------------------------------------------- #
 def _cfg_with_fresh_gold(local_cfg, tmp_path):
-    """A cfg that reuses the module's Silver (for the tenant guard) but writes Gold
-    to a per-test tmp dir, so partitioned score writes never accumulate across tests."""
-    s = local_cfg.storage
-    fresh = StorageConfig(
-        root=s.root, landing=s.landing, bronze=s.bronze, silver=s.silver,
-        gold=str(tmp_path / "gold"), ml_artifacts=s.ml_artifacts,
-    )
-    return PlatformConfig(raw=local_cfg.raw, tenants=local_cfg.tenants, storage=fresh)
+    """A per-test lake with a copy of the module's Silver (for the tenant guard) and
+    an empty Gold, so score appends never accumulate across tests."""
+    from conftest import clone_lake
+    return clone_lake(local_cfg, tmp_path / "lake", layers=("silver",), tables={"dim_subscriber"})
 
 
 @pytest.fixture()
@@ -230,9 +228,9 @@ def scored_cfg(local_cfg, tmp_path, monkeypatch):
         "recommended_limit": [90.0, 30.0, 60.0, 32.0, 108.0, 67.0, 22.0, 96.0, 49.0, 66.0],
         "scored_at": [now - pd.Timedelta(days=d) for d in ages],
     })
-    gold = storage.lake_uri(cfg, "gold")
-    storage.write_parquet(fraud, f"{gold}/fraud_scores", cfg, partition_cols=["tenant_id"])
-    storage.write_parquet(credit, f"{gold}/credit_scores", cfg, partition_cols=["tenant_id"])
+    from idp.common import catalog
+    catalog.append_table(cfg, "gold", "fraud_scores", fraud)
+    catalog.append_table(cfg, "gold", "credit_scores", credit)
     monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: cfg)
     return cfg
 
@@ -272,8 +270,8 @@ def test_score_tools_snapshot_note_without_timestamp(local_cfg, tmp_path, monkey
         "tenant_id": "tenant_a", "service_id": ["tok_0", "tok_1"],
         "fraud_proba": [0.2, 0.7], "rule_score": [0.1, 0.5], "fraud_score": [0.2, 0.66],
     })
-    storage.write_parquet(frame, f"{storage.lake_uri(cfg, 'gold')}/fraud_scores",
-                          cfg, partition_cols=["tenant_id"])
+    from idp.common import catalog
+    catalog.append_table(cfg, "gold", "fraud_scores", frame)
     monkeypatch.setattr(mcp_tools, "load_config", lambda _p=None: cfg)
     out = mcp_tools.analyze_fraud_score_tool("tenant_a")
     assert all(out["by_window"][w]["count"] == 2 for w in ("7d", "15d", "30d"))
@@ -293,19 +291,8 @@ def test_server_builds_and_registers_tools():
 # --------------------------------------------------------------------------- #
 def _untagged_copy(local_cfg, tmp_path, table):
     """A lake identical to local_cfg's Silver except ``table`` lacks tenant_id."""
-    import shutil
-    from pathlib import Path
-    root = tmp_path / "untagged"
-    shutil.copytree(local_cfg.storage.silver, root / "silver")
-    df = pd.read_parquet(root / "silver" / table).drop(columns=["tenant_id"])
-    shutil.rmtree(root / "silver" / table)
-    (root / "silver" / table).mkdir()
-    df.to_parquet(root / "silver" / table / "part-0.parquet", index=False)
-    s = local_cfg.storage
-    storage_cfg = StorageConfig(root=str(root), landing=s.landing, bronze=s.bronze,
-                                silver=str(root / "silver"), gold=str(root / "gold"),
-                                ml_artifacts=s.ml_artifacts)
-    return PlatformConfig(raw=local_cfg.raw, tenants=local_cfg.tenants, storage=storage_cfg)
+    from conftest import clone_lake
+    return clone_lake(local_cfg, tmp_path / "untagged", layers=("silver",), drop_tenant=table)
 
 
 @pytest.mark.parametrize("table,tool", [

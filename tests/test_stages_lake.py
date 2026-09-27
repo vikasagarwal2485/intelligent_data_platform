@@ -18,9 +18,8 @@ KEY = ["tenant_id", "service_id"]
 
 
 def _read(cfg, layer, table) -> pd.DataFrame:
-    df = storage.read_parquet(f"{storage.lake_uri(cfg, layer)}/{table}", cfg)
-    df["tenant_id"] = df["tenant_id"].astype(str)
-    return df
+    from idp.common import catalog
+    return catalog.read_table(cfg, layer, table)
 
 
 def _consenting(cfg) -> int:
@@ -68,7 +67,8 @@ def test_gold_fails_clearly_without_silver(spark, tmp_path):
     cfg = golden_cfg(tmp_path)
     with pytest.raises(RuntimeError, match="Run the Silver stage"):
         to_gold(cfg)
-    assert not Path(cfg.storage.gold).exists()
+    from idp.common import catalog
+    assert not catalog.load_catalog(cfg).list_tables("gold")
 
 
 # --- REQ-ORC-05: no whole-table pandas in Silver/Gold ----------------------------
@@ -143,7 +143,8 @@ def test_run_equals_separate_stages(spark, tmp_path, monkeypatch):
 
     sep = golden_cfg(tmp_path / "separate")
     import shutil
-    shutil.copytree(cfg.storage.bronze, sep.storage.bronze)    # same Bronze
+    from conftest import clone_lake
+    sep = clone_lake(cfg, tmp_path / "separate", layers=("bronze",))   # same Bronze
     to_silver(sep)
     to_gold(sep)
     for table in ("credit_features", "fraud_features"):

@@ -1,0 +1,48 @@
+# One-off lake migration (idp-app): legacy Parquet Bronze -> Iceberg Bronze
+# (`idp migrate-lake`; re-runs skip migrated entities). Then rebuild Silver and
+# Gold: `make silver-full-refresh` and `make gold` (deploy/README.md).
+#
+# Apply:  make migrate-lake
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-migrate-lake
+  namespace: idp-app
+  labels: { app: idp-medallion, stage: migrate-lake }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-medallion, stage: migrate-lake }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate-lake
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "migrate-lake"]
+          env:
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio.idp-platform.svc:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET_PREFIX
+              value: "idp"
+            # the lake's Iceberg catalog (REQ-FND-04): JDBC on the platform Postgres
+            # (database `iceberg`; dev credentials, use External Secrets on EKS)
+            - name: IDP_CATALOG_TYPE
+              value: "sql"
+            - name: IDP_CATALOG_URI
+              value: "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg"
+            # Spark (single engine, REQ-ORC-05): local master in this pod. The JVM
+            # heap is fixed; the pod limit leaves headroom for off-heap + Python.
+            - name: IDP_SPARK_MASTER
+              value: "local[*]"
+            - name: IDP_SPARK_DRIVER_MEMORY
+              value: "1g"
+          resources:
+            requests: { cpu: "500m", memory: 1536Mi }
+            limits: { cpu: "2", memory: 3Gi }

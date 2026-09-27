@@ -53,14 +53,42 @@ def _read_layer_table(cfg: PlatformConfig, layer: str, table: str, tenant_id: st
     yet). Raises :class:`LakeReadError` when the lake can't be reached at all, so
     a broken connection is not mistaken for "no data".
     """
-    uri = f"{storage.lake_uri(cfg, layer)}/{table}"
+    df = _scan(cfg, layer, table, tenant_id=str(tenant_id))
+    return pd.DataFrame() if df is None else _scoped(df, str(tenant_id), table)
+
+
+def _scan(cfg: PlatformConfig, layer: str, table: str, *, tenant_id: str | None = None,
+          columns: tuple[str, ...] | None = None) -> pd.DataFrame | None:
+    """Scan a lake table through the Iceberg catalog, pushing the tenant filter
+    into the scan (only that tenant's partitions are read; REQ-FND-04).
+
+    None when the table was never written. An untagged table (no ``tenant_id``)
+    is an isolation violation; an unreachable catalog is a :class:`LakeReadError`.
+    """
+    from pyiceberg.exceptions import NoSuchTableError
+    from pyiceberg.expressions import EqualTo
+
+    from idp.common import catalog
+
+    source = f"{layer}.{table}"
     try:
-        df = storage.read_parquet(uri, cfg)
-    except FileNotFoundError:
-        return pd.DataFrame()  # table not written yet -> genuinely empty
+        tbl = catalog.load_catalog(cfg).load_table(source)
+    except NoSuchTableError:
+        return None                                   # not written yet -> genuinely empty
     except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
-        raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
-    return _scoped(df, str(tenant_id), table)
+        raise LakeReadError(f"could not read {source}: {type(e).__name__}: {e}") from e
+    if "tenant_id" not in {f.name for f in tbl.schema().fields}:
+        raise _isolation_error(table, TenantIsolationError(
+            f"table has no 'tenant_id' column; every record must be tenant-stamped"))
+    kwargs: dict[str, Any] = {}
+    if tenant_id is not None:
+        kwargs["row_filter"] = EqualTo("tenant_id", tenant_id)
+    if columns is not None:
+        kwargs["selected_fields"] = columns
+    try:
+        return tbl.scan(**kwargs).to_pandas()
+    except Exception as e:  # noqa: BLE001
+        raise LakeReadError(f"could not read {source}: {type(e).__name__}: {e}") from e
 
 
 def _isolation_error(table: str, err: TenantIsolationError) -> TenantIsolationError:
@@ -94,17 +122,9 @@ def _read_gold(cfg: PlatformConfig, table: str, tenant_id: str) -> pd.DataFrame:
 
 def _available_tenants(cfg: PlatformConfig) -> list[str]:
     """Distinct ``tenant_id`` values present in Silver (empty if nothing ingested)."""
-    uri = f"{storage.lake_uri(cfg, 'silver')}/{_DIM}"
-    try:
-        df = storage.read_parquet(uri, cfg)
-    except FileNotFoundError:
+    df = _scan(cfg, "silver", _DIM, columns=("tenant_id",))
+    if df is None:
         return []
-    except Exception as e:  # noqa: BLE001 - connectivity/permission/etc.
-        raise LakeReadError(f"could not read {uri}: {type(e).__name__}: {e}") from e
-    try:
-        require_tenant_column(df)
-    except TenantIsolationError as e:
-        raise _isolation_error(_DIM, e) from e
     return sorted(df["tenant_id"].astype(str).unique().tolist())
 
 

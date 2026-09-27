@@ -27,21 +27,17 @@ def test_silver_stage_from_bronze(silver):
 
 def test_gold_stage_builds_features(lake):
     """Gold stage builds feature tables only from the persisted Silver (no scores)."""
-    gold = Path(lake.storage.gold)
-    assert (gold / "credit_features").is_dir() and (gold / "fraud_features").is_dir()
-    assert not (gold / "credit_scores").exists()
+    from idp.common import catalog
+    gold = {name for _, name in catalog.load_catalog(lake).list_tables("gold")}
+    assert {"credit_features", "fraud_features"} <= gold and "credit_scores" not in gold
 
 
 def test_score_stage_scores_gold_features(tmp_path, lake, credit_labeled, fraud_labeled):
     """The Score stage applies trained models to the Gold features read from the lake."""
-    import shutil
-
+    from conftest import clone_lake
     from idp.ml.credit_model import CreditLimitModel
     from idp.ml.fraud_model import FraudModel
-    from conftest import lake_cfg
-    cfg = lake_cfg(tmp_path)
-    for table in ("credit_features", "fraud_features"):
-        shutil.copytree(Path(lake.storage.gold) / table, Path(cfg.storage.gold) / table)
+    cfg = clone_lake(lake, tmp_path / "lake", layers=("gold",), tables={"credit_features", "fraud_features"})
     models = {"credit": CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"]),
               "fraud": FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])}
     result = to_scores(cfg, models=models, persist=False)
@@ -54,3 +50,82 @@ def test_fee_charges_have_their_own_topic():
     from idp.streaming.producer import _topic
     assert TABLE_TO_SUFFIX["fee_charges"] == "fees"
     assert _topic("t", "tenant_b", TABLE_TO_SUFFIX["fee_charges"]) == "t.tenant_b.fees"
+
+
+# --- Kafka -> Bronze commit semantics (REQ-STR-02) -----------------------------
+class _Msg:
+    def __init__(self, topic, value):
+        self.topic, self.value = topic, value
+
+
+class _FakeConsumer:
+    instances: list = []
+
+    def __init__(self, *topics, **kwargs):
+        self.kwargs, self.committed, self.closed = kwargs, False, False
+        self.msgs = [_Msg("t.tenant_a.parties", {"tenant_id": "tenant_a", "id": "p1"})] if _FakeConsumer.with_data else []
+        _FakeConsumer.instances.append(self)
+
+    def __iter__(self):
+        return iter(self.msgs)
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def _fake_kafka(monkeypatch, with_data):
+    import sys, types
+    _FakeConsumer.instances, _FakeConsumer.with_data = [], with_data
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(KafkaConsumer=_FakeConsumer))
+
+
+def test_offsets_committed_only_after_landing(monkeypatch):
+    from idp.streaming.consumer import consume_to_bronze
+    _fake_kafka(monkeypatch, with_data=True)
+    landed = []
+    consume_to_bronze("x:9092", ["tenant_a"], land=landed.append)
+    c = _FakeConsumer.instances[0]
+    assert c.kwargs["enable_auto_commit"] is False
+    assert len(landed) == 1 and c.committed and c.closed
+
+
+def test_failed_landing_commits_nothing(monkeypatch):
+    import pytest
+    from idp.streaming.consumer import consume_to_bronze
+    _fake_kafka(monkeypatch, with_data=True)
+
+    def boom(_frames):
+        raise RuntimeError("catalog down")
+    with pytest.raises(RuntimeError):
+        consume_to_bronze("x:9092", ["tenant_a"], land=boom)
+    c = _FakeConsumer.instances[0]
+    assert not c.committed and c.closed
+
+
+def test_empty_topics_no_snapshot(monkeypatch, tmp_path):
+    # SCN-STR-02.2 — nothing consumed: no landing, no Bronze snapshot
+    from conftest import lake_cfg
+    from idp.common import catalog
+    from idp.pipeline import to_bronze
+    from idp.streaming.consumer import consume_to_bronze
+    _fake_kafka(monkeypatch, with_data=False)
+    cfg = lake_cfg(tmp_path)
+    out = consume_to_bronze("x:9092", ["tenant_a"], land=lambda f: to_bronze(cfg, f))
+    assert out == {} and not _FakeConsumer.instances[0].committed
+    assert catalog.table_exists(cfg, "bronze", "parties") is False
+
+
+def test_consume_appends_to_iceberg_bronze(monkeypatch, tmp_path):
+    # SCN-STR-02.1 — consumed records become a Bronze snapshot; no Silver/Gold
+    from conftest import lake_cfg
+    from idp.common import catalog
+    from idp.pipeline import to_bronze
+    from idp.streaming.consumer import consume_to_bronze
+    _fake_kafka(monkeypatch, with_data=True)
+    cfg = lake_cfg(tmp_path)
+    consume_to_bronze("x:9092", ["tenant_a"], land=lambda f: to_bronze(cfg, f))
+    assert catalog.read_table(cfg, "bronze", "parties")["id"].tolist() == ["p1"]
+    assert not catalog.table_exists(cfg, "silver", "dim_subscriber")
