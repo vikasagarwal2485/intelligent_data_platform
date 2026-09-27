@@ -165,26 +165,26 @@ kafka: ## Deploy Kafka cluster + Schema Registry, create topics, register schema
 	bash deploy/platform/kafka/setup-kafka.sh idp-platform
 
 .PHONY: minio-ls
-minio-ls: ## List the lake objects in MinIO (idp-bronze / idp-silver / idp-gold)
-	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold; do echo "== $$b =="; mc ls -r m/$$b/; done'
+minio-ls: ## List the landing + lake objects in MinIO (idp-landing / idp-bronze / idp-silver / idp-gold)
+	$(MC_SH) '$(MC_ENV) for b in idp-landing idp-bronze idp-silver idp-gold; do echo "== $$b =="; mc ls -r m/$$b/; done'
 
 .PHONY: minio-reset
-minio-reset: ## Empty the lake buckets (idp-bronze/silver/gold) for a clean re-run
+minio-reset: ## Empty the lake + landing buckets (idp-bronze/silver/gold/ml/landing) for a clean re-run
 	# Full RECREATE, not a shallow `rm -r`. `mc rm -r --force` does NOT remove
 	# object versions or delete markers, so on a versioned/suspended bucket it
 	# leaves `null`-version delete markers on the reset keys (e.g. credit_features/,
 	# fraud_features/) that then SHADOW new writes to those same keys — the object
 	# PUTs succeed but list/get return nothing. `mc rb --force` drops the bucket and
 	# ALL versions/markers/ILM; `mc mb` recreates it clean (unversioned by default).
-	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold idp-ml; do echo "recreating $$b"; mc rb --force m/$$b/ 2>/dev/null || true; mc mb --ignore-existing m/$$b; done; echo done'
+	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold idp-ml idp-landing; do echo "recreating $$b"; mc rb --force m/$$b/ 2>/dev/null || true; mc mb --ignore-existing m/$$b; done; echo done'
 
 .PHONY: minio-versions
 minio-versions: ## Diagnose hidden bucket state (versioning, delete markers, ILM) — a plain `ls` hides these
-	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold idp-ml; do echo "== $$b =="; echo "-- versioning:"; mc version info m/$$b; echo "-- ILM rules:"; mc ilm rule ls m/$$b 2>/dev/null || echo "(none)"; echo "-- versions/delete-markers:"; mc ls --versions -r m/$$b/; done'
+	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold idp-ml idp-landing; do echo "== $$b =="; echo "-- versioning:"; mc version info m/$$b; echo "-- ILM rules:"; mc ilm rule ls m/$$b 2>/dev/null || echo "(none)"; echo "-- versions/delete-markers:"; mc ls --versions -r m/$$b/; done'
 
 .PHONY: minio-mkbuckets
-minio-mkbuckets: ## Create the lake buckets if missing (idp-bronze/silver/gold/ml) — idempotent repair
-	$(MC_SH) '$(MC_ENV) mc mb --ignore-existing m/idp-bronze m/idp-silver m/idp-gold m/idp-ml && echo "buckets:" && mc ls m/'
+minio-mkbuckets: ## Create the buckets if missing (idp-bronze/silver/gold/ml + idp-landing) — idempotent repair
+	$(MC_SH) '$(MC_ENV) mc mb --ignore-existing m/idp-bronze m/idp-silver m/idp-gold m/idp-ml m/idp-landing && echo "buckets:" && mc ls m/'
 
 .PHONY: lake-archive-policy
 lake-archive-policy: ## Render the Bronze archive rule; apply it to idp-bronze when ARCHIVE_TIER=<MinIO remote tier> is set
@@ -218,7 +218,7 @@ kafka-ui: ## Deploy the Kafka admin UI (Kafbat) for managing topics
 	@echo "Then open http://localhost:8080"
 
 .PHONY: stream
-stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). Bronze stage only.
+stream: ## Ingestion (idp-app): in-memory produce -> Kafka, then consume -> Bronze (S3). Bronze stage only. Don't run alongside `make stream-from-landing`.
 	kubectl -n idp-app delete job idp-produce idp-consume --ignore-not-found
 	kubectl -n idp-app apply -f deploy/app/jobs/produce-job.yaml
 	@echo ">> Producing... (follow: kubectl -n idp-app logs -f job/idp-produce)"
@@ -226,6 +226,49 @@ stream: ## Ingestion (idp-app): produce -> Kafka, then consume -> Bronze (S3). B
 	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
 	@echo ">> Consuming -> Bronze... (follow: kubectl -n idp-app logs -f job/idp-consume)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
+	@echo ">> Bronze ready. Next: make silver, then make gold."
+
+# Wait for an idp-app Job to finish: exit 0 when it completes, and exit 1 (printing
+# its log) as soon as it FAILS, instead of `kubectl wait --for=condition=complete`,
+# which would sit out its whole timeout on a failed Job. $(1)=job name, $(2)=timeout (s).
+define wait_job
+	@j=$(1); for i in $$(seq 1 $$(( $(2) / 2 ))); do \
+	  s=$$(kubectl -n idp-app get job $$j -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null); \
+	  case "$$s" in \
+	    *Complete*) echo ">> $$j complete"; kubectl -n idp-app logs job/$$j --tail=25; exit 0;; \
+	    *Failed*) echo ">> $$j FAILED"; kubectl -n idp-app logs job/$$j --tail=40; exit 1;; \
+	  esac; sleep 2; done; echo ">> $$j timed out after $(2)s"; exit 1
+endef
+
+.PHONY: stream-from-landing
+stream-from-landing: ## Ingestion via the landing zone: generate -> s3://idp-landing -> produce --from-landing -> Kafka -> consume -> Bronze. Stops at the first failed step. Don't run alongside `make stream`.
+	kubectl -n idp-app delete job idp-generate idp-produce-from-landing idp-consume --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/generate-job.yaml
+	@echo ">> [1/3] Generating source files -> s3://idp-landing ..."
+	$(call wait_job,idp-generate,900)
+	kubectl -n idp-app apply -f deploy/app/jobs/produce-from-landing-job.yaml
+	@echo ">> [2/3] Publishing the landing files -> Kafka ..."
+	$(call wait_job,idp-produce-from-landing,900)
+	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
+	@echo ">> [3/3] Consuming -> Bronze ..."
+	$(call wait_job,idp-consume,600)
+	@echo ">> Bronze ready (from the landing zone). Next: make silver, then make gold."
+
+.PHONY: generate-job
+generate-job: ## Landing only (idp-app): write synthetic source files to s3://idp-landing (step 1 of stream-from-landing)
+	kubectl -n idp-app delete job idp-generate --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/generate-job.yaml
+	$(call wait_job,idp-generate,900)
+
+.PHONY: stream-replay
+stream-replay: ## Re-publish the EXISTING landing files (no regenerate) -> Kafka -> consume -> Bronze. Stops if a file is rejected.
+	kubectl -n idp-app delete job idp-produce-from-landing idp-consume --ignore-not-found
+	kubectl -n idp-app apply -f deploy/app/jobs/produce-from-landing-job.yaml
+	@echo ">> [1/2] Publishing the existing landing files -> Kafka ..."
+	$(call wait_job,idp-produce-from-landing,900)
+	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
+	@echo ">> [2/2] Consuming -> Bronze ..."
+	$(call wait_job,idp-consume,600)
 	@echo ">> Bronze ready. Next: make silver, then make gold."
 
 .PHONY: silver

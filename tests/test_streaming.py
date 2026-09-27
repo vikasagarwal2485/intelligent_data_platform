@@ -174,3 +174,156 @@ def test_produce_to_kafka_publishes_per_tenant_topics_with_natural_keys(monkeypa
         ("t.tenant_b.fees", b"f1"),                                           # else the record id
     ]
     assert producer.flushed and producer.closed
+
+
+# --- landing zone -> Kafka (REQ-STR-01, `idp produce --from-landing`) -------------
+def _small_config(tmp_path):
+    import yaml
+
+    from idp.common.config import DEFAULT_CONFIG_PATH
+    raw = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    raw["storage"] = {k: str(tmp_path / k) for k in
+                      ("root", "landing", "bronze", "silver", "gold", "ml_artifacts")}
+    raw["synthetic"].update({"subscribers_per_tenant": 8, "days": 4})
+    path = tmp_path / "platform.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return str(path)
+
+
+def _sent(producers):
+    """Every message as (topic, key, serialized value), in send order."""
+    out = []
+    for p in producers:
+        ser = p.kwargs["value_serializer"]
+        out += [(t, k, ser(v)) for t, k, v in p.sent]
+    return out
+
+
+def _no_s3(monkeypatch):
+    for var in ("IDP_S3_ENDPOINT", "IDP_SUBSCRIBERS", "IDP_DAYS"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_landing_and_in_memory_production_send_the_same_messages(monkeypatch, tmp_path):
+    # SCN-STR-01.3
+    import sys
+    import types
+
+    from idp.cli import main
+    _no_s3(monkeypatch)
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(KafkaProducer=_FakeProducer))
+    cfg = _small_config(tmp_path)
+
+    _FakeProducer.instances = []
+    assert main(["--config", cfg, "produce"]) == 0
+    in_memory = _sent(_FakeProducer.instances)
+
+    assert main(["--config", cfg, "generate"]) == 0
+    _FakeProducer.instances = []
+    assert main(["--config", cfg, "produce", "--from-landing"]) == 0
+    from_landing = _sent(_FakeProducer.instances)
+
+    assert in_memory and from_landing == in_memory
+
+
+def test_rejected_landing_files_are_not_published_and_fail_the_run(monkeypatch, tmp_path, capsys):
+    # SCN-STR-01.4 / SCN-STR-01.5
+    import json
+    import sys
+    import types
+
+    from idp.cli import main
+    _no_s3(monkeypatch)
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(KafkaProducer=_FakeProducer))
+    cfg = _small_config(tmp_path)
+    assert main(["--config", cfg, "generate"]) == 0
+    land = tmp_path / "landing"
+    bad = land / "tenant=tenant_a" / "recharge_events.json"
+    records = json.loads(bad.read_text())
+    records[0]["tenant_id"] = "tenant_b"                    # one foreign record poisons the file
+    bad.write_text(json.dumps(records))
+    (land / "tenant=tenant_x").mkdir()
+    (land / "tenant=tenant_x" / "parties.json").write_text(json.dumps([{"tenant_id": "tenant_x", "id": "p"}]))
+
+    _FakeProducer.instances = []
+    assert main(["--config", cfg, "produce", "--from-landing"]) == 1
+    topics = {t for t, _, _ in _sent(_FakeProducer.instances)}
+    assert "t.tenant_a.recharge" not in topics                # nothing from the rejected file
+    assert not any(t.startswith("t.tenant_x.") for t in topics)
+    assert {"t.tenant_a.parties", "t.tenant_b.recharge"} <= topics   # the good files still go
+    out = capsys.readouterr().out
+    assert "REJECTED 2 landing file(s)" in out and "tenant mismatch" in out and "unknown tenant" in out
+
+
+def test_empty_landing_zone_fails(monkeypatch, tmp_path, capsys):
+    import sys
+    import types
+
+    from idp.cli import main
+    _no_s3(monkeypatch)
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(KafkaProducer=_FakeProducer))
+    assert main(["--config", _small_config(tmp_path), "produce", "--from-landing"]) == 1
+    assert "Run 'idp generate' first" in capsys.readouterr().out
+
+
+class _Broker:
+    """A loopback Kafka: producers append serialized bytes, consumers deserialize them."""
+    topics: dict = {}
+
+    class Producer:
+        def __init__(self, **kw):
+            self.ser = kw["value_serializer"]
+
+        def send(self, topic, key=None, value=None):
+            _Broker.topics.setdefault(topic, []).append(self.ser(value))
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    class Consumer:
+        def __init__(self, *topics, **kw):
+            de = kw["value_deserializer"]
+            self.msgs = [_Msg(t, de(b)) for t in topics for b in _Broker.topics.get(t, [])]
+
+        def __iter__(self):
+            return iter(self.msgs)
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+
+def test_landing_path_end_to_end_lands_exactly_the_landing_records(monkeypatch, tmp_path):
+    # SCN-BRZ-03.4 — generate -> landing -> produce --from-landing -> Kafka -> consume -> Bronze
+    import json
+    import sys
+    import types
+    from collections import Counter
+
+    from idp.cli import main
+    from idp.common import catalog
+    from idp.common.config import load_config
+    _no_s3(monkeypatch)
+    _Broker.topics = {}
+    monkeypatch.setitem(sys.modules, "kafka", types.SimpleNamespace(
+        KafkaProducer=_Broker.Producer, KafkaConsumer=_Broker.Consumer))
+    cfg_path = _small_config(tmp_path)
+    assert main(["--config", cfg_path, "generate"]) == 0
+    assert main(["--config", cfg_path, "produce", "--from-landing"]) == 0
+    assert main(["--config", cfg_path, "consume", "--idle-timeout", "0.1"]) == 0
+
+    landed = Counter()
+    for f in (tmp_path / "landing").rglob("*.json"):
+        landed[(f.parent.name.split("=", 1)[1], f.stem)] = len(json.loads(f.read_text()))
+    cfg = load_config(cfg_path)
+    bronze = Counter()
+    for entity in {e for _, e in landed}:
+        df = catalog.read_table(cfg, "bronze", entity)
+        for tenant, n in df.groupby("tenant_id").size().items():
+            bronze[(tenant, entity)] = n
+    assert landed and bronze == landed

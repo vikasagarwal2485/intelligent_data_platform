@@ -81,7 +81,7 @@ kubectl -n "${NS}" rollout status deploy/minio --timeout=300s || true
 # returns "unauthorized" for anonymous pulls, which ImagePullBackOffs a client pod.
 # HOME=/tmp keeps mc's config dir writable; MC_HOST_m needs no `mc alias set`.
 kubectl -n "${NS}" exec -i deploy/minio -- sh -c \
-  'export HOME=/tmp MC_HOST_m=http://minioadmin:minioadmin123@127.0.0.1:9000; until mc ls m >/dev/null 2>&1; do echo "waiting for minio..."; sleep 3; done; for b in idp-bronze idp-silver idp-gold idp-ml; do mc mb --ignore-existing m/$b && echo "bucket $b ready"; done'
+  'export HOME=/tmp MC_HOST_m=http://minioadmin:minioadmin123@127.0.0.1:9000; until mc ls m >/dev/null 2>&1; do echo "waiting for minio..."; sleep 3; done; for b in idp-bronze idp-silver idp-gold idp-ml idp-landing; do mc mb --ignore-existing m/$b && echo "bucket $b ready"; done'
 
 echo ">> serving DB (TimescaleDB, upstream image, plain manifest)"
 kubectl apply -n "${NS}" -f "${HERE}/timescaledb/timescaledb.yaml"

@@ -41,6 +41,15 @@ def lake_uri(cfg: PlatformConfig, layer: str) -> str:
     return getattr(cfg.storage, layer)
 
 
+def landing_uri(cfg: PlatformConfig) -> str:
+    """Base URI of the source landing zone (REQ-BRZ-03): ``s3://<prefix>-landing``
+    on S3 (its own bucket, not a lake layer), else ``storage.landing``."""
+    s3 = cfg.s3
+    if s3.get("enabled"):
+        return f"s3://{s3['bucket_prefix']}-landing"
+    return cfg.storage.landing
+
+
 WriteMode = Literal["replace", "append"]
 
 # pyarrow dataset-writer behaviour per mode (partitioned writes only).

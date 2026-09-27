@@ -228,7 +228,26 @@ Run `make help` to list every target with a description.
    ```
    - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
      (small default volume: 150 subscribers × 14 days, via env, to fit memory).
-   - `idp-consume` drains the topics → Bronze → Silver → Gold, written to MinIO.
+   - `idp-consume` drains the topics into the Iceberg Bronze tables on MinIO
+     (Bronze only; Silver and Gold are separate stages).
+
+   **Or stream through the landing zone** (source files → landing → Kafka → Bronze,
+   the path the architecture plan describes for NiFi):
+   ```bash
+   make stream-from-landing   # generate -> s3://idp-landing -> produce --from-landing -> consume
+   ```
+   - `idp-generate` writes the synthetic source files to
+     `s3://idp-landing/tenant=<id>/<entity>.json`, one tenant at a time.
+   - `idp-produce-from-landing` checks every file's tenant and publishes it. A file
+     whose folder names an unknown tenant, or whose records belong to another
+     tenant, is **not published**; the Job fails and consume doesn't run.
+   - `idp-consume` lands the records in Bronze, exactly as with `make stream`.
+   - `make stream-replay` re-publishes the landing files already there, without
+     regenerating them (replay). `make generate-job` writes them only.
+   - Inspect the source files: `make minio-ls` (the `idp-landing` bucket). Locally,
+     `idp generate` writes them to `data/landing/`, and
+     `idp produce --from-landing` publishes them.
+   - Run one streaming target at a time. They share the topics and the consumer.
 3. **Watch / verify** (jobs are in `idp-app`):
    ```bash
    kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
@@ -237,7 +256,7 @@ Run `make help` to list every target with a description.
    - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
    - Inspect the lake in MinIO (one bucket per layer):
      ```bash
-     make minio-ls          # lists idp-bronze / idp-silver / idp-gold
+     make minio-ls          # lists idp-landing / idp-bronze / idp-silver / idp-gold
      make minio-console     # web UI at http://localhost:9001 (minioadmin/minioadmin123)
      ```
 
@@ -312,6 +331,7 @@ Health checks & fixes if a component is unhappy:
 **Run the medallion stages — each is a separate job (separation of concerns):**
 ```bash
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
+                   #    (or: make stream-from-landing — via the s3://idp-landing source files)
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
 make labels        # 3) Seed the labels/outcomes store -> s3://idp-ml/labels (training input)
 make gold          # 4) Gold stage:  Silver (S3) -> feature tables ONLY (S3)

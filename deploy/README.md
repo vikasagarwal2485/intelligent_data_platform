@@ -90,6 +90,34 @@ The script adds the required Helm repos before installing — omitting
 All images are freely pullable — no Bitnami subscription needed. The script is
 idempotent and first removes any earlier broken Bitnami releases.
 
+## Streaming ingestion: in-memory or through the landing zone
+
+Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same data.
+
+| Target | Steps (Jobs in `idp-app`) |
+|---|---|
+| `make stream` | `idp-produce` (generates in memory → Kafka) → `idp-consume` (→ Bronze) |
+| `make stream-from-landing` | `idp-generate` (→ `s3://idp-landing`) → `idp-produce-from-landing` (landing files → Kafka) → `idp-consume` |
+| `make stream-replay` | `idp-produce-from-landing` → `idp-consume`: re-publish the landing files already there |
+| `make generate-job` | `idp-generate` only |
+
+- **The `idp-landing` bucket** holds the source files, laid out as
+  `tenant=<id>/<entity>.json`. It's created by `install-infra.sh` and
+  `make minio-mkbuckets`, and emptied by `make minio-reset`. It's not a lake layer,
+  so Bronze archiving and maintenance never touch it.
+- **Each step waits for the previous one,** and the chain **stops at the first
+  failed Job** without sitting out a timeout.
+- **A rejected landing file fails the chain:** its folder names a tenant that isn't
+  configured, it isn't a known entity, it isn't a JSON array, or any record belongs
+  to another tenant. The produce Job publishes the good files, lists the rejected
+  ones in its log, and exits 1, so consume doesn't run. Fix or remove the file,
+  then `make stream-replay`.
+- **Keep `IDP_SUBSCRIBERS`/`IDP_DAYS` equal** in `generate-job.yaml`,
+  `produce-job.yaml` and `labels-job.yaml`, because labels are regenerated from
+  them.
+- **Run one streaming target at a time:** they share the Kafka topics and the
+  `idp-consume` Job.
+
 ## The Iceberg lake (JDBC catalog)
 
 Bronze, Silver and Gold are Iceberg tables (ADR-0028), catalogued in an **Iceberg

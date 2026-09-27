@@ -1,7 +1,7 @@
 """Command-line entrypoint for the platform.
 
 Usage (separated medallion stages):
-    idp produce    # synthetic data -> Kafka topics
+    idp produce    # synthetic data -> Kafka topics (--from-landing: the landing files)
     idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
     idp silver     # new Bronze -> Silver (incremental; --full-refresh replays all)  [Silver stage]
     idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
@@ -26,22 +26,29 @@ from idp.common.config import load_config
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
+    from idp.common import storage
     from idp.ingestion.landing import write_landing
-    from idp.synthetic.generator import generate_for_tenants
+    from idp.synthetic.generator import generate
 
     cfg = load_config(args.config)
     syn = cfg.synthetic
-    dataset = generate_for_tenants(
-        cfg.tenant_ids,
-        subscribers=int(syn.get("subscribers_per_tenant", 200)),
-        days=int(syn.get("days", 60)),
-        fraud_rate=float(syn.get("fraud_rate", 0.05)),
-        default_rate=float(syn.get("default_rate", 0.12)),
-        seed=int(syn.get("seed", 42)),
-    )
-    written = write_landing(dataset, cfg.storage.landing)
-    total = sum(len(v) for v in written.values())
-    print(f"Wrote {total} landing files for {len(cfg.tenant_ids)} tenant(s) to {cfg.storage.landing}")
+    landing = storage.landing_uri(cfg)
+    # One tenant at a time, like `idp produce`, to cap peak memory.
+    total = 0
+    for tenant_id in cfg.tenant_ids:
+        dataset = generate(
+            tenant_id,
+            subscribers=int(syn.get("subscribers_per_tenant", 200)),
+            days=int(syn.get("days", 60)),
+            fraud_rate=float(syn.get("fraud_rate", 0.05)),
+            default_rate=float(syn.get("default_rate", 0.12)),
+            seed=int(syn.get("seed", 42)),
+        )
+        written = write_landing(dataset, landing, storage_options=storage.storage_options(cfg))
+        total += sum(len(v) for v in written.values())
+        del dataset
+    print(f"Wrote {total} landing files for {len(cfg.tenant_ids)} tenant(s) to {landing}")
+    print("Next: 'idp produce --from-landing' publishes them to Kafka.")
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
@@ -53,13 +60,15 @@ def _cmd_run(args: argparse.Namespace) -> None:
     print(json.dumps(printable, indent=2, default=str))
 
 
-def _cmd_produce(args: argparse.Namespace) -> None:
+def _cmd_produce(args: argparse.Namespace) -> int | None:
     from idp.streaming.producer import produce_to_kafka
     from idp.synthetic.generator import generate
 
     cfg = load_config(args.config)
     syn = cfg.synthetic
     bootstrap = args.bootstrap or cfg.kafka["bootstrap"]
+    if args.from_landing:
+        return _produce_from_landing(cfg, bootstrap)
     # Generate + publish one tenant at a time to cap peak memory (avoids OOM on
     # small nodes; the whole multi-tenant dataset would be large in RAM).
     totals: dict[str, int] = {}
@@ -79,6 +88,51 @@ def _cmd_produce(args: argparse.Namespace) -> None:
         print(f"[{tenant_id}] published {sum(counts.values())} messages")
     print(f"Published to Kafka at {bootstrap}:")
     print(json.dumps(totals, indent=2))
+    return None
+
+
+def _produce_from_landing(cfg, bootstrap: str) -> int:
+    """Publish the landing zone's files (REQ-STR-01), one tenant at a time.
+
+    A rejected file (unknown tenant or entity, invalid JSON, tenant mismatch) is
+    not published at all; the other files are. Returns 1 when anything was
+    rejected or the landing zone holds no tenant folder, else 0.
+    """
+    from itertools import groupby
+
+    from idp.common import storage
+    from idp.ingestion.landing import read_landing
+    from idp.streaming.producer import publish_records
+
+    landing = storage.landing_uri(cfg)
+    files = read_landing(landing, cfg.tenant_ids, storage_options=storage.storage_options(cfg))
+    rejected: list[tuple[str, str]] = []
+    totals: dict[str, int] = {}
+    tenants_seen = 0
+    for tenant, group in groupby(files, key=lambda f: f.tenant):
+        def accepted(group=group):
+            for f in group:
+                if f.reason:
+                    rejected.append((f.path, f.reason))
+                else:
+                    yield f.entity, f.records
+        if not tenant:                                  # entries outside any tenant folder
+            list(accepted())
+            continue
+        tenants_seen += 1
+        counts = publish_records(accepted(), bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+        for k, v in counts.items():
+            totals[k] = totals.get(k, 0) + v
+        print(f"[{tenant}] published {sum(counts.values())} messages from the landing zone")
+    print(f"Published from {landing} to Kafka at {bootstrap}:")
+    print(json.dumps(totals, indent=2))
+    if rejected:
+        print(f"REJECTED {len(rejected)} landing file(s) (not published):")
+        for path, reason in rejected:
+            print(f"  {path}: {reason}")
+    if not tenants_seen:
+        print(f"No tenant folders in {landing}. Run 'idp generate' first.")
+    return 1 if rejected or not tenants_seen else 0
 
 
 def _cmd_consume(args: argparse.Namespace) -> None:
@@ -215,6 +269,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_prod = sub.add_parser("produce", help="Publish synthetic data to Kafka topics")
     p_prod.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
+    p_prod.add_argument("--from-landing", action="store_true",
+                        help="Publish the landing zone's files (written by 'idp generate') "
+                             "instead of generating in memory")
     p_prod.set_defaults(func=_cmd_produce)
 
     p_cons = sub.add_parser("consume", help="Bronze stage: drain Kafka topics -> Bronze (S3)")
@@ -250,8 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp", help="Start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)").set_defaults(func=_cmd_mcp)
 
     args = parser.parse_args(argv)
-    args.func(args)
-    return 0
+    return args.func(args) or 0          # a command may return a failure status
 
 
 if __name__ == "__main__":

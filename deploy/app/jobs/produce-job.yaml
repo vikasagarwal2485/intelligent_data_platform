@@ -23,8 +23,9 @@ spec:
             - name: IDP_KAFKA_BOOTSTRAP
               value: "idp-kafka-kafka-bootstrap.idp-platform.svc:9092"
             # Keep the streaming demo volume small so the producer fits in memory.
-            # labels-job.yaml MUST use the SAME values (labels are regenerated from
-            # these params and must match the data that becomes Gold).
+            # labels-job.yaml and generate-job.yaml MUST use the SAME values (labels
+            # are regenerated from these params and must match the data that becomes
+            # Gold). Keep these three jobs in lock-step.
             - name: IDP_SUBSCRIBERS
               value: "150"
             - name: IDP_DAYS

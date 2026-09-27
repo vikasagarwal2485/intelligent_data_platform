@@ -9,9 +9,9 @@ from idp.ingestion.jsonapi import (
     unwrap_recharge_event,
     unwrap_usage_event,
 )
-from idp.ingestion.landing import write_landing
+from idp.ingestion.landing import LandingFile, read_landing, write_landing
 
 __all__ = [
-    "write_landing",
+    "write_landing", "read_landing", "LandingFile",
     "normalize_money", "strip_uuid_wrapper", "unwrap_recharge_event", "unwrap_usage_event",
 ]

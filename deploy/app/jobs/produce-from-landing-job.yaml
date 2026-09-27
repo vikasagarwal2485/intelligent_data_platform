@@ -1,0 +1,39 @@
+# Landing -> Kafka (idp-app): publishes the files in s3://idp-landing (written by
+# the generate Job) to the per-tenant topics, checking each file's tenant first
+# (REQ-STR-01). A rejected file is not published and fails the Job (exit 1), so
+# `make stream-from-landing` stops before consume. The in-memory producer is
+# produce-job.yaml (`make stream`).
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: idp-produce-from-landing
+  namespace: idp-app
+  labels: { app: idp-streaming }
+spec:
+  backoffLimit: 0                     # a rejected file is a data problem; retrying won't fix it
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: idp-streaming }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: produce
+          image: idp/scoring-api:dev
+          imagePullPolicy: Never
+          command: ["idp", "produce", "--from-landing"]
+          env:
+            - name: IDP_KAFKA_BOOTSTRAP
+              value: "idp-kafka-kafka-bootstrap.idp-platform.svc:9092"
+            - name: IDP_S3_ENDPOINT
+              value: "http://minio.idp-platform.svc:9000"
+            - name: IDP_S3_ACCESS_KEY
+              value: "minioadmin"
+            - name: IDP_S3_SECRET_KEY
+              value: "minioadmin123"
+            - name: IDP_S3_BUCKET_PREFIX
+              value: "idp"
+          resources:
+            requests: { cpu: "250m", memory: 1Gi }
+            limits: { cpu: "1", memory: 2Gi }

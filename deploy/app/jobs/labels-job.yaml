@@ -24,10 +24,10 @@ spec:
           imagePullPolicy: Never
           command: ["idp", "labels"]
           env:
-            # MUST MATCH produce-job.yaml's IDP_SUBSCRIBERS/IDP_DAYS. Labels are
+            # MUST MATCH produce-job.yaml's and generate-job.yaml's IDP_SUBSCRIBERS/IDP_DAYS. Labels are
             # regenerated deterministically from these params; if they differ from
             # the data that produced Gold, the tokenized service_ids won't match and
-            # the training join is empty. Keep these two jobs in lock-step.
+            # the training join is empty. Keep these three jobs in lock-step.
             - name: IDP_SUBSCRIBERS
               value: "150"
             - name: IDP_DAYS
