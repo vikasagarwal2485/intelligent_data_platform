@@ -442,6 +442,61 @@ only thing the consumer does** — it does not chain into Silver/Gold.
 - Every record is **tenant-stamped** at ingestion (`common/tenancy.py`), the
   leading partition column that guarantees physical isolation.
 
+#### The `idp-bronze` bucket: what's in it
+
+`idp-bronze` is the **Bronze layer's bucket**. It holds the raw, append-only
+record of everything ingested, as Iceberg tables. (Source files waiting to be
+published live in `idp-landing`; Silver and Gold have their own buckets,
+ADR-0008.) Every entity is one Iceberg table, `bronze.<entity>`, stored under
+`tables/<entity>/`. Here is `accounts` after its first landing:
+
+```
+idp-bronze/tables/accounts/
+├── data/                                         <- the records (Parquet)
+│   ├── tenant_id=tenant_a/ingest_date=2026-09-28/00000-1-02df54c1-….parquet
+│   └── tenant_id=tenant_b/ingest_date=2026-09-28/00000-0-02df54c1-….parquet
+└── metadata/                                     <- how to read them (Iceberg)
+    ├── 00000-8737….metadata.json                 table created (schema, location)
+    ├── 00001-9a9e….metadata.json                 partition spec added (tenant_id, ingest_date)
+    ├── 00002-0f16….metadata.json                 first append committed = CURRENT version
+    ├── snap-6417943028689728948-0-02df54c1-….avro   manifest list of snapshot 6417…
+    └── 02df54c1-…-m0.avro                        manifest: the data files that snapshot added
+```
+
+| Path | What it is |
+|---|---|
+| `data/tenant_id=<t>/ingest_date=<d>/` | **Partitions.** `tenant_id` comes first, so each tenant's records sit in their own files (physical tenant isolation, REQ-FND-02). `ingest_date` is the UTC day the batch landed. Readers filter on both without opening other tenants' or other days' files. |
+| `00000-<n>-<write-uuid>.parquet` | **Data files.** One file per partition per commit. `<n>` is the number of the write task that produced it (here `1` and `0`, one per tenant partition), and `<write-uuid>` ties the file to the commit that wrote it (the same uuid as that commit's manifest and manifest list). The columns are the landed record, plus `_ingested_at` (the UTC landing time) and `ingest_date`. |
+| `NNNNN-<uuid>.metadata.json` | **Table metadata versions.** Each commit writes a new version with the schema, the partition spec, the table properties and the snapshot history. The first landing makes three versions: create the table (`00000`), add the partition spec (`00001`), and append (`00002`). Later appends add one each. |
+| `snap-<snapshot-id>-<attempt>-<commit-uuid>.avro` | **Manifest list.** One per snapshot (commit). It lists that snapshot's manifests. |
+| `<commit-uuid>-m<k>.avro` | **Manifest.** It lists data files, with their partition values, row counts and column stats, so a query can skip files without opening them. |
+
+**How a reader finds the data.** The Iceberg catalog (the `iceberg` database on
+TimescaleDB; locally `data/lake/catalog.db`) records only one thing per table: the
+path of its *current* `metadata.json` (here `00002-…`). A reader follows it:
+current metadata → current snapshot → manifest list → manifests → the Parquet
+files. Nothing lists the directories. So:
+- **A commit is atomic.** New files are invisible until the catalog pointer moves
+  to the new `metadata.json`. A reader sees the table before or after an append,
+  never half of it.
+- **Old files stay until maintenance.** Every append adds files and a snapshot;
+  nothing is rewritten. `idp maintain` compacts small files and expires old
+  snapshots. Bronze records themselves are never deleted, and old objects can be
+  moved to a colder storage class (`make lake-archive-policy`).
+- **Bucket and catalog must match.** If the bucket is emptied but the catalog
+  isn't, the catalog points at deleted `metadata.json` files, and every stage fails
+  with `FileNotFoundError`. `make minio-reset` resets both together (see
+  `deploy/README.md`, Troubleshooting).
+- **Silver reads Bronze by snapshot.** Each `idp consume` (or `idp run` /
+  `idp migrate-lake`) appends one snapshot per entity. Incremental Silver
+  remembers the last Bronze snapshot it processed (its streaming checkpoint in
+  `idp-silver/_checkpoints/`), and next time reads only the files that later
+  snapshots added.
+
+To look inside: `make minio-ls` lists the objects. To read a table rather than its
+files, use Spark or `pyiceberg`, for example
+`catalog.read_table(cfg, "bronze", "accounts")` in `idp.common.catalog`.
+
 ### 4.2 Silver pipeline (batch vs stream)
 
 **Purpose:** turn raw per-entity records into clean, canonical, joinable,
