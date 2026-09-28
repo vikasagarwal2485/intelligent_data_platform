@@ -367,7 +367,7 @@ kubectl -n idp-app logs job/idp-silver          # silver counts
 kubectl -n idp-app logs job/idp-gold            # gold tables
 make kafka-ui                                   # browse topics/messages/schemas
 make minio-ls                                   # objects in idp-bronze / idp-silver / idp-gold
-make minio-reset                                # empty the lake buckets for a clean re-run
+make minio-reset                                # clean re-run: recreate the buckets AND clear the Iceberg catalog
 ```
 
 **Production (orchestrated Silver/Gold):**

@@ -169,7 +169,7 @@ minio-ls: ## List the landing + lake objects in MinIO (idp-landing / idp-bronze 
 	$(MC_SH) '$(MC_ENV) for b in idp-landing idp-bronze idp-silver idp-gold; do echo "== $$b =="; mc ls -r m/$$b/; done'
 
 .PHONY: minio-reset
-minio-reset: ## Empty the lake + landing buckets (idp-bronze/silver/gold/ml/landing) for a clean re-run
+minio-reset: ## Reset the lake for a clean re-run: recreate the buckets (idp-bronze/silver/gold/ml/landing) AND clear the Iceberg catalog
 	# Full RECREATE, not a shallow `rm -r`. `mc rm -r --force` does NOT remove
 	# object versions or delete markers, so on a versioned/suspended bucket it
 	# leaves `null`-version delete markers on the reset keys (e.g. credit_features/,
@@ -177,6 +177,13 @@ minio-reset: ## Empty the lake + landing buckets (idp-bronze/silver/gold/ml/land
 	# PUTs succeed but list/get return nothing. `mc rb --force` drops the bucket and
 	# ALL versions/markers/ILM; `mc mb` recreates it clean (unversioned by default).
 	$(MC_SH) '$(MC_ENV) for b in idp-bronze idp-silver idp-gold idp-ml idp-landing; do echo "recreating $$b"; mc rb --force m/$$b/ 2>/dev/null || true; mc mb --ignore-existing m/$$b; done; echo done'
+	# The lake's tables are registered in the Iceberg catalog (database `iceberg` on
+	# TimescaleDB), not in MinIO. Emptying the buckets alone leaves catalog rows
+	# pointing at deleted metadata files, and every stage then fails with
+	# FileNotFoundError on *.metadata.json. So forget the tables too; the next stage
+	# recreates them. (Silver's streaming checkpoints live in idp-silver and went
+	# with the bucket, so the next Silver run starts from all of Bronze.)
+	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform --reset
 
 .PHONY: minio-versions
 minio-versions: ## Diagnose hidden bucket state (versioning, delete markers, ILM) — a plain `ls` hides these

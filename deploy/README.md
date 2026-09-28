@@ -103,7 +103,8 @@ Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same dat
 
 - **The `idp-landing` bucket** holds the source files, laid out as
   `tenant=<id>/<entity>.json`. It's created by `install-infra.sh` and
-  `make minio-mkbuckets`, and emptied by `make minio-reset`. It's not a lake layer,
+  `make minio-mkbuckets`, and emptied by `make minio-reset` (which also clears the
+  lake's Iceberg catalog, see below). It's not a lake layer,
   so Bronze archiving and maintenance never touch it.
 - **Each step waits for the previous one,** and the chain **stops at the first
   failed Job** without sitting out a timeout.
@@ -129,6 +130,12 @@ Every stage pod gets the catalog from `IDP_CATALOG_TYPE=sql` and
   creates the `iceberg` database idempotently. The first stage creates the catalog
   tables. Tables live at `s3://idp-<layer>/tables/<table>`, and each layer
   namespace carries that location too.
+- **Resetting the lake is buckets plus catalog.** The tables are registered in the
+  `iceberg` database, not in MinIO. `make minio-reset` recreates the buckets **and**
+  clears the catalog entries (`lake-catalog.sh --reset`). Never empty the lake
+  buckets any other way (`mc rb`, the MinIO console) without also running
+  `bash deploy/platform/timescaledb/lake-catalog.sh idp-platform --reset`. See
+  Troubleshooting.
 - **Why not Nessie.** Nessie's REST catalog keeps only a table's current snapshot,
   and the incremental Silver checkpoints need the Bronze snapshot history. Nessie
   stays provisioned (in-memory) but is not on the lake path.
@@ -218,6 +225,22 @@ process, the Spark JVM. Check it and raise it live (no restart, state kept):
 docker inspect minikube --format '{{.HostConfig.Memory}}'   # bytes; 0 = no cap
 docker update --memory 12g --memory-swap 12g minikube
 ```
+
+**Stages fail with `FileNotFoundError: … /metadata/000NN-….metadata.json`**
+(e.g. `idp consume` in `to_bronze`, or `idp silver`): the lake buckets were emptied
+but the Iceberg catalog still lists the tables, so it points at metadata files that
+no longer exist. Typically this happens after a bucket reset done without the
+catalog, such as a `make minio-reset` from before the catalog step existed, or
+`mc rb`. Confirm and fix:
+```bash
+make minio-ls                                   # buckets empty ...
+kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -d iceberg \
+  -c "select table_namespace, table_name from iceberg_tables"   # ... but tables still listed
+make minio-reset                                # recreate buckets + clear the catalog, together
+```
+The data is already gone, so clearing the catalog loses nothing. The next
+`make stream` (or `stream-from-landing`) recreates the tables, and the next
+`make silver` starts from all of Bronze.
 
 **Strimzi entity-operator `OOMKilled` (exit 137)** (the `*-entity-operator` pod's
 topic-operator/user-operator containers): the Kafka CR now gives the topic
