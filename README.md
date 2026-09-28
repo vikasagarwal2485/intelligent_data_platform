@@ -539,6 +539,71 @@ the cluster under `s3://idp-silver/tables/`. The facts are partitioned by
 `(tenant_id, day(event time))`, and `dim_subscriber` by `tenant_id`. Each run
 commits atomically, so readers never see a partial write.
 
+#### The `idp-silver` bucket: what's in it
+
+`idp-silver` is the **Silver layer's bucket**: the curated, canonical, PII-tokenized
+tables that Gold, the ML stages and the MCP analytics read. It has two top-level
+folders:
+
+```
+idp-silver/
+├── tables/                          <- the four Silver Iceberg tables
+│   ├── dim_subscriber/              1 row per subscriber; rebuilt in full each run
+│   ├── fact_usage/                  voice + data usage events; incremental
+│   ├── fact_recharge/               recharges; incremental
+│   └── fact_fee_charge/             product fee charges; incremental
+└── _checkpoints/                    <- how far incremental Silver has read Bronze
+    ├── fact_usage/voice_events/     one checkpoint per (fact, Bronze source)
+    ├── fact_usage/data_events/
+    ├── fact_recharge/recharge_events/
+    └── fact_fee_charge/fee_charges/
+```
+
+**`tables/<table>/`** has the same Iceberg layout as Bronze (see the `idp-bronze`
+section above): `data/` holds Parquet files, and `metadata/` holds the
+`metadata.json` versions, manifest lists (`snap-….avro`) and manifests
+(`…-m0.avro`). What differs in Silver:
+
+| | `dim_subscriber` | `fact_usage` / `fact_recharge` / `fact_fee_charge` |
+|---|---|---|
+| Partitioning | `tenant_id` | `tenant_id`, then **day** of the event time (`started_at_day`, `created_at_day`, `charged_at_day`) |
+| Example path | `data/tenant_id=tenant_a/00000-13-…-00002.parquet` | `data/tenant_id=tenant_a/created_at_day=2026-01-03/00164-1054-…-00002.parquet` |
+| How it's written | **Rebuilt in full** from the Bronze reference tables each run: an `overwrite` snapshot replaces the tenants' rows | **Incremental**: each run `MERGE`s only the new Bronze records, inserting a record only if its `(tenant_id, id)` isn't there yet. Each run adds an `append` snapshot, with no rewrite of existing files. |
+| Why this partitioning | One small row per subscriber; per-tenant reads | The day partition lets feature windows (7/30/90 days) and the MCP time-range tools skip whole days |
+
+- **File names.** Spark writes these files, so the names differ from Bronze's
+  (which pyiceberg writes): `<spark partition>-<task>-<write id>-<n>.parquet`.
+  Files from one commit share the write id.
+- **The first snapshot is empty.** A table's first snapshot is an empty `append`
+  (`rows +0`). The table is created from the output schema, then the first batch
+  is merged in. `make lake-table-show TABLE=silver.fact_recharge` shows it.
+
+**`_checkpoints/<fact>/<source>/`** is Spark Structured Streaming's bookkeeping for
+incremental Silver. It isn't table data: it records which **Bronze** snapshots have
+already been merged into that fact.
+
+| File | Content (example from `fact_recharge/recharge_events`) |
+|---|---|
+| `metadata` | the stream's id |
+| `sources/0/offsets/0` | where the stream **started**: the first Bronze snapshot it saw, `{"snapshot_id": 323716817858676295, "position": 0}` |
+| `offsets/<n>` | the end point of batch `n`: the Spark settings, then `{"snapshot_id": 323716817858676295, "position": 2}`. That's the current snapshot of `bronze.recharge_events`; `position` 2 means both of its files have been read |
+| `commits/<n>` | written only **after** batch `n`'s `MERGE` committed. An `offsets/<n>` without `commits/<n>` means the batch failed, and the next run redoes it (exactly once) |
+
+On the next `idp silver`, each stream resumes after its last committed offset and
+reads only the Bronze snapshots appended since. Other consequences:
+- **Checkpoints and tables go together.** `idp silver --full-refresh` deletes the
+  checkpoints and empties the facts, then replays all of Bronze. Deleting
+  checkpoints by hand without emptying the facts isn't harmful, since the `MERGE`
+  skips existing keys, but it makes the next run re-read all of Bronze.
+- **Maintenance respects the checkpoints.** `idp maintain` never expires a Bronze
+  snapshot that one of these offsets still references (REQ-ORC-06).
+- **One Silver run at a time.** Only one streaming query may use a checkpoint at
+  once. That's why the Airflow features DAG runs with `max_active_runs=1`, and why
+  a manual `make silver` shouldn't overlap it.
+- **A bucket reset loses them too.** `make minio-reset` recreates `idp-silver`,
+  which removes the checkpoints, and clears the catalog. The next Silver run then
+  starts from all of Bronze.
+
 ### 4.3 Gold pipeline (batch vs stream)
 
 **Purpose:** analytics-ready, per-subscriber tables for ML and serving. The stage
