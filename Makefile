@@ -139,6 +139,18 @@ trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 lake-catalog: ## Create the lake's Iceberg JDBC catalog database (`iceberg` in TimescaleDB) — idempotent
 	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform
 
+.PHONY: lake-catalog-show
+lake-catalog-show: ## Show what the Iceberg catalog (TimescaleDB `iceberg` DB) stores: every table's current metadata.json + namespace properties (read-only)
+	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform
+
+.PHONY: lake-table-show
+lake-table-show: ## Decode one lake table's current Iceberg metadata from MinIO: schema, partitioning, snapshots (read-only). TABLE=bronze.accounts
+	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform table "$(TABLE)"
+
+.PHONY: lake-catalog-psql
+lake-catalog-psql: ## Open a psql shell on the Iceberg catalog database (`iceberg`): tables iceberg_tables, iceberg_namespace_properties
+	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform psql
+
 .PHONY: nessie-fix
 nessie-fix: ## Re-apply tuned Nessie values (in-memory store, fixes CrashLoop)
 	bash deploy/platform/nessie-tune.sh idp-platform

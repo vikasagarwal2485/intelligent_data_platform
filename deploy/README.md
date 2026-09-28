@@ -130,6 +130,12 @@ Every stage pod gets the catalog from `IDP_CATALOG_TYPE=sql` and
   creates the `iceberg` database idempotently. The first stage creates the catalog
   tables. Tables live at `s3://idp-<layer>/tables/<table>`, and each layer
   namespace carries that location too.
+- **Look inside the catalog (read-only):**
+  - `make lake-catalog-show` lists every table's current `metadata.json` and the
+    namespace locations. That's all the catalog database stores.
+  - `make lake-table-show TABLE=bronze.accounts` decodes that table's
+    `metadata.json` from MinIO: schema, partitioning, properties and snapshots.
+  - `make lake-catalog-psql` opens a SQL shell on the `iceberg` database.
 - **Resetting the lake is buckets plus catalog.** The tables are registered in the
   `iceberg` database, not in MinIO. `make minio-reset` recreates the buckets **and**
   clears the catalog entries (`lake-catalog.sh --reset`). Never empty the lake
