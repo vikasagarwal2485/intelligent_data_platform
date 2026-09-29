@@ -90,6 +90,9 @@ echo ">> lake catalog (Iceberg JDBC catalog: database 'iceberg' in TimescaleDB)"
 bash "${HERE}/timescaledb/lake-catalog.sh" "${NS}"
 
 echo ">> identity (Keycloak, upstream image, plain manifest)"
+# the realm `idp` (REQ-SRV-03), imported at every Keycloak start
+kubectl create configmap keycloak-realm -n "${NS}" \
+  --from-file=idp-realm.json="${HERE}/keycloak/idp-realm.json" --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -n "${NS}" -f "${HERE}/keycloak/keycloak.yaml"
 
 echo ">> streaming (Apache Kafka via Strimzi operator)"

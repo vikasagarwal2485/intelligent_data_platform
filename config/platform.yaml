@@ -134,6 +134,20 @@ ml:
   train_max_rows: 2000000
   sample_seed: 42
 
+# Scoring-API authentication (REQ-SRV-03). When enabled, every endpoint except
+# GET /health needs a Bearer JWT from the Keycloak realm `idp`, validated against the
+# realm's JWKS (signature, iss, aud, exp); the caller's tenant is the `tenant_claim`
+# claim, and a body/path tenant_id that differs gets 403. Off here for local dev and
+# tests; both cluster overlays set IDP_AUTH_ENABLED=true.
+# Env: IDP_AUTH_ENABLED, IDP_AUTH_ISSUER, IDP_AUTH_AUDIENCE, IDP_AUTH_TENANT_CLAIM,
+# IDP_AUTH_LEEWAY_SECONDS.
+auth:
+  enabled: false
+  issuer: "http://keycloak.idp-platform.svc:8080/realms/idp"
+  audience: "idp-scoring-api"
+  tenant_claim: "tenant_id"
+  leeway_seconds: 30
+
 # Model registry (REQ-ML-04). With a tracking URI, `train` logs each run to MLflow,
 # registers `idp-credit`/`idp-fraud` versions and moves the `champion` alias to
 # versions that pass the gates below; Score and the scoring API load `champion`

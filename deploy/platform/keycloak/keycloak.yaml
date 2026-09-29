@@ -1,7 +1,12 @@
 # Keycloak (identity / RBAC, plan 1.5) using the official quay.io image in dev
 # mode (H2, start-dev) - free to pull, fine for a local prototype. For EKS,
 # switch to a production chart with an external DB and TLS.
-# Apply with:  kubectl apply -n idp-platform -f deploy/infra/keycloak.yaml
+#
+# The realm `idp` (REQ-SRV-03) is imported at every start from the ConfigMap
+# `keycloak-realm` (deploy/platform/keycloak/idp-realm.json): the dev store is
+# in-container H2, so the import re-applies after each restart.
+# Apply with:  make keycloak   (creates the ConfigMap from the JSON, applies this,
+#                               and restarts the pod so the realm is re-imported)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,7 +23,7 @@ spec:
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.0   # quay.io, free
-          args: ["start-dev"]
+          args: ["start-dev", "--import-realm"]
           env:
             - name: KEYCLOAK_ADMIN
               value: "admin"
@@ -26,6 +31,11 @@ spec:
               value: "admin"               # dev only; use External Secrets on EKS
             - name: KC_HEALTH_ENABLED
               value: "true"
+            # Tokens carry this issuer however they are requested (in-cluster, or
+            # through `make keycloak-token`'s port-forward), so `iss` always matches
+            # the scoring API's IDP_AUTH_ISSUER.
+            - name: KC_HOSTNAME
+              value: "http://keycloak.idp-platform.svc:8080"
             # Cap the JVM so total RSS (heap + metaspace + code cache + direct
             # buffers) stays under the memory limit. Without this the Quarkus JVM
             # sizes its heap at ~70% of the cgroup limit and the rest pushes the
@@ -57,9 +67,17 @@ spec:
               port: 9000
             periodSeconds: 15
             failureThreshold: 5
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
           resources:
             requests: { cpu: "250m", memory: 768Mi }
             limits: { cpu: "1", memory: 1536Mi }
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
 ---
 apiVersion: v1
 kind: Service

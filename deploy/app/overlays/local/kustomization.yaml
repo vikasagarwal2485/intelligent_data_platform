@@ -23,3 +23,14 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: Never
+      # Authentication is always on in a cluster (REQ-SRV-03): tokens from the
+      # in-cluster Keycloak realm `idp` (KC_HOSTNAME pins this issuer).
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: IDP_AUTH_ENABLED, value: "true"}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: IDP_AUTH_ISSUER, value: "http://keycloak.idp-platform.svc:8080/realms/idp"}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: IDP_AUTH_AUDIENCE, value: "idp-scoring-api"}

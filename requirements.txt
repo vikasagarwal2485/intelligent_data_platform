@@ -19,3 +19,5 @@ trino==0.340.0
 mlflow-skinny==3.14.0
 boto3>=1.43.3,<1.43.47
 botocore>=1.43.3,<1.43.47
+# Scoring-API auth (REQ-SRV-03): Keycloak JWT validation via JWKS.
+PyJWT[crypto]>=2.8,<3

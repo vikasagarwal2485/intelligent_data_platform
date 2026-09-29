@@ -75,7 +75,7 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **Nessie** | Git-like Iceberg catalog | Provisioned (not the lake's catalog: its REST catalog keeps only the current snapshot; ADR-0028) |
 | **Trino** | Distributed SQL over the lake for ad-hoc queries | **Active** (query Silver/Gold) |
 | **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
-| **Keycloak** | OIDC identity for multi-tenant RBAC | Provisioned (RBAC design, §1.5) |
+| **Keycloak** | OIDC identity: realm `idp` issues the scoring API's tenant-scoped tokens | **Active** (`make keycloak` + `make keycloak-token`) |
 | **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | Provisioned (DAG in `pipelines/airflow`) |
 | **MLflow** | Experiment tracking + model registry (versions, gated `champion` alias) | **Active** (`make mlflow` + `make mlflow-ui`) |
 | **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
@@ -759,16 +759,32 @@ namespace `idp-app`) that computes a score from features using the loaded models
 single indexed lookup instead of recomputing — the plan's Gold serving layer
 (Q4/Q6). The `GET /serving/...` endpoint above reads from it.
 
-Every request carries a `tenant_id` (from the validated OIDC token in production,
-via Keycloak) and is served only within that tenant's scope — tenant isolation at
-the edge. Models are loaded lazily; scoring endpoints return `503` until models
-are trained, and the serving endpoint returns `503` until TimescaleDB is enabled.
+**Tenant isolation at the edge (REQ-SRV-03).** In the cluster every endpoint except
+`/health` needs a Bearer access token from the Keycloak realm `idp`. The API checks
+its signature against the realm's keys (JWKS), its issuer, audience
+(`idp-scoring-api`) and expiry, and serves only the token's `tenant_id` claim:
+- no or an invalid token → `401`; a valid token without `tenant_id` → `403`
+- a body or path `tenant_id` that differs from the token's → `403` (the body's
+  `tenant_id` may be omitted; the token decides)
+- Keycloak unreachable → `503`, never an unauthenticated pass-through
 
-Run locally: `make serve` then:
+Models are loaded lazily; scoring endpoints return `503` until models are trained,
+and the serving endpoint returns `503` until TimescaleDB is enabled.
+
+Run locally: `make serve` (auth is off locally, `auth.enabled: false`, so the body's
+`tenant_id` is used) then:
 ```bash
 curl -s localhost:8000/health
 curl -s -X POST localhost:8000/credit-limit -H 'content-type: application/json' \
   -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"recharge_avg_amount":40,"account_tenure_days":500,"recharge_success_rate":0.95}}'
+```
+In the cluster, get a tenant's token first (`deploy/README.md`, "Calling the scoring
+API"):
+```bash
+TOKEN=$(make -s keycloak-token TENANT=tenant_a)
+kubectl -n idp-app port-forward svc/scoring-api 18000:80 &
+curl -s -X POST localhost:18000/credit-limit -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"service_id":"tok_demo","features":{"recharge_avg_amount":40}}'
 ```
 Inspect the TimescaleDB serving tables: `make timescale-psql`.
 

@@ -81,6 +81,23 @@ class PlatformConfig:
         return self.raw.get("fraud", {})
 
     @property
+    def auth(self) -> dict[str, Any]:
+        """API authentication (REQ-SRV-03): Keycloak-issued Bearer JWTs, with the
+        caller's tenant from a token claim. Off by default (local dev and tests);
+        the cluster overlays turn it on with IDP_AUTH_ENABLED=true."""
+        a = {"enabled": False, "issuer": "", "audience": "idp-scoring-api",
+             "tenant_claim": "tenant_id", "leeway_seconds": 30, **self.raw.get("auth", {})}
+        env = os.environ
+        if "IDP_AUTH_ENABLED" in env:
+            a["enabled"] = env["IDP_AUTH_ENABLED"].strip().lower() in ("1", "true", "yes", "on")
+        a["enabled"] = bool(a["enabled"])
+        a["issuer"] = env.get("IDP_AUTH_ISSUER", a["issuer"] or "")
+        a["audience"] = env.get("IDP_AUTH_AUDIENCE", a["audience"])
+        a["tenant_claim"] = env.get("IDP_AUTH_TENANT_CLAIM", a["tenant_claim"])
+        a["leeway_seconds"] = int(env.get("IDP_AUTH_LEEWAY_SECONDS", a["leeway_seconds"]))
+        return a
+
+    @property
     def mlflow(self) -> dict[str, Any]:
         """Model registry (REQ-ML-04): MLflow when ``tracking_uri`` is set, else the
         object-store fallback."""

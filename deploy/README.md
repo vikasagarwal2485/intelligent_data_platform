@@ -359,9 +359,58 @@ work while it restarts; the entity operator only reconciles `KafkaTopic` CRs.
 **Keycloak `OOMKilled` (exit 137), CrashLoopBackOff**: the Quarkus JVM sized its
 heap from the cgroup limit and total RSS exceeded the memory limit. The manifest
 caps it with `JAVA_OPTS_APPEND=-XX:MaxRAMPercentage=50.0 -XX:MaxMetaspaceSize=256m`;
-re-apply it (`kubectl apply -f deploy/platform/keycloak/keycloak.yaml`). Keycloak
-is **optional** for the runnable prototype (RBAC design only) — on a memory-tight
-node, `kubectl -n idp-platform scale deploy/keycloak --replicas=0` frees ~1.5Gi.
+re-apply it with `make keycloak`. Keycloak is **required** by the scoring API in the
+cluster (it issues the tokens, and the API fetches its signing keys): with Keycloak
+scaled down, scoring calls get `503` (auth backend unavailable) once the API's key
+cache expires.
+
+### Calling the scoring API (Keycloak tokens, REQ-SRV-03)
+
+**Breaking change:** in the cluster (both overlays) the scoring API requires a
+Bearer token on every endpoint except `GET /health`; an unauthenticated call gets
+`401`. Local `make serve` is unchanged (auth off by default).
+
+**The realm.** `make keycloak` loads `deploy/platform/keycloak/idp-realm.json` into
+the ConfigMap `keycloak-realm` and restarts Keycloak, which imports realm `idp` at
+every start (its dev store is in-container, so the import re-applies after each
+restart). `KC_HOSTNAME=http://keycloak.idp-platform.svc:8080` pins the issuer, so a
+token has `iss = http://keycloak.idp-platform.svc:8080/realms/idp` however it was
+requested, which is what the API expects (`IDP_AUTH_ISSUER`). The realm holds (dev
+secrets and passwords, never for EKS):
+
+| Client / user | For | Token's `tenant_id` |
+|---|---|---|
+| `idp-tenant-a` / `idp-tenant-b` (client credentials; secrets `tenant-a-dev-secret` / `tenant-b-dev-secret`) | machine callers of one tenant | hard-coded `tenant_a` / `tenant_b` |
+| `idp-dev-cli` (public, password grant) with users `alice` / `bob` (password `dev-password`) | people | the user's `tenant_id` attribute (`tenant_a` / `tenant_b`) |
+| `idp-scoring-api` | the API itself (the audience every token above carries) | — |
+
+**Get a token and call each endpoint:**
+```bash
+TOKEN=$(make -s keycloak-token TENANT=tenant_a)      # client credentials of idp-tenant-a
+kubectl -n idp-app port-forward svc/scoring-api 18000:80 &
+AUTH="Authorization: Bearer $TOKEN"
+
+curl -s localhost:18000/health                                               # open
+curl -s -X POST localhost:18000/credit-limit -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"service_id":"tok_demo","features":{"recharge_avg_amount":40,"account_tenure_days":500}}'
+curl -s -X POST localhost:18000/fraud-score -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"service_id":"tok_demo","features":{}}'
+curl -s localhost:18000/serving/credit_scores/tenant_a/<service_id> -H "$AUTH"
+```
+The body's `tenant_id` can be omitted (the token's is used); if given it must match.
+A person's token instead (e.g. `alice`, tenant_a):
+```bash
+kubectl -n idp-platform port-forward svc/keycloak 18180:8080 &
+curl -s -d grant_type=password -d client_id=idp-dev-cli -d username=alice -d password=dev-password \
+  http://127.0.0.1:18180/realms/idp/protocol/openid-connect/token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+```
+Tokens live 5 minutes. **Responses:** `401` no, expired or forged token; `403`
+token without `tenant_id`, or a body/path tenant other than the token's; `503` models
+not trained, TimescaleDB off, or Keycloak unreachable.
+
+**Rollback (dev only, never on EKS):** set `IDP_AUTH_ENABLED=false` on the
+`scoring-api` Deployment. The aws overlay expects the production Keycloak's issuer
+(`https://<KEYCLOAK_HOST>/realms/idp`) and real client secrets from a Secret.
 
 **Postgres/TimescaleDB `PANIC: could not locate a valid checkpoint record`**: WAL
 corruption from an ungraceful kill (usually a node OOM). The DB holds only

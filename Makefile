@@ -132,6 +132,20 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/platform/trino-tune.sh idp-platform
 
+.PHONY: keycloak
+keycloak: ## Apply Keycloak with the `idp` realm (ConfigMap from deploy/platform/keycloak/idp-realm.json) and restart it to re-import
+	kubectl create configmap keycloak-realm -n idp-platform \
+	  --from-file=idp-realm.json=deploy/platform/keycloak/idp-realm.json --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -n idp-platform -f deploy/platform/keycloak/keycloak.yaml
+	kubectl -n idp-platform scale deploy/keycloak --replicas=1
+	kubectl -n idp-platform rollout restart deploy/keycloak
+	kubectl -n idp-platform rollout status deploy/keycloak --timeout=600s
+
+TENANT ?= tenant_a
+.PHONY: keycloak-token
+keycloak-token: ## Print a dev access token for TENANT (default tenant_a): TOKEN=$$(make -s keycloak-token TENANT=tenant_b)
+	@bash deploy/platform/keycloak/token.sh $(TENANT) idp-platform
+
 .PHONY: mlflow
 mlflow: ## Install/upgrade the MLflow model registry (pinned chart; creates its `mlflow` DB in TimescaleDB)
 	bash deploy/platform/mlflow/install.sh idp-platform

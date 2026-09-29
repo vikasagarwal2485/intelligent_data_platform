@@ -1,9 +1,10 @@
 """FastAPI scoring service (plan 5.6 / 6.6).
 
-Exposes on-demand credit-limit and fraud scoring. Every request must carry a
-``tenant_id`` (in production this is derived from the validated OIDC token via
-Keycloak; here it is an explicit field) and the service only ever returns a
-score for that tenant's subject - enforcing tenant isolation at the edge.
+Exposes on-demand credit-limit and fraud scoring and the precomputed serving
+lookup. With ``auth.enabled`` (every cluster deployment), each endpoint except
+``/health`` needs a Keycloak Bearer token and serves only the token's tenant: a
+``tenant_id`` in the body or path that differs is a 403 (``serving/auth.py``,
+REQ-SRV-03). With auth off (local dev, tests), the request's ``tenant_id`` is used.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from idp.common.config import load_config
@@ -20,10 +21,12 @@ from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
 from idp.ml.registry import model_store
+from idp.serving.auth import scoped_tenant, tenant_dependency
 
 
 class ScoreRequest(BaseModel):
-    tenant_id: str = Field(..., description="Caller's tenant; enforces isolation")
+    tenant_id: str = Field("", description="Caller's tenant. With auth on it may be "
+                           "omitted (the token's tenant is used) and must match it if given")
     service_id: str = Field(..., description="Tokenized subscriber id (MSISDN token)")
     features: dict[str, float] = Field(default_factory=dict)
 
@@ -42,6 +45,8 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
     # The model store's champion (REQ-ML-04): MLflow `champion`, or the object
     # store's latest file; an explicit artifacts_dir (tests) is a local object store.
     store = model_store(cfg, artifacts_dir=artifacts_dir)
+    # The caller's tenant from the Bearer token (None when auth is off).
+    current_tenant = tenant_dependency(cfg.auth)
     refresh = float(cfg.mlflow.get("refresh_seconds", 60))
     # per model: (version, model, time of the last champion check)
     cache: dict[str, tuple[str | None, Any, float]] = {}
@@ -79,7 +84,8 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/credit-limit")
-    def credit_limit(req: ScoreRequest) -> dict[str, Any]:
+    def credit_limit(req: ScoreRequest, token_tenant: str | None = Depends(current_tenant)) -> dict[str, Any]:
+        req.tenant_id = scoped_tenant(req.tenant_id, token_tenant)
         frame = _to_frame(req, CREDIT_FEATURES)
         model = _credit()
         result = model.recommend_limit(frame).iloc[0].to_dict()
@@ -87,18 +93,22 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         return result
 
     @app.post("/fraud-score")
-    def fraud_score(req: ScoreRequest) -> dict[str, Any]:
+    def fraud_score(req: ScoreRequest, token_tenant: str | None = Depends(current_tenant)) -> dict[str, Any]:
+        req.tenant_id = scoped_tenant(req.tenant_id, token_tenant)
         frame = _to_frame(req, FRAUD_FEATURES)
         result = _fraud().score(frame).iloc[0].to_dict()
         return result
 
     @app.get("/serving/{table}/{tenant_id}/{service_id}")
-    def serving_lookup(table: str, tenant_id: str, service_id: str) -> dict[str, Any]:
+    def serving_lookup(table: str, tenant_id: str, service_id: str,
+                       token_tenant: str | None = Depends(current_tenant)) -> dict[str, Any]:
         """Low-latency lookup of a PRECOMPUTED Gold row from TimescaleDB.
 
         e.g. GET /serving/credit_scores/tenant_a/tok_abc — returns the score the
-        Gold+publish stages materialized, without recomputing from features.
+        Gold+publish stages materialized, without recomputing from features. With
+        auth on, the path's tenant must be the token's.
         """
+        tenant_id = scoped_tenant(tenant_id, token_tenant)
         if not cfg.timescale.get("enabled"):
             raise HTTPException(503, "serving DB (TimescaleDB) not enabled")
         if table not in ("credit_scores", "fraud_scores", "credit_features", "fraud_features"):

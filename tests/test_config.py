@@ -7,7 +7,7 @@ from idp.common.config import load_config
 def test_config_exposes_all_sections():
     # SCN-FND-01.1
     cfg = load_config()
-    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "mlflow", "timescale",
+    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "mlflow", "auth", "timescale",
                     "spark", "synthetic", "features", "credit", "fraud"):
         assert getattr(cfg, section) is not None, section
 
@@ -103,3 +103,19 @@ def test_mlflow_registry_via_env(monkeypatch):
     assert cfg.credit["min_auc"] == 0.55 and cfg.fraud["min_pr_auc_lift"] == 1.5
     monkeypatch.setenv("IDP_MLFLOW_TRACKING_URI", "http://mlflow.idp-platform.svc:5000")
     assert load_config().mlflow["tracking_uri"] == "http://mlflow.idp-platform.svc:5000"
+
+
+def test_auth_defaults_off_and_env(monkeypatch):
+    # REQ-SRV-03 — auth off for local dev/tests; the cluster overlays enable it via env
+    for var in ("IDP_AUTH_ENABLED", "IDP_AUTH_ISSUER", "IDP_AUTH_AUDIENCE"):
+        monkeypatch.delenv(var, raising=False)
+    a = load_config().auth
+    assert a["enabled"] is False and a["tenant_claim"] == "tenant_id" and a["leeway_seconds"] == 30
+    assert a["issuer"] == "http://keycloak.idp-platform.svc:8080/realms/idp"
+    monkeypatch.setenv("IDP_AUTH_ENABLED", "true")
+    monkeypatch.setenv("IDP_AUTH_ISSUER", "http://kc/realms/x")
+    monkeypatch.setenv("IDP_AUTH_AUDIENCE", "aud-x")
+    a = load_config().auth
+    assert (a["enabled"], a["issuer"], a["audience"]) == (True, "http://kc/realms/x", "aud-x")
+    monkeypatch.setenv("IDP_AUTH_ENABLED", "false")
+    assert load_config().auth["enabled"] is False
