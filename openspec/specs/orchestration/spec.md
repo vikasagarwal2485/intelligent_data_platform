@@ -164,6 +164,7 @@ pandas SHALL be used only:
 - for model training, on a bounded sample (REQ-ML-09)
 - by the synthetic data generator
 - by the Python Bronze landing, per consumed batch
+- to shape the bounded results of analytics queries (REQ-MCP-09)
 
 #### Scenario: SCN-ORC-05.1 — Same code in every entrypoint
 - **WHEN** Silver is built once with `idp silver` locally and once by the Silver

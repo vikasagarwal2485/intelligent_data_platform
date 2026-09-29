@@ -192,7 +192,7 @@ Consequences. Status: `Accepted` unless noted.
   patch lives in app *overlays* (not the app base) so local vs AWS stay distinct.
 
 ### ADR-0021 — MCP analytics tools read Silver via pandas, stdio server
-- **Status:** Accepted (2026-07-19)
+- **Status:** Superseded by ADR-0030 (2026-09-29); accepted 2026-07-19
 - **Context:** REQ-MCP-01…06 expose the lake to AI agents as five read-only,
   tenant-scoped analytics tools. Two questions: what the tools read from, and how
   they are served.
@@ -415,3 +415,51 @@ Consequences. Status: `Accepted` unless noted.
     `TIMESTAMP` column. The lake keeps the time zone.
   - Model loading goes through one seam, `transforms.scoring.load_scoring_models`,
     which a model registry replaces later.
+
+### ADR-0030 — MCP analytics tools query the lake through Trino as a read-only identity
+- **Status:** Accepted (2026-09-29) — supersedes ADR-0021
+- **Context:** ADR-0021's tools read each tenant's tables into pandas in the MCP
+  process. After ADR-0028 that meant `pyiceberg` scans with a tenant filter, but still
+  the whole tenant slice in memory (694,859 usage rows at 10× volume), and read-only
+  was only a property of the code, with lake credentials on the operator's host.
+  Trino 480 was installed but had no catalogs.
+- **Decision:**
+  - **Trino `lake` catalog** on the lake's Iceberg JDBC catalog (the TimescaleDB
+    `iceberg` database), with native S3 to MinIO. The catalog name is pinned to
+    `lake` (`catalog.name`, `IDP_CATALOG_NAME`) instead of a hash of the connection
+    URI, so Spark, `pyiceberg` and Trino address the same rows and a password
+    rotation can't change it; the existing rows were renamed once.
+  - **Read-only identity.** File-based access control gives `idp-mcp` `SELECT` on
+    `lake.silver` and `lake.gold` only; `admin` may do anything, other users
+    nothing. The engine refuses writes, DDL and Bronze reads.
+  - **Tools as SQL.** Each tool runs a few queries through `mcp.sql` with DB-API `?`
+    binding: the tenant, `sensitivity` and `limit` are always parameters, and table
+    and column names are code constants (granularity through an allow-list).
+    Filtering, grouping, sums, histograms and rank statistics run in Trino over the
+    tenant's partitions; Python only shapes the grouped results. Every result keeps
+    `tenant_id` and passes through `scope_to_tenant`.
+  - **Exact rank statistics.** Medians, the anomaly MAD and percentiles are exact,
+    from window-function order statistics, interpolated as numpy does. REQ-MCP-09
+    allows ±1% rank error, but Trino's T-Digest `approx_percentile` exceeded it on
+    small or discrete data.
+  - **Error contract kept:** unknown tenant → `available_tenants` +
+    `action_required`; unreachable engine or access denied → `error` + `source`
+    (the Trino endpoint); a table not written yet → empty.
+  - **Testing.** The pandas implementations are frozen as the oracle
+    (`tests/mcp_reference.py`). Unit tests use a fake query engine; `pytest -m trino`
+    builds a lake through the real stages in a compose stack (Trino + Postgres +
+    MinIO, the cluster's catalog file and rules) and compares every tool with the
+    oracle, the IO plan's tenant constraint, the rows fetched, and the refused writes.
+- **Consequences:**
+  - The MCP process holds only aggregates, and the host needs only Trino
+    (`make trino-api`, 127.0.0.1:8085), no lake credentials. `make mcp-config-minio`
+    is gone.
+  - Trino is now a runtime dependency of the analytics surface. Its coordinator
+    (768M heap, about 0.9 GB resident) competes with Spark stages on the 12 GB
+    minikube node, and its JDBC catalog adds Postgres connections.
+  - **Dev authentication is header-based** (`X-Trino-User`) inside the cluster
+    network, so a client can claim any user; access control still limits even a
+    spoofed `idp-mcp` to reads. Production needs TLS plus password or OIDC
+    authentication, and per-end-user row-level security stays out of scope.
+  - The official MinIO images are no longer publicly pullable; the test stack uses
+    Bitnami's frozen legacy build of the cluster's MinIO commit.

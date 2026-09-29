@@ -16,11 +16,14 @@ deploy/
     argocd/                 #   GitOps Applications for EKS (platform base + app)
     kafka/                  #   Strimzi Kafka cluster, schema registry, topics, admin UI
     keycloak/  timescaledb/ #   per-service plain manifests
-    trino/  nessie/         #   per-service tuned Helm values
+    trino/  nessie/         #   per-service tuned Helm values; trino/ also holds the `lake`
+                            #   catalog (lake.properties) and access rules (rules.json)
     airflow/                #   Airflow values, RBAC, DAG image Dockerfile
     monitoring/             #   Prometheus/Grafana values, dashboards, Kafka PodMonitor
     install-infra.sh        #   one-shot platform install (Helm repos + services)
     strimzi-tune.sh  trino-tune.sh  nessie-tune.sh   # self-healing repair scripts
+  dev/                      # local test stacks: trino-compose.yaml (Trino + Postgres + MinIO
+                            #   for the MCP integration tests, `make mcp-trino-test`)
   app/                      # APPLICATION TEAM — workloads on the platform
     deployment/             #   scoring-api base (Deployment/Service + kustomization)
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
@@ -257,8 +260,32 @@ Run `minikube status`, `minikube update-context`, and increase resources.
 reset by peer`, startup/liveness probe failures): the chart defaults to an 8G
 heap + worker pods, too big for a small node.
 ```bash
-make trino-fix        # coordinator-only, ~1G heap, auto-recovers stuck releases
+make trino-fix        # coordinator-only, 768M heap, auto-recovers stuck releases
 ```
+
+**Trino and the MCP tools.** Trino serves the MCP analytics tools (ADR-0030). Its
+`lake` catalog is an Iceberg JDBC catalog on the TimescaleDB `iceberg` database
+(catalog name `lake`, the rows the stages commit) with native S3 to MinIO:
+`deploy/platform/trino/lake.properties`, credentials from the `timescaledb` and
+`minio` Secrets. File-based access control (`deploy/platform/trino/rules.json`)
+gives the MCP user `idp-mcp` `SELECT` on `lake.silver` and `lake.gold` only; `admin`
+may do anything, every other user nothing. `make trino-fix` installs both files
+(`--set-file`), and `make trino-api` forwards Trino to `127.0.0.1:8085` for the host
+MCP server. Check it:
+```bash
+make trino-api &                                   # 127.0.0.1:8085
+make mcp-smoke                                     # every tool, both tenants
+```
+- *`Access Denied: Cannot access catalog lake`* — the client isn't `idp-mcp`
+  (or `admin`); check `IDP_TRINO_USER`.
+- *`relation "iceberg_tables" does not exist`* — the catalog database is empty; run
+  a stage first (the stages create the catalog tables), or `make lake-catalog`.
+- *`TABLE_NOT_FOUND` / empty results after a catalog change* — the rows must carry
+  `catalog_name = lake` (`make lake-catalog-show`; `make lake-catalog-rename` once).
+- **Memory.** The coordinator uses about 0.9 GB. On the 12 GB minikube node, run
+  `make mk-check` before a Spark stage with Trino up; if it fails, scale Trino down
+  for the stage (`kubectl -n idp-platform scale deploy/trino-coordinator --replicas=0`)
+  or raise the node cap.
 
 **Nessie CrashLoopBackOff**: the chart can default to a version store needing an
 external DB, or OOM on too small a limit.

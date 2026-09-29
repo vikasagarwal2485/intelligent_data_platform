@@ -13,7 +13,10 @@ typed object, and SHALL allow environment variables to override select values:
 - Kafka: `IDP_KAFKA_BOOTSTRAP`, `IDP_SCHEMA_REGISTRY`
 - object storage: `IDP_S3_ENDPOINT`, `IDP_S3_ACCESS_KEY`, `IDP_S3_SECRET_KEY`,
   `IDP_S3_BUCKET_PREFIX`
-- the lake's Iceberg catalog: `IDP_CATALOG_TYPE`, `IDP_CATALOG_URI`
+- the lake's Iceberg catalog: `IDP_CATALOG_TYPE`, `IDP_CATALOG_URI`,
+  `IDP_CATALOG_NAME`
+- the SQL query engine used by the analytics tools: `IDP_TRINO_HOST`,
+  `IDP_TRINO_PORT`, `IDP_TRINO_USER`, `IDP_TRINO_CATALOG`
 - the TimescaleDB serving store: `IDP_TS_HOST`, `IDP_TS_PORT`, `IDP_TS_DB`,
   `IDP_TS_USER`, `IDP_TS_PASSWORD`
 - the Spark runtime: `IDP_SPARK_MASTER`, `IDP_SPARK_DRIVER_MEMORY`
@@ -22,7 +25,8 @@ typed object, and SHALL allow environment variables to override select values:
 #### Scenario: SCN-FND-01.1 — Load config
 - **WHEN** `load_config()` is called with no argument
 - **THEN** it returns a config exposing `tenants`, `storage`, `kafka`, `s3`,
-  `catalog`, `timescale`, `spark`, `synthetic`, `features`, `credit`, and `fraud`
+  `catalog`, `lake`, `trino`, `timescale`, `spark`, `synthetic`, `features`,
+  `credit`, and `fraud`
 
 #### Scenario: SCN-FND-01.2 — S3 mode via env
 - **WHEN** the environment sets `IDP_S3_ENDPOINT`
@@ -44,6 +48,18 @@ typed object, and SHALL allow environment variables to override select values:
 - **THEN** `cfg.catalog` carries them, and every lake reader and writer uses that
   catalog; **AND WHEN** neither is set **THEN** the local file-based (SQLite)
   catalog under the local lake root is used
+
+#### Scenario: SCN-FND-01.6 — Query engine via env
+- **WHEN** the environment sets `IDP_TRINO_HOST` and `IDP_TRINO_PORT`
+- **THEN** `cfg.trino` carries them, and the analytics tools connect to that
+  endpoint as the configured user and catalog
+
+#### Scenario: SCN-FND-01.7 — Stable catalog name
+- **WHEN** the catalog is not a local SQLite file and no name is configured
+- **THEN** `cfg.catalog["name"]` is `lake`, independent of the connection URI and
+  its credentials, so Spark, `pyiceberg` and Trino address the same catalog rows;
+  `IDP_CATALOG_NAME` overrides it, and a local SQLite catalog keeps a per-file name
+  so one process can use several local lakes
 
 ### Requirement: REQ-FND-02 — Tenant stamping and isolation
 The system SHALL treat `tenant_id` as the mandatory, leading isolation column on

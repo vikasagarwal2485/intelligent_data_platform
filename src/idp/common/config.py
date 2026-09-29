@@ -89,6 +89,18 @@ class PlatformConfig:
         return k
 
     @property
+    def trino(self) -> dict[str, Any]:
+        """SQL query engine for the analytics tools (REQ-MCP-06): Trino's lake catalog."""
+        t = dict(self.raw.get("trino", {}))
+        env = os.environ
+        t["host"] = env.get("IDP_TRINO_HOST", t.get("host", "127.0.0.1"))
+        t["port"] = int(env.get("IDP_TRINO_PORT", t.get("port", 8085)))
+        t["user"] = env.get("IDP_TRINO_USER", t.get("user", "idp-mcp"))
+        t["catalog"] = env.get("IDP_TRINO_CATALOG", t.get("catalog", "lake"))
+        t.setdefault("http_scheme", "http")
+        return t
+
+    @property
     def timescale(self) -> dict[str, Any]:
         t = dict(self.raw.get("timescale", {}))
         env = os.environ
@@ -114,6 +126,7 @@ class PlatformConfig:
         c.setdefault("warehouse", "")
         c.setdefault("branch", "main")
         root = Path(self.storage.root).resolve()
+        c["name"] = env.get("IDP_CATALOG_NAME", c.get("name") or "")
         if c["type"] == "sql":
             c["uri"] = c["uri"] or f"sqlite:///{root / 'catalog.db'}"
             # only the default for tables created without a location; every lake

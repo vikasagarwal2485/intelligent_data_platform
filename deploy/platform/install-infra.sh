@@ -111,8 +111,13 @@ hi nessie nessie/nessie -f "${HERE}/nessie/nessie-values.yaml"
 echo ">> Spark Operator (Silver/Gold/Score/publish/maintain as SparkApplications)"
 bash "${HERE}/spark-operator/install.sh" "${NS}"
 
-echo ">> query engine (Trino, tuned small for local)"
-hi trino trino/trino -f "${HERE}/trino/trino-values.yaml"
+echo ">> query engine (Trino, tuned small for local; the lake catalog + read-only MCP user)"
+# The `lake` catalog reads the Iceberg JDBC catalog (TimescaleDB `iceberg` DB) and
+# MinIO; its credentials come from the timescaledb and minio Secrets, so the
+# coordinator waits (CreateContainerConfigError) until TimescaleDB is applied.
+hi trino trino/trino --version 1.42.2 -f "${HERE}/trino/trino-values.yaml" \
+  --set-file catalogs.lake="${HERE}/trino/lake.properties" \
+  --set-file "accessControl.rules.rules\.json=${HERE}/trino/rules.json"
 
 echo ">> orchestration (Airflow) — installed separately via 'make airflow-wire'"
 # Airflow is NOT installed here: it needs a metadata DB in TimescaleDB and the

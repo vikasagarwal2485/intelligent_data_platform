@@ -1,0 +1,65 @@
+# The MCP tools' query stack for integration tests (mcp-over-trino): Trino 480
+# with the cluster's `lake` catalog file and access rules, on a Postgres Iceberg
+# JDBC catalog and MinIO. Host ports are offset from the cluster port-forwards
+# (8080, 5432, 9000) so both can run at once.
+#
+#   docker compose -f deploy/dev/trino-compose.yaml up -d --wait
+#   make mcp-trino-test          # builds a lake into this stack, then pytest -m trino
+#   docker compose -f deploy/dev/trino-compose.yaml down -v
+#
+# Dev credentials only; this stack is disposable (the tests wipe its lake).
+name: idp-trino
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: idp-dev-password
+      POSTGRES_DB: iceberg
+    ports: ["15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iceberg"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    # The cluster's MinIO release (2025-04-22T22-12-26Z). The official minio/minio
+    # images are no longer publicly pullable; Bitnami's frozen legacy build of the
+    # same commit is, so this runs locally and in CI.
+    image: bitnamilegacy/minio:2025.4.22
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports: ["19000:9000"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  trino:
+    image: trinodb/trino:480
+    mem_limit: 2g            # the image sizes its heap at 80% of this
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    ports: ["18080:8080"]
+    environment:
+      LAKE_CATALOG_URL: jdbc:postgresql://postgres:5432/iceberg
+      LAKE_CATALOG_USER: postgres
+      LAKE_CATALOG_PASSWORD: idp-dev-password
+      LAKE_S3_ENDPOINT: http://minio:9000
+      LAKE_S3_ACCESS_KEY: minioadmin
+      LAKE_S3_SECRET_KEY: minioadmin123
+    volumes:
+      - ../platform/trino/lake.properties:/etc/trino/catalog/lake.properties:ro
+      - ../platform/trino/rules.json:/etc/trino/rules.json:ro
+      - ./trino/access-control.properties:/etc/trino/access-control.properties:ro
+    healthcheck:
+      test: ["CMD", "/usr/lib/trino/bin/health-check"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s

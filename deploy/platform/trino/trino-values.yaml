@@ -7,11 +7,18 @@
 #    container memory LIMIT must sit well ABOVE -Xmx. If limit ~= heap, the
 #    kernel OOM-kills the container.
 #
-# This config: coordinator-only (no workers), a modest 1G heap, and a 2Gi limit
-# (~1Gi of off-heap headroom) so the JVM can't exceed the cgroup limit.
+# This config: coordinator-only (no workers), a 768M heap, and a 1536Mi limit
+# (~768Mi of off-heap headroom) so the JVM can't exceed the cgroup limit. The MCP
+# tools' queries are single-tenant aggregates, and the 12 GB minikube node must
+# still fit the largest Spark stage with Trino running (`make mk-check`).
 #
-# Apply/upgrade:
-#   helm upgrade --install trino trino/trino -n idp-platform -f deploy/trino-values.yaml
+# The `lake` catalog and the access rules live in their own files, shared with the
+# compose test stack (deploy/dev/trino-compose.yaml), and are passed as --set-file:
+#   deploy/platform/trino/lake.properties -> catalogs.lake
+#   deploy/platform/trino/rules.json      -> accessControl.rules."rules.json"
+#
+# Apply/upgrade (does all of the above):
+#   make trino-fix          # bash deploy/platform/trino-tune.sh idp-platform
 
 server:
   workers: 0          # coordinator-only; removes the worker pods entirely
@@ -20,19 +27,50 @@ server:
 # safely below (heap - heap-headroom) so a query can't push the JVM past -Xmx.
 additionalConfigProperties:
   - node-scheduler.include-coordinator=true
-  - query.max-memory-per-node=400MB
-  - memory.heap-headroom-per-node=256MB
+  - query.max-memory-per-node=256MB
+  - memory.heap-headroom-per-node=192MB
+
+# The lake's Iceberg JDBC catalog (REQ-PLT-11): `catalogs.lake` comes from
+# lake.properties. The chart's sample catalogs are dropped.
+catalogs:
+  tpch: null
+  tpcds: null
+
+# The endpoints and credentials lake.properties reads (${ENV:...}); the secrets come
+# from the platform's timescaledb and minio Secrets.
+env:
+  - name: LAKE_CATALOG_URL
+    value: jdbc:postgresql://timescaledb.idp-platform.svc:5432/iceberg
+  - name: LAKE_CATALOG_USER
+    value: postgres
+  - name: LAKE_CATALOG_PASSWORD
+    valueFrom: { secretKeyRef: { name: timescaledb, key: POSTGRES_PASSWORD } }
+  - name: LAKE_S3_ENDPOINT
+    value: http://minio.idp-platform.svc:9000
+  - name: LAKE_S3_ACCESS_KEY
+    valueFrom: { secretKeyRef: { name: minio, key: rootUser } }
+  - name: LAKE_S3_SECRET_KEY
+    valueFrom: { secretKeyRef: { name: minio, key: rootPassword } }
+
+# File-based access control: the analytics user `idp-mcp` may only SELECT from
+# lake.silver and lake.gold; `admin` may do anything; every other user nothing.
+# Authentication is header-based (X-Trino-User) inside the cluster network in dev;
+# the rules still refuse writes to a spoofed `idp-mcp` (ADR-0030).
+accessControl:
+  type: configmap
+  refreshPeriod: 60s
+  configFile: rules.json      # rules.json comes from deploy/platform/trino/rules.json
 
 coordinator:
   jvm:
-    maxHeapSize: "1G"          # -Xmx; keep it ~50% of the memory limit
+    maxHeapSize: "768M"        # -Xmx; keep it ~50% of the memory limit
   resources:
     requests:
       cpu: "500m"
-      memory: "1500Mi"
+      memory: "1Gi"
     limits:
       cpu: "2"
-      memory: "2Gi"            # ~1Gi headroom above the heap for off-heap use
+      memory: "1536Mi"         # ~768Mi headroom above the heap for off-heap use
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 15

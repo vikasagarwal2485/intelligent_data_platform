@@ -52,14 +52,28 @@ serve: ## Start the FastAPI scoring service on :8000
 mcp: ## Start the MCP analytics server (stdio): 7 read-only, tenant-scoped tools (5 Silver, 2 Gold scores)
 	$(PY) -m idp.cli mcp
 
+# The MCP tools' integration stack (deploy/dev/trino-compose.yaml): Trino 480 +
+# Postgres + MinIO on offset host ports. The tests build their lake in it.
+TRINO_COMPOSE := docker compose -f deploy/dev/trino-compose.yaml
+TRINO_TEST_ENV := IDP_CATALOG_TYPE=sql IDP_CATALOG_NAME=lake \
+	IDP_CATALOG_URI=postgresql+psycopg2://postgres:idp-dev-password@127.0.0.1:15432/iceberg \
+	IDP_S3_ENDPOINT=http://127.0.0.1:19000 IDP_S3_ACCESS_KEY=minioadmin IDP_S3_SECRET_KEY=minioadmin123 \
+	IDP_TRINO_HOST=127.0.0.1 IDP_TRINO_PORT=18080
+.PHONY: trino-stack
+trino-stack: ## Start the compose Trino test stack (Trino + Postgres + MinIO) and wait until healthy
+	$(TRINO_COMPOSE) up -d --wait
+
+.PHONY: trino-stack-down
+trino-stack-down: ## Stop the compose Trino test stack and drop its data
+	$(TRINO_COMPOSE) down -v
+
+.PHONY: mcp-trino-test
+mcp-trino-test: trino-stack ## Run the MCP tools' Trino integration tests (parity with the pandas reference; pytest -m trino)
+	$(TRINO_TEST_ENV) $(PY) -m pytest -m trino tests/test_mcp_trino.py
+
 .PHONY: mcp-smoke
-mcp-smoke: ## Verify the MCP tools (local Silver, or MinIO when IDP_S3_ENDPOINT is set)
-	@if [ -n "$$IDP_S3_ENDPOINT" ]; then echo ">> Reading Silver from S3/MinIO at $$IDP_S3_ENDPOINT"; \
-	 elif [ ! -d data/lake/silver/dim_subscriber ]; then echo ">> Silver lake empty; running pipeline..." && $(PY) -m idp.cli run >/dev/null; fi
-	@echo ">> analyze_subscribers_tool(tenant_a):"
-	@$(PY) -c "import json,idp.mcp.tools as t; print(json.dumps(t.analyze_subscribers_tool('tenant_a'), indent=2))"
-	@echo ">> analyze_fee_charges_tool(tenant_a):"
-	@$(PY) -c "import json,idp.mcp.tools as t; print(json.dumps(t.analyze_fee_charges_tool('tenant_a'), indent=2)[:800])"
+mcp-smoke: ## Call every MCP tool for each tenant against the configured Trino (run 'make trino-api' first)
+	$(PY) -m idp.mcp.smoke
 
 .PHONY: mcp-config
 mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_desktop_config.json)
@@ -67,40 +81,23 @@ mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_des
 	  '{' \
 	  '  "mcpServers": {' \
 	  '    "idp-analytics": {' \
-	  '      "command": "/bin/sh",' \
-	  '      "args": ["-c", "cd $(CURDIR) && exec $(abspath $(PY)) -m idp.cli mcp"]' \
-	  '    }' \
-	  '  }' \
-	  '}'
-	@echo ""
-	@echo "# Paste the block above into your Claude Desktop config, then restart it:"
-	@echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
-	@echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
-	@echo "# The 'cd $(CURDIR)' makes the local Silver lake (data/lake/silver) resolve."
-	@echo "# Populate it first with 'make run' (or use 'make mcp-config-minio' for MinIO)."
-
-.PHONY: mcp-config-minio
-mcp-config-minio: ## Print the Claude Desktop MCP config for MinIO mode (Silver from MinIO via 127.0.0.1:9000)
-	@printf '%s\n' \
-	  '{' \
-	  '  "mcpServers": {' \
-	  '    "idp-analytics": {' \
 	  '      "command": "$(abspath $(PY))",' \
 	  '      "args": ["-m", "idp.cli", "mcp"],' \
 	  '      "env": {' \
-	  '        "IDP_S3_ENDPOINT": "http://127.0.0.1:9000",' \
-	  '        "IDP_S3_ACCESS_KEY": "minioadmin",' \
-	  '        "IDP_S3_SECRET_KEY": "minioadmin123",' \
-	  '        "IDP_S3_BUCKET_PREFIX": "idp"' \
+	  '        "IDP_TRINO_HOST": "127.0.0.1",' \
+	  '        "IDP_TRINO_PORT": "8085",' \
+	  '        "IDP_TRINO_USER": "idp-mcp"' \
 	  '      }' \
 	  '    }' \
 	  '  }' \
 	  '}'
 	@echo ""
-	@echo "# MinIO mode. Prereqs: 'make install' (installs mcp), Silver present in idp-silver,"
-	@echo "# and keep 'make minio-api' running (forwards 127.0.0.1:9000) while Claude uses it."
+	@echo "# The tools query the lake through Trino as the read-only 'idp-mcp' user; they"
+	@echo "# need no lake or MinIO credentials. Prereqs: 'make install' (installs mcp), and"
+	@echo "# keep 'make trino-api' running (forwards 127.0.0.1:8085) while Claude uses it."
 	@echo "# Paste into (create if missing), then fully quit (Cmd-Q) and reopen Claude Desktop:"
-	@echo "#   ~/Library/Application Support/Claude/claude_desktop_config.json"
+	@echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
+	@echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
 
 .PHONY: smoke
 smoke: ## End-to-end smoke test (pipeline + tenant isolation)
@@ -146,6 +143,10 @@ mk-check: ## Check the minikube node container's real memory cap can hold the pl
 .PHONY: lake-catalog
 lake-catalog: ## Create the lake's Iceberg JDBC catalog database (`iceberg` in TimescaleDB) — idempotent
 	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform
+
+.PHONY: lake-catalog-rename
+lake-catalog-rename: ## One-off: rename the Iceberg catalog rows to the stable name `lake` (pause DAGs + no Spark stages first; idempotent)
+	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform --rename-to-lake
 
 .PHONY: lake-catalog-show
 lake-catalog-show: ## Show what the Iceberg catalog (TimescaleDB `iceberg` DB) stores: every table's current metadata.json + namespace properties (read-only)
@@ -229,6 +230,11 @@ lake-archive-policy: ## Render the Bronze archive rule; apply it to idp-bronze w
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
 	@echo "Open http://localhost:9001  (user: minioadmin  pass: minioadmin123)"
 	kubectl -n idp-platform port-forward svc/minio-console 9001:9001
+
+.PHONY: trino-api
+trino-api: ## Port-forward Trino to 127.0.0.1:8085 (for the host MCP server's analytics queries)
+	@echo "Trino on http://127.0.0.1:8085  (keep this running while the MCP server answers)"
+	kubectl -n idp-platform port-forward svc/trino 8085:8080
 
 .PHONY: minio-api
 minio-api: ## Port-forward the MinIO S3 API to 127.0.0.1:9000 (for the host MCP server to read Silver)

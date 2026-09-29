@@ -41,15 +41,20 @@ LOCAL_TABLE_DIR = "tables"
 # configuration shared by both engines                                        #
 # --------------------------------------------------------------------------- #
 def catalog_name(cfg: PlatformConfig) -> str:
-    """Catalog name used by BOTH engines (it is stored in every SQL-catalog row).
+    """Catalog name used by Spark, pyiceberg AND Trino (it is stored in every
+    JDBC-catalog row, and Trino's ``catalog-name`` must match it; SCN-FND-01.7).
 
-    Local SQL catalogs get a name derived from their database, so several local
-    lakes (e.g. per-test temp lakes) can be registered in one Spark session.
+    ``catalog.name`` / ``IDP_CATALOG_NAME`` wins. Otherwise a shared catalog (the
+    platform Postgres, REST) is ``lake``, independent of its URI and credentials; a
+    local SQLite catalog gets a per-file name so one process can hold several local
+    lakes (e.g. per-test temp lakes).
     """
     c = cfg.catalog
-    if c["type"] == "sql":
+    if c.get("name"):                                 # catalog.name / IDP_CATALOG_NAME
+        return c["name"]
+    if c["type"] == "sql" and is_sqlite(c["uri"]):
         return "lake_" + hashlib.sha1(c["uri"].encode()).hexdigest()[:10]
-    return "lake"
+    return "lake"                                     # a stable name Trino can address
 
 
 def table_location(cfg: PlatformConfig, layer: str, table: str) -> str:

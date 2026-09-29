@@ -1,11 +1,12 @@
 """MCP server exposing the seven analytics tools over stdio (REQ-MCP-06).
 
 Run with ``idp mcp`` (or ``python -m idp.mcp.server``). Every tool is read-only,
-requires a ``tenant_id`` and returns tenant-scoped, tokenized aggregates — see
-``tools.py`` and ADR-0021. Five read Silver (subscribers/usage/recharges/anomalies/
-fees); two read the Gold score tables (fraud/credit score distributions). The heavy
-``mcp`` dependency is imported lazily so the rest of the package (and the tool
-functions, used directly in tests) need no MCP install.
+requires a ``tenant_id`` and returns tenant-scoped, tokenized aggregates, which it
+computes in Trino as the read-only ``idp-mcp`` user (``cfg.trino``; locally
+``make trino-api``) — see ``tools.py`` and ADR-0030. Five read Silver (subscribers/
+usage/recharges/anomalies/fees); two read the Gold score tables (fraud/credit score
+distributions). The heavy ``mcp`` dependency is imported lazily so the rest of the
+package (and the tool functions, used directly in tests) need no MCP install.
 """
 from __future__ import annotations
 
@@ -97,8 +98,8 @@ def build_server(config_path: str | None = None):
 # Module-level instance so the standard MCP CLI can find it:
 #   mcp dev src/idp/mcp/server.py      # interactive MCP Inspector (needs Node/npx)
 #   mcp install src/idp/mcp/server.py  # register into Claude Desktop
-# Uses the default config (config/platform.yaml); reads Silver from the lake that
-# config points at (local dir when IDP_S3_ENDPOINT is unset, else MinIO/S3).
+# Uses the default config (config/platform.yaml); queries the Trino that config
+# points at (127.0.0.1:8085 by default, i.e. `make trino-api`; IDP_TRINO_* override).
 mcp = build_server()
 
 

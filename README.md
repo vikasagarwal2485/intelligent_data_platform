@@ -764,7 +764,20 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server exposes the
 curated lake to AI agents (e.g. Claude Desktop) as **seven read-only, tenant-scoped
 analytics tools** — five over the Silver tables, two over the Gold score tables.
 Every tool takes a `tenant_id`, reads only that tenant's data, and returns compact
-aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`, ADR-0021).
+aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`, ADR-0030).
+
+The tools ask **Trino**: its `lake` catalog reads the same Iceberg catalog rows and
+tables the stages commit. Filtering, grouping, sums, histograms and percentiles run
+in Trino over the tenant's partitions (the tenant is always a bound parameter), and
+only the aggregated rows come back to the MCP process. The tools connect as
+`idp-mcp`, a user Trino's access control limits to `SELECT` on `lake.silver` and
+`lake.gold`, so the engine itself refuses writes and Bronze reads.
+
+```
+Claude Desktop --stdio--> idp mcp --SQL (idp-mcp, ?-bound tenant)--> Trino `lake`
+                                                                      |  catalog rows: Postgres `iceberg`
+                                                                      v  data: s3://idp-silver, idp-gold
+```
 
 | Tool | Answers |
 |---|---|
@@ -781,27 +794,31 @@ aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`, ADR-0021)
 > history (multiple `idp score` runs); with a single snapshot every window shows the
 > same distribution and the result says so.
 
-**Prerequisites.** The `mcp` package (installed by `make install`) and **Silver
-data in the lake** the server reads. The lake is chosen by config: a local
-directory (`data/lake/silver`) by default, or MinIO/S3 when `IDP_S3_ENDPOINT` is
-set. Populate the local lake with `make run` (or, in-cluster, `make silver`).
+**Prerequisites.** The `mcp` package (installed by `make install`), a lake with
+Silver (and, for the score tools, Gold) in the cluster (`make stream`, `make silver`,
+and the Gold/Score stages), and Trino deployed with the `lake` catalog
+(`make trino-fix`; it installs `deploy/platform/trino/lake.properties` and the
+access rules in `rules.json`).
 
-**Step 1 — install deps and populate Silver (local):**
+**Step 1 — forward Trino to your host** (keep it running in its own terminal):
 ```bash
-make install                 # includes the `mcp` runtime dependency
-make run                     # writes data/lake/silver/ (Bronze/Silver/Gold + models)
+make trino-api        # = kubectl -n idp-platform port-forward svc/trino 8085:8080
 ```
+Host port 8085, because `kafka-ui` and the Airflow webserver already forward 8080.
+`config/platform.yaml` (`trino:`) defaults to `127.0.0.1:8085` as `idp-mcp`;
+`IDP_TRINO_HOST`/`PORT`/`USER`/`CATALOG` override it.
 
 **Step 2 — verify the tools return data:**
 ```bash
-make mcp-smoke               # runs the pipeline if the lake is empty, then calls two tools
+make mcp-smoke        # calls all seven tools for each tenant; non-zero exit on any error
 ```
 Expected (abridged):
-```json
-{ "tenant_id": "tenant_a", "subscriber_count": 500,
-  "subscription_count": 351, "device_count": 149,
-  "business_line_mix": {"mobile": 74, "broadband": 71, "...": 0},
-  "roamers": 143, "non_roamers": 357 }
+```
+>> Trino at http://127.0.0.1:8085 as idp-mcp (catalog lake)
+ok   tenant_a analyze_subscribers_tool: 1645 subscribers (1719 ms)
+ok   tenant_a analyze_usage_events_tool: 345029 usage events (2406 ms)
+...
+ok   tenant_b analyze_credit_score_tool: 399 scores in 30d (1043 ms)
 ```
 
 **Step 3 — start the server (stdio):**
@@ -813,13 +830,14 @@ used standalone. Three ways to connect:
 
 - **Claude Desktop** — print a ready-made config and paste it in:
   ```bash
-  make mcp-config            # prints the "mcpServers" block with absolute paths
+  make mcp-config            # prints the "mcpServers" block (absolute python path + Trino env)
   ```
   Add it to `claude_desktop_config.json` (macOS:
   `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`) and restart
-  Claude Desktop. The generated command `cd`s into this repo so the local
-  `data/lake/silver` resolves. Then ask Claude, e.g. *"Using idp-analytics, what's
-  the roamer split and top products by fee revenue for tenant_a?"*
+  Claude Desktop. The config needs no lake or MinIO credentials, only the Trino
+  endpoint; `make trino-api` must be running whenever Claude Desktop launches the
+  server. Then ask Claude, e.g. *"Using idp-analytics, what's the roamer split and
+  top products by fee revenue for tenant_a?"*
 - **MCP Inspector** (interactive UI, needs Node/npx):
   ```bash
   .venv/bin/mcp dev src/idp/mcp/server.py
@@ -829,59 +847,28 @@ used standalone. Three ways to connect:
   .venv/bin/mcp install src/idp/mcp/server.py --name idp-analytics
   ```
 
-#### Serving Silver from the cluster's MinIO
+**Errors are results, not exceptions.** A missing or unknown tenant returns the
+tenants that exist and asks the client to ask you which one; an unreachable Trino
+(e.g. `make trino-api` not running) returns an `error` naming the endpoint as
+`source`, never an empty "0".
 
-Instead of the local `data/lake/silver` dir, the host MCP server can read Silver
-straight from the cluster's MinIO. Setting `IDP_S3_ENDPOINT` flips the server into
-S3 mode (`lake_uri` → `s3://idp-silver`).
+**Exactness.** The tools reproduce the pandas implementations they replaced, which
+are kept as the test oracle (`tests/mcp_reference.py`): counts, sums, means,
+histograms, and exact medians and percentiles (window-function order statistics in
+Trino). REQ-MCP-09 would allow ±1% rank error; Trino's `approx_percentile` exceeded
+that on small or discrete data, so the tools don't use it.
 
-**1. Make sure Silver exists in MinIO.** Deploying the app (`make image` +
-`make app-deploy`) does *not* populate the lake — run the in-cluster stages once:
-```bash
-make stream    # produce -> Kafka -> consume -> Bronze (s3://idp-bronze)
-make silver    # Bronze -> Silver (s3://idp-silver)
-make minio-ls  # confirm idp-silver has dim_subscriber/ fact_usage/ fact_recharge/ fact_fee_charge/
-```
+**Integration tests.** `make mcp-trino-test` starts a disposable Trino + Postgres +
+MinIO stack (`deploy/dev/trino-compose.yaml`, offset ports 18080/15432/19000) with
+the cluster's catalog file and rules, builds a two-tenant lake in it through the real
+stages, and compares every tool with the oracle, checks the IO plan's tenant
+constraint and the rows fetched, and checks that `idp-mcp` can't write
+(`pytest -m trino`; the default `pytest` run skips them). `make trino-stack-down`
+removes the stack.
 
-**2. Port-forward the MinIO S3 API to your host** (keep it running in its own terminal):
-```bash
-make minio-api   # = kubectl -n idp-platform port-forward svc/minio 9000:9000
-```
-
-**3. Point the MCP server at MinIO and verify.** Use `127.0.0.1` (not `localhost`)
-— an IP endpoint forces S3 path-style addressing, which MinIO needs:
-```bash
-export IDP_S3_ENDPOINT=http://127.0.0.1:9000
-export IDP_S3_ACCESS_KEY=minioadmin
-export IDP_S3_SECRET_KEY=minioadmin123
-export IDP_S3_BUCKET_PREFIX=idp
-make mcp-smoke   # reads Silver from MinIO (skips the local-pipeline fallback)
-make mcp         # start the server for a client
-```
-
-**4. Claude Desktop (MinIO mode).** No `cd` is needed (it reads MinIO, not the
-local dir); put the S3 env in the config's `env` block. The port-forward from
-step 2 must be running whenever Claude Desktop launches the server:
-```json
-{
-  "mcpServers": {
-    "idp-analytics": {
-      "command": "/ABSOLUTE/PATH/TO/repo/.venv/bin/python",
-      "args": ["-m", "idp.cli", "mcp"],
-      "env": {
-        "IDP_S3_ENDPOINT": "http://127.0.0.1:9000",
-        "IDP_S3_ACCESS_KEY": "minioadmin",
-        "IDP_S3_SECRET_KEY": "minioadmin123",
-        "IDP_S3_BUCKET_PREFIX": "idp"
-      }
-    }
-  }
-}
-```
-
-Make targets: `make mcp` (start), `make mcp-smoke` (verify, local or MinIO),
-`make mcp-config` (local-dir Claude Desktop config), `make minio-api` (forward the
-S3 API).
+Make targets: `make mcp` (start), `make mcp-smoke` (verify against Trino),
+`make mcp-config` (Claude Desktop config), `make trino-api` (forward Trino),
+`make mcp-trino-test` (integration tests).
 
 ---
 

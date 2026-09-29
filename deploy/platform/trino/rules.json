@@ -1,0 +1,16 @@
+{
+  "catalogs": [
+    {"user": "admin", "allow": "all"},
+    {"user": "idp-mcp", "catalog": "lake", "allow": "read-only"},
+    {"allow": "none"}
+  ],
+  "schemas": [
+    {"user": "admin", "owner": true},
+    {"user": "idp-mcp", "catalog": "lake", "schema": "silver|gold", "owner": false}
+  ],
+  "tables": [
+    {"user": "admin", "privileges": ["SELECT", "INSERT", "DELETE", "UPDATE", "OWNERSHIP"]},
+    {"user": "idp-mcp", "catalog": "lake", "schema": "silver|gold", "privileges": ["SELECT"]},
+    {"privileges": []}
+  ]
+}

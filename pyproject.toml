@@ -22,6 +22,7 @@ dependencies = [
     "s3fs>=2023.12",
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
+    "trino==0.340.0",                 # SQL engine client for the MCP analytics tools
     "mcp>=1.2",
     # Single transformation engine for Silver/Gold (REQ-ORC-05); matches the
     # Spark 3.5 runtime. Needs a JDK 11/17 on the host (the image bundles a JRE).
@@ -45,6 +46,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not trino'"   # `pytest -m trino` (or `make mcp-trino-test`) runs those
 filterwarnings = ["ignore::DeprecationWarning"]
-markers = ["postgres: needs a real PostgreSQL/TimescaleDB (set IDP_TEST_POSTGRES_URL); skipped otherwise"]
+markers = [
+    "postgres: needs a real PostgreSQL/TimescaleDB (set IDP_TEST_POSTGRES_URL); skipped otherwise",
+    "trino: needs the compose Trino stack (deploy/dev/trino-compose.yaml); run with `make mcp-trino-test`",
+]

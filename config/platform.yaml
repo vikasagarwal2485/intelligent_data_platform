@@ -59,6 +59,8 @@ catalog:
   type: sql
   uri: ""                          # sql: sqlite under storage.root when empty
   warehouse: ""                    # default location only; tables live in their layer
+  name: ""                         # catalog name in the rows (IDP_CATALOG_NAME); empty ->
+                                   # `lake` for a shared catalog, per-file for local SQLite
 
 # Lake table maintenance and cost controls (REQ-ORC-06).
 lake:
@@ -69,6 +71,18 @@ lake:
 # TimescaleDB (Gold serving layer). When enabled, the publish stage mirrors Gold
 # tables here for low-latency serving. Overridable via env: IDP_TS_HOST,
 # IDP_TS_PORT, IDP_TS_DB, IDP_TS_USER, IDP_TS_PASSWORD.
+# SQL query engine for the MCP analytics tools (REQ-MCP-06/09): Trino's `lake`
+# Iceberg catalog over the same JDBC catalog the stages use. The tools connect as
+# the read-only analytics identity. Locally `make trino-api` port-forwards the
+# cluster's Trino to 127.0.0.1:8085. Overridable via env: IDP_TRINO_HOST,
+# IDP_TRINO_PORT, IDP_TRINO_USER, IDP_TRINO_CATALOG.
+trino:
+  host: "127.0.0.1"
+  port: 8085            # `make trino-api` forwards the cluster's trino:8080 here (8080 is taken by kafka-ui/airflow)
+  user: "idp-mcp"
+  catalog: "lake"
+  http_scheme: "http"
+
 timescale:
   enabled: false
   host: "timescaledb.idp-platform.svc"

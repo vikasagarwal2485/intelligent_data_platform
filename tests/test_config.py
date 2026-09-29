@@ -7,8 +7,8 @@ from idp.common.config import load_config
 def test_config_exposes_all_sections():
     # SCN-FND-01.1
     cfg = load_config()
-    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "timescale", "spark",
-                    "synthetic", "features", "credit", "fraud"):
+    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "timescale",
+                    "spark", "synthetic", "features", "credit", "fraud"):
         assert getattr(cfg, section) is not None, section
 
 
@@ -65,3 +65,31 @@ def test_catalog_postgres_via_env(monkeypatch):
     assert conf[f"{p}.jdbc.user"] == "postgres" and conf[f"{p}.jdbc.password"] == "pw"
     assert conf[f"{p}.io-impl"] == "org.apache.iceberg.aws.s3.S3FileIO"
     assert "connect_args.timeout" not in catalog.pyiceberg_properties(cfg)   # SQLite only
+
+def test_catalog_name_is_stable_for_shared_catalogs(monkeypatch):
+    # SCN-FND-01.7 — `lake` for the platform Postgres, whatever its URI/credentials;
+    # IDP_CATALOG_NAME overrides; a local SQLite catalog keeps a per-file name
+    from idp.common import catalog
+    monkeypatch.delenv("IDP_CATALOG_NAME", raising=False)
+    monkeypatch.setenv("IDP_CATALOG_TYPE", "sql")
+    for pw in ("pw", "rotated-pw"):
+        monkeypatch.setenv("IDP_CATALOG_URI", f"postgresql+psycopg2://postgres:{pw}@db:5432/iceberg")
+        assert catalog.catalog_name(load_config()) == "lake"
+    monkeypatch.setenv("IDP_CATALOG_NAME", "lake_custom")
+    assert catalog.catalog_name(load_config()) == "lake_custom"
+    monkeypatch.delenv("IDP_CATALOG_NAME")
+    monkeypatch.delenv("IDP_CATALOG_URI")
+    local = catalog.catalog_name(load_config())
+    assert local.startswith("lake_") and local != "lake"
+
+
+def test_trino_defaults_and_env(monkeypatch):
+    # SCN-FND-01.6 — the analytics tools' query engine comes from config/env
+    for var in ("IDP_TRINO_HOST", "IDP_TRINO_PORT", "IDP_TRINO_USER", "IDP_TRINO_CATALOG"):
+        monkeypatch.delenv(var, raising=False)
+    t = load_config().trino
+    assert (t["host"], t["port"], t["user"], t["catalog"]) == ("127.0.0.1", 8085, "idp-mcp", "lake")
+    monkeypatch.setenv("IDP_TRINO_HOST", "trino.idp-platform.svc")
+    monkeypatch.setenv("IDP_TRINO_PORT", "8443")
+    t = load_config().trino
+    assert (t["host"], t["port"]) == ("trino.idp-platform.svc", 8443)

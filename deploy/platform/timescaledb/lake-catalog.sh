@@ -11,15 +11,24 @@
 # alone leaves rows pointing at deleted metadata files, and every stage then fails
 # with "FileNotFoundError: ... metadata.json" (`make minio-reset` does both).
 #
-# Usage:  bash deploy/platform/timescaledb/lake-catalog.sh [namespace] [--reset]
-#         (make lake-catalog; make minio-reset runs it with --reset)
+# --rename-to-lake renames every catalog row to the stable catalog name `lake`
+# (one transaction, idempotent). Catalogs written before the name was pinned carry
+# `lake_<hash of the URI>`; Spark, pyiceberg and Trino must all address `lake`.
+# Run it with the DAGs paused and no Spark stage running, then deploy the image
+# that pins the name (mcp-over-trino, design 1a).
+#
+# Usage:  bash deploy/platform/timescaledb/lake-catalog.sh [namespace] [--reset|--rename-to-lake]
+#         (make lake-catalog; make minio-reset runs it with --reset;
+#          make lake-catalog-rename runs it with --rename-to-lake)
 set -euo pipefail
 
 NS="idp-platform"
 RESET=0
+RENAME=0
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET=1 ;;
+    --rename-to-lake) RENAME=1 ;;
     *) NS="$arg" ;;
   esac
 done
@@ -50,5 +59,24 @@ BEGIN
   RAISE NOTICE 'lake catalog reset: % table entries removed', n;
 END
 $reset$;
+SQL
+fi
+
+if [ "$RENAME" = 1 ]; then
+  kubectl -n "${NS}" exec -i deploy/timescaledb -- psql -U postgres -d iceberg -v ON_ERROR_STOP=1 -q <<'SQL'
+DO $rename$
+DECLARE t bigint := 0; n bigint := 0;
+BEGIN
+  IF to_regclass('public.iceberg_tables') IS NOT NULL THEN
+    UPDATE iceberg_tables SET catalog_name = 'lake' WHERE catalog_name <> 'lake';
+    GET DIAGNOSTICS t = ROW_COUNT;
+  END IF;
+  IF to_regclass('public.iceberg_namespace_properties') IS NOT NULL THEN
+    UPDATE iceberg_namespace_properties SET catalog_name = 'lake' WHERE catalog_name <> 'lake';
+    GET DIAGNOSTICS n = ROW_COUNT;
+  END IF;
+  RAISE NOTICE 'lake catalog renamed to "lake": % table rows, % namespace-property rows', t, n;
+END
+$rename$;
 SQL
 fi

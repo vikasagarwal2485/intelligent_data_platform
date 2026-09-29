@@ -7,7 +7,7 @@
 # a pending-* state (common when the cluster is slow and ops time out). Trino is
 # stateless, so we clear the stuck release and reinstall cleanly.
 #
-# Usage:  bash deploy/trino-tune.sh [namespace]
+# Usage:  bash deploy/platform/trino-tune.sh [namespace]
 set -euo pipefail
 
 NS="${1:-idp-platform}"
@@ -32,6 +32,11 @@ if helm list -n "${NS}" --pending -q 2>/dev/null | grep -qx trino; then
 fi
 
 echo ">> Installing/upgrading Trino with tuned values"
-helm upgrade --install trino trino/trino -n "${NS}" -f "${HERE}/trino/trino-values.yaml"
+# The lake catalog and the access rules are shared with the compose test stack,
+# so they are files, passed as values here.
+helm upgrade --install trino trino/trino -n "${NS}" --version 1.42.2 \
+  -f "${HERE}/trino/trino-values.yaml" \
+  --set-file catalogs.lake="${HERE}/trino/lake.properties" \
+  --set-file "accessControl.rules.rules\.json=${HERE}/trino/rules.json"
 kubectl -n "${NS}" rollout status deploy/trino-coordinator --timeout=300s
 echo ">> Trino coordinator is Ready."

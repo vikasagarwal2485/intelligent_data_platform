@@ -32,16 +32,17 @@ catalog (the `iceberg` database on the platform Postgres, ADR-0028).
   the engine, not only by code.
 - **The seven tools become SQL.** Each tool runs a small number of parameterized
   queries against `lake`, with `tenant_id` always a bound parameter. Grouping, sums,
-  windows, histograms (`width_bucket`), medians and percentiles (`approx_percentile`)
-  run inside Trino, and only compact results come back. Every returned row still
+  windows, histograms, medians and percentiles (from window-function order
+  statistics) run inside Trino, and only compact results come back. Every returned row still
   carries `tenant_id` and passes through the tenant gateway (`scope_to_tenant`)
   before it's used (REQ-FND-06).
 - **Output shapes are unchanged:** the JSON keys and the meaning of every field, the
   tenant guard (`available_tenants`, `action_required`), the isolation errors, and the
   unreachable-lake error. The unreachable case now names the Trino endpoint as
   `source`.
-- **Rank statistics** (percentiles, medians, and the anomaly tool's MAD) become
-  engine-computed approximations with a bounded rank error. Counts, sums, means and
+- **Rank statistics** (percentiles, medians, and the anomaly tool's MAD) may become
+  engine-computed approximations with a bounded rank error (REQ-MCP-09); the
+  implementation computes them exactly (design, Risks). Counts, sums, means and
   histograms stay exact.
 - **Tests:**
   - The pandas logic that exists today moves to the test suite, as the reference
@@ -73,6 +74,12 @@ None.
   stable catalog name, `IDP_CATALOG_NAME`).
 - `platform-deployment`: new REQ-PLT-11 (Trino `lake` catalog on the lake's JDBC
   catalog, read-only MCP user).
+- `orchestration`: REQ-ORC-05. Since `distributed-spark-runtime`, it lists the only
+  permitted pandas uses, and the MCP tools aren't among them. After this change the
+  tools use pandas only to shape the small results of engine queries, so the list
+  must gain "shaping the bounded results of analytics queries (REQ-MCP-09)".
+  The delta (`specs/orchestration/spec.md`) carries REQ-ORC-05 from the main spec
+  with that one addition.
 
 ## Impact
 
