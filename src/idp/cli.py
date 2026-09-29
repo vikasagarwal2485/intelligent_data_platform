@@ -246,7 +246,8 @@ def _cmd_train(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     result = train(cfg, persist=True)
     print(json.dumps({"credit_metrics": result["credit_metrics"],
-                      "fraud_metrics": result["fraud_metrics"]}, indent=2, default=str))
+                      "fraud_metrics": result["fraud_metrics"],
+                      "registry": result["registry"]}, indent=2, default=str))
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:

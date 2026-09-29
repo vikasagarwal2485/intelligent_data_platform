@@ -43,6 +43,8 @@ spec:
       value: postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg
     - name: IDP_SPARK_MASTER
       value: k8s://https://kubernetes.default.svc:443
+    - name: IDP_MLFLOW_TRACKING_URI
+      value: http://mlflow.idp-platform.svc:80
   executor:
     instances: 2
     cores: 1
@@ -66,3 +68,5 @@ spec:
       value: postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg
     - name: IDP_SPARK_MASTER
       value: k8s://https://kubernetes.default.svc:443
+    - name: IDP_MLFLOW_TRACKING_URI
+      value: http://mlflow.idp-platform.svc:80

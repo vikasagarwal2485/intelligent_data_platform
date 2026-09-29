@@ -7,6 +7,7 @@ score for that tenant's subject - enforcing tenant isolation at the edge.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,11 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from idp.common import storage
 from idp.common.config import load_config
 from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.ml.credit_model import CreditLimitModel
 from idp.ml.fraud_model import FraudModel
+from idp.ml.registry import model_store
 
 
 class ScoreRequest(BaseModel):
@@ -38,30 +39,40 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
     """Application factory. Loads models lazily so the app starts without them."""
     cfg = load_config()
     app = FastAPI(title="IDP Scoring API", version="0.1.0")
-    state: dict[str, Any] = {"credit": None, "fraud": None}
+    # The model store's champion (REQ-ML-04): MLflow `champion`, or the object
+    # store's latest file; an explicit artifacts_dir (tests) is a local object store.
+    store = model_store(cfg, artifacts_dir=artifacts_dir)
+    refresh = float(cfg.mlflow.get("refresh_seconds", 60))
+    # per model: (version, model, time of the last champion check)
+    cache: dict[str, tuple[str | None, Any, float]] = {}
 
-    def _muri(name: str) -> str:
-        # explicit override (tests) stays local; otherwise the model store
-        # (MinIO s3://idp-ml in-cluster, local dir otherwise).
-        if artifacts_dir is not None:
-            return str(Path(artifacts_dir) / name)
-        return storage.model_uri(cfg, name)
+    def _champion(name: str) -> Any:
+        """The cached champion, re-checked every ``refresh`` seconds. A new version
+        is loaded without a restart; a failed check or load keeps the cached model
+        (serve stale rather than 503)."""
+        now = time.monotonic()
+        version, model, checked = cache.get(name, (None, None, float("-inf")))
+        if model is not None and now - checked < refresh:
+            return model
+        try:
+            current = store.champion_version(name)
+            if model is None or current != version:
+                loaded = store.load_champion(name) if current is not None else None
+                if loaded is not None:
+                    version, model = current, loaded
+        except Exception:  # noqa: BLE001 - registry/object store unreachable
+            if model is None:
+                raise HTTPException(503, f"{name} model store unreachable")
+        cache[name] = (version, model, now)
+        if model is None:
+            raise HTTPException(503, f"{name} model not trained yet (no champion)")
+        return model
 
     def _credit() -> CreditLimitModel:
-        if state["credit"] is None:
-            uri = _muri("credit_model.joblib")
-            if not storage.model_exists(uri, cfg):
-                raise HTTPException(503, "credit model not trained yet")
-            state["credit"] = storage.load_model(uri, cfg)
-        return state["credit"]
+        return _champion("credit")
 
     def _fraud() -> FraudModel:
-        if state["fraud"] is None:
-            uri = _muri("fraud_model.joblib")
-            if not storage.model_exists(uri, cfg):
-                raise HTTPException(503, "fraud model not trained yet")
-            state["fraud"] = storage.load_model(uri, cfg)
-        return state["fraud"]
+        return _champion("fraud")
 
     @app.get("/health")
     def health() -> dict[str, str]:

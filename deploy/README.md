@@ -287,6 +287,31 @@ make mcp-smoke                                     # every tool, both tenants
   for the stage (`kubectl -n idp-platform scale deploy/trino-coordinator --replicas=0`)
   or raise the node cap.
 
+**MLflow model registry** (REQ-ML-04). `make mlflow` installs community-charts/mlflow
+1.11.2 (MLflow 3.14.0, matching the `mlflow-skinny` client) from
+`deploy/platform/mlflow/mlflow-values.yaml`, after creating its backend database
+`mlflow` on TimescaleDB. Artifacts go to `s3://idp-ml/mlflow` on MinIO; clients upload
+and download them directly with their `IDP_S3_*` keys (not proxied).
+- **Endpoint:** Service `mlflow` port 80 (container 5000), so in-cluster
+  `http://mlflow.idp-platform.svc:80`. That is `IDP_MLFLOW_TRACKING_URI` on the train
+  and score Jobs, the SparkApplications, the Airflow stage pods and the scoring API.
+  `make mlflow-ui` forwards it to http://127.0.0.1:5050 (port 5000 is often taken by
+  macOS AirPlay).
+- **What to look for:** experiment `idp-training` (one run per `train`, with both
+  models' hold-out metrics and the `idp.version`/`idp.git_sha` tags); registered models
+  `idp-credit` and `idp-fraud`, each with a `champion` alias on the latest version that
+  passed its gate (`credit.min_auc`, `fraud.min_pr_auc_lift`). A version that failed is
+  registered with `gate=failed` and doesn't move the alias. To roll back, move
+  `champion` to an older version in the UI; the scoring API follows within
+  `mlflow.refresh_seconds`, and the next Score run uses it.
+- **OOMKilled at startup:** MLflow 3 starts a job runner with about ten huey
+  consumers (~200 MiB each) unless `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, which
+  the values set.
+- **Connections:** TimescaleDB allows 25; the values cap MLflow's pool at 2 (+2
+  overflow) with one worker.
+- **Fallback:** unset `IDP_MLFLOW_TRACKING_URI` and the workloads use the joblib files
+  in `s3://idp-ml` again (the latest trained model, no gate).
+
 **Nessie CrashLoopBackOff**: the chart can default to a version store needing an
 external DB, or OOM on too small a limit.
 ```bash

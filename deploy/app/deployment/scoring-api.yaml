@@ -1,6 +1,7 @@
-# The FastAPI scoring service (plan 5.6 / 6.6). Stateless; loads the trained
-# models from the MinIO/S3 model store (s3://idp-ml) via the IDP_S3_* env below,
-# so it shares one artifact store with the train and Gold jobs.
+# The FastAPI scoring service (plan 5.6 / 6.6). Stateless; serves the model
+# registry's `champion` versions (MLflow, IDP_MLFLOW_TRACKING_URI below; artifacts in
+# s3://idp-ml/mlflow via the IDP_S3_* env) and re-checks the champion every
+# mlflow.refresh_seconds, so a newly promoted model is served without a restart.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,6 +33,9 @@ spec:
               value: "minioadmin123"
             - name: IDP_S3_BUCKET_PREFIX
               value: "idp"
+            # Model registry (REQ-ML-04): MLflow in idp-platform; artifacts use the S3 env above
+            - name: IDP_MLFLOW_TRACKING_URI
+              value: "http://mlflow.idp-platform.svc:80"
             # the lake's Iceberg catalog (REQ-FND-04): JDBC on the platform Postgres
             # (database `iceberg`; dev credentials, use External Secrets on EKS)
             - name: IDP_CATALOG_TYPE

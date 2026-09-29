@@ -17,7 +17,6 @@ from typing import Any, Iterator
 
 import pandas as pd
 
-from idp.common import storage
 from idp.common.config import PlatformConfig
 
 CREDIT_SCHEMA = ("tenant_id string, service_id string, pd double, "
@@ -29,15 +28,20 @@ SCORE_PARTITION_COLUMN = "scored_at"
 
 def load_scoring_models(cfg: PlatformConfig, models: dict | None = None) -> dict[str, Any]:
     """The models to score with: ``models`` entries first (tests), else the model
-    store. A model absent from both is simply not returned (graceful skip).
+    store's champion (REQ-ML-04: the MLflow ``champion`` alias, or the object store's
+    latest file). A model with no champion is simply not returned, and its score
+    table is skipped. An unreachable registry raises: Score fails rather than fall
+    back to another source."""
+    from idp.ml.registry import MODELS, model_store
 
-    This is the one seam for model loading; a model registry replaces the store
-    lookup here."""
     found = {k: v for k, v in (models or {}).items() if v is not None}
-    for key, name in (("credit", "credit_model.joblib"), ("fraud", "fraud_model.joblib")):
-        uri = storage.model_uri(cfg, name)
-        if key not in found and storage.model_exists(uri, cfg):
-            found[key] = storage.load_model(uri, cfg)
+    missing = [k for k in MODELS if k not in found]
+    if missing:
+        store = model_store(cfg)
+        for key in missing:
+            model = store.load_champion(key)
+            if model is not None:
+                found[key] = model
     return found
 
 

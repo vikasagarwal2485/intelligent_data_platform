@@ -117,7 +117,7 @@ mk-up: ## Start minikube with required addons
 
 .PHONY: image
 image: ## Build the scoring-api image INTO minikube's docker daemon (local, no registry)
-	@eval $$(minikube docker-env) && docker build -t idp/scoring-api:dev .
+	@eval $$(minikube docker-env) && docker build --build-arg IDP_GIT_SHA=$$(git rev-parse HEAD 2>/dev/null || echo unknown) -t idp/scoring-api:dev .
 	@echo "Built idp/scoring-api:dev inside minikube. Now run: make platform-base && make app-deploy"
 
 .PHONY: platform-services
@@ -131,6 +131,15 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 .PHONY: trino-fix
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/platform/trino-tune.sh idp-platform
+
+.PHONY: mlflow
+mlflow: ## Install/upgrade the MLflow model registry (pinned chart; creates its `mlflow` DB in TimescaleDB)
+	bash deploy/platform/mlflow/install.sh idp-platform
+
+.PHONY: mlflow-ui
+mlflow-ui: ## Port-forward the MLflow UI/API to http://127.0.0.1:5050 (runs, versions, the `champion` alias)
+	@echo "MLflow on http://127.0.0.1:5050"
+	kubectl -n idp-platform port-forward svc/mlflow 5050:80
 
 .PHONY: spark-operator
 spark-operator: ## Install/upgrade the Kubeflow Spark Operator (pinned, watches idp-app) + Airflow SparkApplication RBAC
@@ -375,7 +384,7 @@ train: ## Train stage (idp-app): Gold features + labels store -> models (s3://id
 	kubectl -n idp-app apply -f deploy/app/jobs/train-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-train --timeout=600s
 	kubectl -n idp-app logs job/idp-train
-	@echo ">> Models written to s3://idp-ml. 'make score' now writes credit/fraud scores."
+	@echo ">> Models registered (MLflow when IDP_MLFLOW_TRACKING_URI is set, else s3://idp-ml); see 'registry' above for the champion gate. 'make score' scores with the champions."
 
 .PHONY: publish
 publish: mk-check ## Serving stage (SparkApplication in idp-app): Gold (S3) -> TimescaleDB (staging load + atomic swap)

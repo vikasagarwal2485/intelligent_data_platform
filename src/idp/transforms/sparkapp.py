@@ -33,6 +33,8 @@ LAKE_ENV = {
     "IDP_CATALOG_URI": "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg",
     # the driver runs get_spark(): keep the operator's Kubernetes master (not local[*])
     "IDP_SPARK_MASTER": K8S_MASTER,
+    # the model registry (REQ-ML-04): Score loads the `champion` versions
+    "IDP_MLFLOW_TRACKING_URI": "http://mlflow.idp-platform.svc:80",
 }
 SERVING_ENV = {
     "IDP_TS_HOST": "timescaledb.idp-platform.svc",

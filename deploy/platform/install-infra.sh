@@ -126,8 +126,8 @@ echo ">> orchestration (Airflow) — installed separately via 'make airflow-wire
 # `helm upgrade --install airflow apache-airflow/airflow` fails outright. Run
 # `make airflow-wire` (pins chart 1.15.0 + our values) after the platform is up.
 
-echo ">> experiment tracking (MLflow)"
-hi mlflow community-charts/mlflow
+echo ">> model registry (MLflow: Postgres backend DB 'mlflow', artifacts in s3://idp-ml/mlflow)"
+bash "${HERE}/mlflow/install.sh" "${NS}"
 
 echo ">> observability (Prometheus + Grafana + node-exporter + kube-state-metrics)"
 hi kube-prom prometheus-community/kube-prometheus-stack \

@@ -1,0 +1,70 @@
+# MLflow tracking server + model registry (REQ-ML-04), community-charts/mlflow 1.11.2
+# (MLflow 3.14.0 = the mlflow-skinny client pinned in requirements.txt).
+#
+#   make mlflow            # = bash deploy/platform/mlflow/install.sh (creates the DB too)
+#
+# In-cluster endpoint: http://mlflow.idp-platform.svc:80 (Service port 80 -> container
+# 5000). Clients set IDP_MLFLOW_TRACKING_URI to it; `make mlflow-ui` forwards it to
+# http://127.0.0.1:5050.
+
+# Backend store: the platform TimescaleDB/Postgres, database `mlflow` (created by
+# install.sh, like the Airflow and Iceberg catalog databases). Dev credentials, as
+# elsewhere in deploy/; External Secrets on EKS.
+backendStore:
+  databaseMigration: true          # `mlflow db upgrade` before the server starts
+  databaseConnectionCheck: true    # wait for Postgres
+  postgres:
+    enabled: true
+    host: timescaledb.idp-platform.svc
+    port: 5432
+    database: mlflow
+    user: postgres
+    password: idp-dev-password
+    driver: psycopg2
+
+# Artifacts (the pyfunc-wrapped joblib models) go to s3://idp-ml/mlflow on MinIO.
+# Not proxied: train/score/API upload and download directly with the platform's S3
+# keys (the idp model store sets MLFLOW_S3_ENDPOINT_URL from IDP_S3_*). The server
+# gets the MinIO keys from the `minio` Secret to list artifacts in the UI.
+artifactRoot:
+  proxiedArtifactStorage: false
+  s3:
+    enabled: true
+    bucket: idp-ml
+    path: mlflow
+    existingSecret:
+      name: minio
+      keyOfAccessKeyId: rootUser
+      keyOfSecretAccessKey: rootPassword
+
+extraEnvVars:
+  MLFLOW_S3_ENDPOINT_URL: http://minio.idp-platform.svc:9000
+  AWS_DEFAULT_REGION: us-east-1
+  # TimescaleDB allows 25 connections, shared with Airflow, the Iceberg catalog
+  # (Spark stages, Trino) and publish: keep MLflow's pool small.
+  MLFLOW_SQLALCHEMYSTORE_POOL_SIZE: "2"
+  MLFLOW_SQLALCHEMYSTORE_MAX_OVERFLOW: "2"
+  # MLflow 3 starts a job runner and about ten huey consumer processes (~200 MiB
+  # each) for server-side GenAI jobs; the registry doesn't use them, and they
+  # OOM-kill the pod on the 14 GB minikube node.
+  MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+
+# One worker: the registry sees a handful of calls per train/score run and one
+# champion check per API replica per refresh interval.
+extraArgs:
+  workers: "1"
+
+# The server validates the Host header; allow the in-cluster name and port-forwards.
+serverAllowedHosts:
+  - "mlflow.idp-platform.svc*"
+  - "mlflow*"
+  - "localhost*"
+  - "127.0.0.1*"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 384Mi
+  limits:
+    cpu: "1"
+    memory: 768Mi

@@ -134,14 +134,29 @@ ml:
   train_max_rows: 2000000
   sample_seed: 42
 
+# Model registry (REQ-ML-04). With a tracking URI, `train` logs each run to MLflow,
+# registers `idp-credit`/`idp-fraud` versions and moves the `champion` alias to
+# versions that pass the gates below; Score and the scoring API load `champion`
+# (the API re-checks it every refresh_seconds). Empty = the object-store fallback
+# (s3://<prefix>-ml/*.joblib, or storage.ml_artifacts locally), latest model wins.
+# Env: IDP_MLFLOW_TRACKING_URI, IDP_MLFLOW_REFRESH_SECONDS. In the cluster the workloads
+# set http://mlflow.idp-platform.svc:80 (chart community-charts/mlflow 1.11.2: Service
+# `mlflow` port 80 -> container 5000); from the host, `make mlflow-ui` = 127.0.0.1:5050.
+mlflow:
+  tracking_uri: ""
+  refresh_seconds: 60
+  experiment: "idp-training"
+
 credit:
   base_multiplier: 3.0         # k in limit0 = k * avg_recharge * factors
   min_limit: 5.0
   max_limit: 500.0
+  min_auc: 0.55                # promotion gate: a new version becomes `champion` only if hold-out AUC >= this
 
 # Fraud model (see plan section 6)
 fraud:
   anomaly_contamination: 0.05
+  min_pr_auc_lift: 1.5         # promotion gate: hold-out PR-AUC >= this x the hold-out fraud rate
   rule_thresholds:
     originating_ratio: 0.9     # SIM-box signature
     max_calls_per_day: 200

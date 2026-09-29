@@ -76,7 +76,12 @@ CATALOG_ENV = [
     k8s.V1EnvVar(name="IDP_CATALOG_TYPE", value="sql"),
     k8s.V1EnvVar(name="IDP_CATALOG_URI", value=LAKE_CATALOG_URI),
 ]
-LAKE_ENV = S3_ENV + CATALOG_ENV
+# The model registry (REQ-ML-04): train registers versions and moves `champion`
+# through the gate; score loads `champion` (MLflow artifacts use the S3 env above).
+MLFLOW_ENV = [
+    k8s.V1EnvVar(name="IDP_MLFLOW_TRACKING_URI", value="http://mlflow.idp-platform.svc:80"),
+]
+LAKE_ENV = S3_ENV + CATALOG_ENV + MLFLOW_ENV
 # Synthetic-generation volume for the `labels` task. MUST MATCH the produce job
 # (deploy/app/jobs/produce-job.yaml) — labels are regenerated deterministically
 # from these params and must line up with the data that became Gold, or the

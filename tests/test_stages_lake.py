@@ -124,6 +124,28 @@ def test_train_reads_only_gold_and_labels(local_lake, monkeypatch):
     assert storage.model_exists(storage.model_uri(local_lake, "credit_model.joblib"), local_lake)
 
 
+def test_train_registers_and_score_uses_the_champion(local_lake, tmp_path, monkeypatch):
+    # REQ-ML-04 with a registry (SCN-ML-04.2/04.3): train registers both versions,
+    # moves `champion` per gate, and Score (no in-memory models) uses the champions
+    monkeypatch.delenv("IDP_MLFLOW_TRACKING_URI", raising=False)
+    import copy
+    from idp.ml.registry import model_store
+    cfg = copy.copy(local_lake)
+    cfg.raw = {**local_lake.raw, "mlflow": {
+        "tracking_uri": f"sqlite:///{tmp_path / 'mlflow.db'}", "experiment": "idp-train-test",
+        "artifact_location": (tmp_path / "mlartifacts").as_uri()},
+        "credit": {**local_lake.raw.get("credit", {}), "min_auc": 0.0},
+        "fraud": {**local_lake.raw.get("fraud", {}), "min_pr_auc_lift": 0.0}}
+    result = train(cfg, persist=True)
+    reg = result["registry"]
+    assert reg["credit"]["version"] == "1" and reg["fraud"]["version"] == "1"
+    assert reg["credit"]["promoted"] and reg["fraud"]["promoted"]
+    store = model_store(cfg)
+    assert store.champion_version("credit") == "1"
+    out = to_scores(cfg, persist=False)
+    assert out["score_tables"] == ["credit_scores", "fraud_scores"]
+
+
 def test_scores_read_gold_from_the_lake(local_lake):
     models = train(local_lake, persist=False)["models"]
     out = to_scores(local_lake, models=models, persist=False)

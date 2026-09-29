@@ -32,6 +32,9 @@ spec:
               value: "minioadmin123"
             - name: IDP_S3_BUCKET_PREFIX
               value: "idp"
+            # Model registry (REQ-ML-04): MLflow in idp-platform; artifacts use the S3 env above
+            - name: IDP_MLFLOW_TRACKING_URI
+              value: "http://mlflow.idp-platform.svc:80"
             # the lake's Iceberg catalog (REQ-FND-04): JDBC on the platform Postgres
             # (database `iceberg`; dev credentials, use External Secrets on EKS)
             - name: IDP_CATALOG_TYPE

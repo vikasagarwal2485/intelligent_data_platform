@@ -7,7 +7,7 @@ from idp.common.config import load_config
 def test_config_exposes_all_sections():
     # SCN-FND-01.1
     cfg = load_config()
-    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "timescale",
+    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "mlflow", "timescale",
                     "spark", "synthetic", "features", "credit", "fraud"):
         assert getattr(cfg, section) is not None, section
 
@@ -93,3 +93,13 @@ def test_trino_defaults_and_env(monkeypatch):
     monkeypatch.setenv("IDP_TRINO_PORT", "8443")
     t = load_config().trino
     assert (t["host"], t["port"]) == ("trino.idp-platform.svc", 8443)
+
+
+def test_mlflow_registry_via_env(monkeypatch):
+    # REQ-ML-04 — no tracking URI: the object-store fallback; the env selects MLflow
+    monkeypatch.delenv("IDP_MLFLOW_TRACKING_URI", raising=False)
+    cfg = load_config()
+    assert cfg.mlflow["tracking_uri"] == "" and cfg.mlflow["refresh_seconds"] == 60
+    assert cfg.credit["min_auc"] == 0.55 and cfg.fraud["min_pr_auc_lift"] == 1.5
+    monkeypatch.setenv("IDP_MLFLOW_TRACKING_URI", "http://mlflow.idp-platform.svc:5000")
+    assert load_config().mlflow["tracking_uri"] == "http://mlflow.idp-platform.svc:5000"

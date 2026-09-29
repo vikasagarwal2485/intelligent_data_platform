@@ -81,6 +81,16 @@ class PlatformConfig:
         return self.raw.get("fraud", {})
 
     @property
+    def mlflow(self) -> dict[str, Any]:
+        """Model registry (REQ-ML-04): MLflow when ``tracking_uri`` is set, else the
+        object-store fallback."""
+        m = {"tracking_uri": "", "refresh_seconds": 60, "experiment": "idp-training",
+             **self.raw.get("mlflow", {})}
+        m["tracking_uri"] = os.environ.get("IDP_MLFLOW_TRACKING_URI", m["tracking_uri"] or "")
+        m["refresh_seconds"] = float(os.environ.get("IDP_MLFLOW_REFRESH_SECONDS", m["refresh_seconds"]))
+        return m
+
+    @property
     def kafka(self) -> dict[str, Any]:
         k = dict(self.raw.get("kafka", {}))
         k["bootstrap"] = os.environ.get("IDP_KAFKA_BOOTSTRAP", k.get("bootstrap", "localhost:9092"))

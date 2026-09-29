@@ -14,3 +14,8 @@ mcp>=1.2
 pyspark==3.5.3
 pyiceberg[sql-sqlite,sql-postgres,pyarrow,s3fs,pyiceberg-core]==0.12.0
 trino==0.340.0
+# Model registry client (REQ-ML-04), matched to the server (MLflow chart 1.11.2 = 3.14.0).
+# boto3/botocore stay inside aiobotocore's (s3fs) botocore range.
+mlflow-skinny==3.14.0
+boto3>=1.43.3,<1.43.47
+botocore>=1.43.3,<1.43.47

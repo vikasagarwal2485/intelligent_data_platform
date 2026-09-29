@@ -49,6 +49,10 @@ PY
 # config/platform.yaml relative to the project root (/app).
 COPY pyproject.toml ./
 COPY src ./src
+# Which commit this image runs: tagged on every model registry run (REQ-ML-04),
+# since loading a model needs the same idp classes that trained it.
+ARG IDP_GIT_SHA=unknown
+ENV IDP_GIT_SHA=${IDP_GIT_SHA}
 COPY config ./config
 RUN pip install -e .
 

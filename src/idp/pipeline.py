@@ -347,7 +347,8 @@ def train(cfg: PlatformConfig, *, persist: bool = True) -> dict:
     lake in dev/tests), joins them, bounds each model's training set to
     ``ml.train_max_rows`` with a stratified per-(tenant, label) sample (REQ-ML-09),
     fits the credit and fraud models on that sample, evaluates out-of-sample, and
-    saves them to the model store. The metrics record ``sampled_rows`` and
+    saves them to the model store (REQ-ML-04; ``registry`` in the result reports each
+    model's version and whether it passed the gate and became ``champion``). The metrics record ``sampled_rows`` and
     ``sample_seed``. Never builds features from Silver and never regenerates
     synthetic data.
     """
@@ -406,13 +407,27 @@ def train(cfg: PlatformConfig, *, persist: bool = True) -> dict:
     credit_metrics.update(sampled_rows=credit_rows, sample_seed=seed)
     fraud_metrics.update(sampled_rows=fraud_rows, sample_seed=seed)
 
+    registry: dict[str, dict] = {}
     if persist:
-        storage.save_model(credit_model, storage.model_uri(cfg, "credit_model.joblib"), cfg)
-        storage.save_model(fraud_model, storage.model_uri(cfg, "fraud_model.joblib"), cfg)
+        # The model store (REQ-ML-04): MLflow registers both versions and moves
+        # `champion` only to those that pass the gate; the object-store fallback just
+        # replaces the files.
+        from idp.ml.registry import model_store
+        params = {"train_max_rows": cap, "sample_seed": seed,
+                  "credit_rows": credit_rows, "fraud_rows": fraud_rows,
+                  "credit_base_multiplier": credit_model.base_multiplier,
+                  "credit_min_limit": credit_model.min_limit, "credit_max_limit": credit_model.max_limit,
+                  "fraud_contamination": fraud_model.contamination}
+        saved = model_store(cfg).save({"credit": (credit_model, credit_metrics),
+                                       "fraud": (fraud_model, fraud_metrics)}, params)
+        registry = {name: {"version": r.version, "promoted": r.promoted,
+                           "gate": "passed" if r.gate.passed else "failed", "gate_reason": r.gate.reason}
+                    for name, r in saved.items()}
 
     return {
         "credit_metrics": credit_metrics,
         "fraud_metrics": fraud_metrics,
+        "registry": registry,
         "models": {"credit": credit_model, "fraud": fraud_model},
     }
 

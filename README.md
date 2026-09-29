@@ -77,7 +77,7 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
 | **Keycloak** | OIDC identity for multi-tenant RBAC | Provisioned (RBAC design, §1.5) |
 | **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | Provisioned (DAG in `pipelines/airflow`) |
-| **MLflow** | Experiment tracking + model registry | Provisioned (registry target) |
+| **MLflow** | Experiment tracking + model registry (versions, gated `champion` alias) | **Active** (`make mlflow` + `make mlflow-ui`) |
 | **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
 | **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | Optional (`make kafka-ui`) |
 
@@ -344,8 +344,9 @@ make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by serv
 ```
 > **Training vs scoring are separate** (phase-13). `train` (fit) learns from
 > **historical Gold features + the labels store** — no synthetic regeneration — and
-> writes a model to the shared MinIO model store (`s3://idp-ml`). `score`
-> (inference) applies that model to the latest Gold features to produce
+> registers a new model version in the MLflow registry, which becomes `champion`
+> only if it passes its quality gate. `score` (inference) applies the `champion`
+> models to the latest Gold features to produce
 > `credit_scores`/`fraud_scores`. Skip `score` (or `train`) and Gold/TimescaleDB
 > hold **features only** — which is why a `gold.credit_features`-only TimescaleDB
 > means scoring hasn't run. In Airflow this is **three dataset-driven DAGs**:
@@ -435,7 +436,7 @@ distinct CLI command / job:
 | Silver | `to_silver` | `idp silver [--full-refresh]` | new Bronze snapshots | `s3://idp-silver` |
 | Gold | `to_gold` | `idp gold` | `s3://idp-silver` | `s3://idp-gold` |
 | Serving | `publish_serving` | `idp publish` | `s3://idp-gold` | **TimescaleDB** (`gold.*` tables) |
-| ML train | `train` | `idp train` | labelled data | `ml/artifacts` (MLflow target) |
+| ML train | `train` | `idp train` | Gold features + labels | MLflow registry (`idp-credit`/`idp-fraud`), else `s3://idp-ml/*.joblib` |
 
 `idp run` is the **local dev orchestrator** — it composes the same stage functions
 end-to-end against local storage (see the note at the end of §4).
@@ -688,8 +689,9 @@ What that looks like in practice:
   it.
 
 What's *not* in this bucket: the trained models and the labels. They live in
-`idp-ml` (`s3://idp-ml/*.joblib`, `s3://idp-ml/labels/`), deliberately outside the
-lake, so that labels never leak into features or serving (REQ-ML-06).
+`idp-ml` (the MLflow registry's artifacts under `s3://idp-ml/mlflow/`, or
+`s3://idp-ml/*.joblib` without a registry, and `s3://idp-ml/labels/`), deliberately
+outside the lake, so that labels never leak into features or serving (REQ-ML-06).
 
 ### 4.4 ML algorithms
 
@@ -716,9 +718,21 @@ reads **historical Gold features + a labels/outcomes store** (`s3://idp-ml/label
 kept out of the serving path so labels never leak) and writes a model — it does
 **not** regenerate synthetic data. `score` (inference) applies the model to the
 latest Gold features to produce `credit_scores`/`fraud_scores`; `to_gold` builds
-features only. Both the model store and labels store live under MinIO `s3://idp-ml`
-(local dir otherwise) via `common/storage.py`, shared across the `train`, `score`
-and `scoring-api` pods (MLflow registry is the longer-term prod target). Orchestrated
+features only.
+
+**Model registry (REQ-ML-04).** With `IDP_MLFLOW_TRACKING_URI` set (as in the
+cluster), `train` logs one MLflow run (parameters, both models' hold-out metrics, the
+`idp` version and git SHA) and registers new versions of `idp-credit` and
+`idp-fraud` (`ml/registry.py`). A version moves the `champion` alias only if it
+passes its gate: credit AUC ≥ `credit.min_auc` (0.55), fraud PR-AUC ≥
+`fraud.min_pr_auc_lift` (1.5) × the hold-out fraud rate. A failing version is
+registered with its metrics and leaves the champion alone. `score` loads the
+champions (and skips a model that has none yet), and the scoring API re-checks
+`champion` every `mlflow.refresh_seconds` (60), so it serves a newly promoted model
+without a restart and keeps the cached one if the registry is unreachable. Without a
+tracking URI (local dev, tests), models are joblib files in `s3://idp-ml` or the
+local ML dir, and the latest trained model is used. The labels store stays under
+`s3://idp-ml/labels`, shared across the `train`, `score` and `scoring-api` pods. Orchestrated
 as **three dataset-driven DAGs**: `idp_features` (`silver → gold`), `idp_training`
 (`labels → train`), and `idp_inference` (`score → publish`) — inference is scheduled
 on the gold-features **or** model dataset, so a new model or fresh features
