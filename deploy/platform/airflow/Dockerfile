@@ -5,10 +5,15 @@
 # image removes any dependency on GitHub egress or credentials for the demo.
 #
 # Build INTO minikube's docker daemon (no registry needed) — `make airflow-wire`
-# does this for you. The build CONTEXT is the dags directory itself, so the repo
-# root .dockerignore (which excludes pipelines/) does not apply:
+# and `make airflow-reload` do this for you. The build CONTEXT is the dags
+# directory itself, so the repo root .dockerignore (which excludes pipelines/)
+# does not apply. The Spark stages' SparkApplication manifests have ONE copy in the
+# repo, deploy/app/spark/ (rendered by `make spark-manifests`); they come in as the
+# named build context `spark` (BuildKit) and land in dags/spark/, where the DAG's
+# SparkKubernetesOperator tasks read `spark/<stage>.yaml`:
 #   eval $(minikube docker-env) && \
-#     docker build -t idp/airflow:dev -f deploy/airflow/Dockerfile pipelines/airflow/dags
+#     docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile \
+#       --build-context spark=deploy/app/spark pipelines/airflow/dags
 #
 # Base tag matches the pinned chart 1.15.0 (Airflow 2.9.3). The official image
 # already bundles the cncf.kubernetes provider the DAGs need.
@@ -17,3 +22,4 @@ FROM apache/airflow:2.9.3
 # Owned by the image's `airflow` user so the DAGs are readable regardless of the
 # host checkout's file modes (e.g. a 077 umask leaves them 0600).
 COPY --chown=airflow:root . /opt/airflow/dags/
+COPY --from=spark --chown=airflow:root . /opt/airflow/dags/spark/

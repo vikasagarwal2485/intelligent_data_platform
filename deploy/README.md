@@ -29,6 +29,8 @@ deploy/
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
     overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
     jobs/                   #   produce/consume/silver/gold/score/labels/train/publish Jobs
+    spark/                  #   SparkApplications for silver/gold/score/publish/maintain: the one
+                            #   copy (`make spark-manifests`); the Airflow DAG image bakes it in
 ```
 
 ## What the platform base provides
@@ -121,10 +123,12 @@ Kubernetes Jobs.
   `…-exec-N` executors).
 - **Scale a stage:** raise `executor.instances` (or `memory`) in its profile, run
   `make mk-check` (does the node still fit it?), then `make spark-manifests` (it
-  re-renders `deploy/app/spark/*.yaml` and the DAG image's copy, which a test
-  compares). No code changes.
-- **Airflow:** the DAG image carries the rendered manifests (`dags/spark/`), and its
-  Spark tasks use `SparkKubernetesOperator`. After changing a profile, run
+  re-renders `deploy/app/spark/*.yaml`, which a test compares with the profiles).
+  No code changes.
+- **Airflow:** the manifests have one copy, `deploy/app/spark/`. The DAG image
+  bakes it in as `dags/spark/` at build time (`--build-context
+  spark=deploy/app/spark`, BuildKit), and the Spark tasks' `SparkKubernetesOperator`
+  reads `spark/<stage>.yaml` there. After changing a profile, run
   `make spark-manifests` and then `make airflow-reload`.
 - **The image:** Spark on Kubernetes starts pods with `driver …` / `executor …`,
   and the image's entrypoint (`docker/spark-entrypoint.sh`) handles those. Every

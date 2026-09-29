@@ -307,12 +307,11 @@ define wait_sparkapp
 endef
 
 .PHONY: spark-manifests
-spark-manifests: ## Re-render the committed SparkApplication manifests (deploy/app/spark/, + the DAG image copy) from spark.profiles
-	@mkdir -p deploy/app/spark pipelines/airflow/dags/spark
+spark-manifests: ## Re-render the SparkApplication manifests (deploy/app/spark/, the one copy; the DAG image bakes it in) from spark.profiles
+	@mkdir -p deploy/app/spark
 	@for st in silver gold score publish maintain; do \
 	  $(PY) -m idp.cli spark-manifest $$st > deploy/app/spark/$$st.yaml; \
-	  cp deploy/app/spark/$$st.yaml pipelines/airflow/dags/spark/$$st.yaml; \
-	done; echo ">> rendered deploy/app/spark/*.yaml (+ pipelines/airflow/dags/spark/)"
+	done; echo ">> rendered deploy/app/spark/*.yaml (run 'make airflow-reload' so the DAG image picks them up)"
 
 # Wait for an idp-app Job to finish: exit 0 when it completes, and exit 1 (printing
 # its log) as soon as it FAILS, instead of `kubectl wait --for=condition=complete`,
@@ -423,7 +422,7 @@ timescale-verify: ## Verify the publish stage: list every gold.* serving table w
 .PHONY: airflow-wire
 airflow-wire: ## Build DAG image into minikube + install Airflow (external metadata DB) + RBAC
 	@echo ">> Building the Airflow DAG image into minikube (idp/airflow:dev)..."
-	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile pipelines/airflow/dags
+	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile --build-context spark=deploy/app/spark pipelines/airflow/dags
 	@echo ">> Ensuring the 'airflow' metadata database exists in TimescaleDB..."
 	kubectl -n idp-platform exec deploy/timescaledb -- psql -U postgres -tc \
 	  "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 || \
@@ -438,7 +437,7 @@ airflow-wire: ## Build DAG image into minikube + install Airflow (external metad
 .PHONY: airflow-reload
 airflow-reload: ## Rebuild the DAG image + restart Airflow so it re-parses the DAGs (run after any DAG change)
 	@echo ">> Rebuilding the DAG image into minikube (idp/airflow:dev)..."
-	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile pipelines/airflow/dags
+	@eval $$(minikube docker-env) && docker build -t idp/airflow:dev -f deploy/platform/airflow/Dockerfile --build-context spark=deploy/app/spark pipelines/airflow/dags
 	# The image tag never changes, so pods won't restart on their own — force it so
 	# the scheduler/dag-processor pick up the new baked DAGs (imagePullPolicy
 	# IfNotPresent resolves the freshly rebuilt local tag).

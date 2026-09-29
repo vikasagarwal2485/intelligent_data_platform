@@ -17,7 +17,16 @@ def test_committed_manifests_match_the_profiles(stage):
     # `make spark-manifests` output must not drift from config/platform.yaml
     rendered = render(load_config(), stage)
     assert (ROOT / "deploy/app/spark" / f"{stage}.yaml").read_text() == rendered
-    assert (ROOT / "pipelines/airflow/dags/spark" / f"{stage}.yaml").read_text() == rendered
+
+
+def test_manifests_have_one_copy():
+    # SCN-ORC-07.4 — deploy/app/spark/ is the only copy: the Airflow image bakes it in as dags/spark/
+    # (named build context), so the DAG folder must not carry its own
+    assert not (ROOT / "pipelines/airflow/dags/spark").exists()
+    dockerfile = (ROOT / "deploy/platform/airflow/Dockerfile").read_text()
+    assert "COPY --from=spark" in dockerfile and "/opt/airflow/dags/spark/" in dockerfile
+    makefile = (ROOT / "Makefile").read_text()
+    assert makefile.count("--build-context spark=deploy/app/spark") == 2   # airflow-wire + airflow-reload
 
 
 @pytest.mark.parametrize("stage", SPARK_STAGES)

@@ -220,6 +220,11 @@ the declared overhead. A stage's capacity SHALL grow by adding executors, withou
 changing code. Overlapping runs of different stages SHALL NOT exceed their
 containers' limits.
 
+Each stage's application manifest SHALL be rendered from its profile into a single
+committed copy (`deploy/app/spark/<stage>.yaml`). Both the manual `make` runs and
+the Airflow tasks SHALL submit that copy; the Airflow DAG image SHALL take it from
+there at build time rather than keep its own.
+
 #### Scenario: SCN-ORC-07.1 — Profile applied
 - **WHEN** the Gold profile sets 3 executors with 2 GiB memory and 512 MiB overhead
   each
@@ -235,3 +240,9 @@ containers' limits.
 #### Scenario: SCN-ORC-07.3 — Overlapping stages stay within limits
 - **WHEN** a Silver application and a maintenance application run at the same time
 - **THEN** both complete and no container is OOMKilled
+
+#### Scenario: SCN-ORC-07.4 — One manifest for make and Airflow
+- **WHEN** a stage's profile changes and the manifests are re-rendered
+  (`make spark-manifests`)
+- **THEN** only `deploy/app/spark/<stage>.yaml` changes, it matches the profile, and
+  the next DAG image build (`make airflow-reload`) submits that same manifest

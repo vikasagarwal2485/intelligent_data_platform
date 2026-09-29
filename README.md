@@ -206,7 +206,9 @@ deploy/                      # split by owning team (ADR-0018)
     deployment/              #     scoring-api base (Deployment/Service)
     overlays/local|aws/      #     env patches for scoring-api (dev image / ECR+IRSA)
     jobs/                    #     produce/consume/silver/gold/score/labels/train/publish Jobs
-pipelines/airflow/dags/      # Airflow DAG for the batch pipeline
+    spark/                   #     the Spark stages' SparkApplications (the one copy; `make
+                             #     spark-manifests`), also baked into the Airflow DAG image
+pipelines/airflow/dags/      # Airflow DAGs for the batch pipeline (Spark manifests come from deploy/app/spark/)
 tests/                       # 63 pytest tests across every layer
 docs/                        # architecture & implementation plan
 Makefile                     # all workflows (run `make help`)
@@ -409,7 +411,9 @@ make minio-reset                                # clean re-run: recreate the buc
   - **Entrypoints:** `pipelines/spark/<stage>_job.py`, thin wrappers over the same
     `idp` stages.
   - **Scaling:** raise `spark.profiles.<stage>.executor.instances` (or memory),
-    then run `make mk-check` and `make spark-manifests`. There's no code change.
+    then run `make mk-check` and `make spark-manifests` (it rewrites the one copy,
+    `deploy/app/spark/<stage>.yaml`), and `make airflow-reload` for the DAGs, whose
+    image bakes that folder in. There's no code change.
   - **Distributed stages:** scoring runs per partition with the models broadcast,
     and publish loads staging tables over JDBC and swaps them in atomically.
   - **Training** fits on at most `ml.train_max_rows` rows, sampled per

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 DAG_FILE = Path(__file__).resolve().parents[1] / "pipelines" / "airflow" / "dags" / "idp_medallion_dag.py"
+SPARK_MANIFESTS = Path(__file__).resolve().parents[1] / "deploy" / "app" / "spark"
 
 
 class _Dataset:
@@ -108,7 +109,8 @@ def test_spark_stages_are_spark_applications(dags):
                 continue
             seen.add(task.task_id)
             assert task.kwargs["namespace"] == "idp-app" and task.kwargs["delete_on_termination"]
-            manifest = DAG_FILE.parent / task.kwargs["application_file"]
+            # the image's dags/spark/<stage>.yaml is baked from deploy/app/spark/ (the one copy)
+            manifest = SPARK_MANIFESTS / Path(task.kwargs["application_file"]).relative_to("spark")
             spec = yaml.safe_load(manifest.read_text())["spec"]
             env = {e["name"]: e["value"] for e in spec["driver"]["env"]}
             assert env["IDP_CATALOG_TYPE"] == "sql" and env["IDP_S3_ENDPOINT"].startswith("http://minio.")

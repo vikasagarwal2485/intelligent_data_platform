@@ -4,8 +4,10 @@ In the cluster, Silver, Gold, Score, publish and maintenance run as Spark
 Operator ``SparkApplication``s: one driver pod plus executor pods, all from the
 ``idp`` image, running the same stage code as the CLI. The resources come from
 ``spark.profiles.<stage>`` in ``config/platform.yaml``, so profiles live in one
-place. ``idp spark-manifest <stage>`` renders the manifest; the ``make`` targets
-and the DAG image use the rendered files (``deploy/app/spark/<stage>.yaml``).
+place. ``idp spark-manifest <stage>`` renders the manifest, and ``make
+spark-manifests`` writes the one committed copy, ``deploy/app/spark/<stage>.yaml``:
+the ``make`` targets apply it, and the Airflow DAG image bakes it in as
+``dags/spark/`` (a named build context, ``deploy/platform/airflow/Dockerfile``).
 """
 from __future__ import annotations
 

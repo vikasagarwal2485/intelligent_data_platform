@@ -5,7 +5,8 @@ the one `idp` image, the same code as the CLI (REQ-ORC-05):
   * the Spark stages (silver, gold, score, publish, maintain) are submitted as Spark
     Operator SparkApplications (REQ-PLT-10): a driver pod plus executor pods, sized by
     `spark.profiles.<stage>`. The manifests are rendered by `make spark-manifests`
-    into ./spark/ next to this file (baked into the DAG image). A task succeeds only
+    into deploy/app/spark/ (their one copy in the repo), and the DAG image bakes them
+    in as ./spark/ next to this file (a named build context). A task succeeds only
     when its application completes; a failed application fails the task.
   * labels and train run as single pods (train uses a local Spark session for its
     bounded, stratified sample, REQ-ML-09).
@@ -120,7 +121,8 @@ def _stage(task_id: str, arg: str, *, extra_env=None, resources=None) -> Kuberne
 
 def _spark_stage(task_id: str, stage: str) -> SparkKubernetesOperator:
     """A Spark stage as a SparkApplication (driver + executors) in idp-app, from the
-    rendered manifest ./spark/<stage>.yaml. The task follows the driver and fails if
+    rendered manifest ./spark/<stage>.yaml (deploy/app/spark/ in the repo, baked into
+    the DAG image). The task follows the driver and fails if
     the application fails (SCN-ORC-02.6); the application is deleted afterwards."""
     return SparkKubernetesOperator(
         task_id=task_id,
