@@ -76,6 +76,13 @@ def overwrite_tenants(df: Any, cfg: PlatformConfig, layer: str, table: str,
     df.writeTo(name).overwritePartitions()
 
 
+def append(df: Any, cfg: PlatformConfig, layer: str, table: str,
+           partition_by: Iterable[Any] = (TENANT_PARTITION,)) -> None:
+    """Append ``df`` as one snapshot (e.g. a score run); nothing existing changes."""
+    name = ensure_table(df, cfg, layer, table, partition_by)
+    df.writeTo(name).append()
+
+
 def merge_insert_new(df: Any, cfg: PlatformConfig, layer: str, table: str,
                      keys: Iterable[str], partition_by: Iterable[Any] = (TENANT_PARTITION,)) -> None:
     """Insert the rows of ``df`` whose ``keys`` are not in the table yet (one commit).

@@ -1,11 +1,15 @@
 """Airflow DAGs that orchestrate the medallion stages (production mode).
 
-Airflow is the ORCHESTRATOR (schedule / order / retries); each stage runs as a
-POD it launches, all from the one `idp` image (`idp <stage>`). Silver and Gold run
-on Spark — the single transformation engine (REQ-ORC-05) — in that same image, as
-a local Spark master inside the pod with a fixed driver heap and Spark-sized pod
-resources. There is no engine switch: the DAG, the CLI and the Kubernetes Jobs all
-run the same code.
+Airflow is the ORCHESTRATOR (schedule / order / retries); every stage runs from
+the one `idp` image, the same code as the CLI (REQ-ORC-05):
+  * the Spark stages (silver, gold, score, publish, maintain) are submitted as Spark
+    Operator SparkApplications (REQ-PLT-10): a driver pod plus executor pods, sized by
+    `spark.profiles.<stage>`. The manifests are rendered by `make spark-manifests`
+    into ./spark/ next to this file (baked into the DAG image). A task succeeds only
+    when its application completes; a failed application fails the task.
+  * labels and train run as single pods (train uses a local Spark session for its
+    bounded, stratified sample, REQ-ML-09).
+There is no engine switch.
 
 Publish is a SEPARATE, independent task (Gold -> TimescaleDB) — never folded into
 Gold. Next step: migrate its target from TimescaleDB to Iceberg tables via the
@@ -18,7 +22,9 @@ Prerequisites:
   * `idp/scoring-api:dev` on the node (`make image`; bundles the JRE, pyspark, the
     S3A jars and the Iceberg jars)
   * the lake's Iceberg catalog database (`iceberg` on TimescaleDB, `make lake-catalog`)
-  * the Airflow SA may create pods in `idp-app` (deploy/platform/airflow/rbac.yaml)
+  * the Spark Operator watching idp-app (`make spark-operator`)
+  * the Airflow SA may create pods and SparkApplications in `idp-app`
+    (deploy/platform/airflow/rbac.yaml)
 
 DAGs (four, decoupled by cadence; the first three wired via Airflow Datasets):
   * idp_features  : silver >> gold           (hourly; PRODUCES gold-features dataset)
@@ -39,6 +45,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.datasets import Dataset
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator
 from kubernetes.client import models as k8s
 
 IMAGE = "idp/scoring-api:dev"
@@ -78,23 +85,9 @@ SYN_ENV = [
     k8s.V1EnvVar(name="IDP_SUBSCRIBERS", value="150"),
     k8s.V1EnvVar(name="IDP_DAYS", value="14"),
 ]
-# TimescaleDB env for the serving (publish) stage.
-TS_ENV = [
-    k8s.V1EnvVar(name="IDP_TS_HOST", value="timescaledb.idp-platform.svc"),
-    k8s.V1EnvVar(name="IDP_TS_PORT", value="5432"),
-    k8s.V1EnvVar(name="IDP_TS_DB", value="idp"),
-    k8s.V1EnvVar(name="IDP_TS_USER", value="postgres"),
-    k8s.V1EnvVar(name="IDP_TS_PASSWORD", value="idp-dev-password"),
-]
-
-# Spark runtime for the Silver/Gold pods: local master in the pod, fixed JVM heap,
-# and a pod limit with headroom above it for off-heap + Python memory (matches
-# deploy/app/jobs/{silver,gold}-job.yaml).
-SPARK_ENV = [
-    k8s.V1EnvVar(name="IDP_SPARK_MASTER", value="local[*]"),
-    k8s.V1EnvVar(name="IDP_SPARK_DRIVER_MEMORY", value="1g"),
-]
-SPARK_RESOURCES = k8s.V1ResourceRequirements(
+# train: a local Spark session (train profile: 2g heap + 1g overhead) for the
+# bounded training sample, then scikit-learn on that sample.
+TRAIN_RESOURCES = k8s.V1ResourceRequirements(
     requests={"cpu": "500m", "memory": "1536Mi"},
     limits={"cpu": "2", "memory": "3Gi"},
 )
@@ -120,9 +113,19 @@ def _stage(task_id: str, arg: str, *, extra_env=None, resources=None) -> Kuberne
     )
 
 
-def _spark_stage(task_id: str, arg: str) -> KubernetesPodOperator:
-    """Silver/Gold: the same `idp` stage pod, with the Spark runtime env + resources."""
-    return _stage(task_id, arg, extra_env=SPARK_ENV, resources=SPARK_RESOURCES)
+def _spark_stage(task_id: str, stage: str) -> SparkKubernetesOperator:
+    """A Spark stage as a SparkApplication (driver + executors) in idp-app, from the
+    rendered manifest ./spark/<stage>.yaml. The task follows the driver and fails if
+    the application fails (SCN-ORC-02.6); the application is deleted afterwards."""
+    return SparkKubernetesOperator(
+        task_id=task_id,
+        namespace=APP_NS,
+        application_file=f"spark/{stage}.yaml",
+        kubernetes_conn_id="kubernetes_default",
+        in_cluster=True,
+        get_logs=True,
+        delete_on_termination=True,
+    )
 
 
 # DAG 1 — FEATURES (refresh): Silver -> Gold (features only), on the data cadence.
@@ -158,7 +161,7 @@ with DAG(
     default_args=default_args,
     tags=["idp", "ml", "inference"],
 ) as dag_inference:
-    _stage("score", "score") >> _stage("publish", "publish", extra_env=TS_ENV)
+    _spark_stage("score", "score") >> _spark_stage("publish", "publish")
 
 
 # DAG 3 — TRAINING: labels -> train, on its own (daily) cadence. The train task
@@ -174,7 +177,7 @@ with DAG(
     default_args=default_args,
     tags=["idp", "ml", "training"],
 ) as dag_training:
-    _train = _stage("train", "train")
+    _train = _stage("train", "train", resources=TRAIN_RESOURCES)
     _train.outlets = [MODEL]                 # a new model triggers inference
     _stage("labels", "labels", extra_env=SYN_ENV) >> _train
 

@@ -90,6 +90,51 @@ The script adds the required Helm repos before installing — omitting
 All images are freely pullable — no Bitnami subscription needed. The script is
 idempotent and first removes any earlier broken Bitnami releases.
 
+## Spark stages as SparkApplications (Spark Operator)
+
+Silver, Gold, Score, publish and maintenance run in the cluster as **Kubeflow Spark
+Operator** `SparkApplication`s: one driver pod, which starts its executor pods, all
+from the `idp` image (ADR-0029). labels, train and the streaming stages stay
+Kubernetes Jobs.
+
+- **Install (idempotent):** `make spark-operator`, also run by
+  `install-infra.sh`.
+  - It pins chart `2.5.2` in `idp-platform`, watching only `idp-app`.
+  - It creates the driver ServiceAccount `idp-spark`, with RBAC to manage its own
+    executors.
+  - It adds the Airflow Role `idp-spark-submitter` (create/watch/delete
+    `sparkapplications`).
+- **Profiles:** `spark.profiles.<stage>` in `config/platform.yaml` sets driver and
+  executor cores, memory (the JVM heap), `memoryOverhead` and executor
+  `instances`. Each pod's memory limit is heap plus overhead. The defaults fit the
+  12 GB minikube node.
+- **Run a stage:** `make silver` (also `gold`, `score`, `publish`, `maintain` and
+  `silver-full-refresh`). The target:
+  1. runs `mk-check`
+  2. renders the manifest (`idp spark-manifest <stage>`) and applies it
+  3. waits for `COMPLETED` or `FAILED`, and prints the driver log
+
+  Pods: `kubectl -n idp-app get pods -l spark-role` (the driver and
+  `…-exec-N` executors).
+- **Scale a stage:** raise `executor.instances` (or `memory`) in its profile, run
+  `make mk-check` (does the node still fit it?), then `make spark-manifests` (it
+  re-renders `deploy/app/spark/*.yaml` and the DAG image's copy, which a test
+  compares). No code changes.
+- **Airflow:** the DAG image carries the rendered manifests (`dags/spark/`), and its
+  Spark tasks use `SparkKubernetesOperator`. After changing a profile, run
+  `make spark-manifests` and then `make airflow-reload`.
+- **The image:** Spark on Kubernetes starts pods with `driver …` / `executor …`,
+  and the image's entrypoint (`docker/spark-entrypoint.sh`) handles those. Every
+  other command (`idp serve`, `idp consume`, …) runs unchanged.
+- **Troubleshooting a failed application:**
+  - `kubectl -n idp-app get sparkapplication idp-<stage> -o yaml` (see
+    `.status.applicationState`)
+  - `kubectl -n idp-app logs idp-<stage>-driver`
+  - An executor OOMKilled below its limit means the node cap is too small; see
+    `make mk-check`.
+- **Rollback:** the single-pod Jobs are still in `deploy/app/jobs/`, e.g.
+  `kubectl -n idp-app apply -f deploy/app/jobs/gold-job.yaml`.
+
 ## Streaming ingestion: in-memory or through the landing zone
 
 Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same data.
@@ -231,6 +276,11 @@ process, the Spark JVM. Check it and raise it live (no restart, state kept):
 docker inspect minikube --format '{{.HostConfig.Memory}}'   # bytes; 0 = no cap
 docker update --memory 12g --memory-swap 12g minikube
 ```
+`make mk-check` does this check for you before you run Spark stages. It compares
+the container's cap with what is running now plus the largest Spark stage profile
+(`spark.profiles` in `config/platform.yaml`, driver plus executors, heap plus
+overhead). It fails with the exact `docker update` command when they don't fit.
+Re-run it after raising a profile's executors.
 
 **Stages fail with `FileNotFoundError: … /metadata/000NN-….metadata.json`**
 (e.g. `idp consume` in `to_bronze`, or `idp silver`): the lake buckets were emptied

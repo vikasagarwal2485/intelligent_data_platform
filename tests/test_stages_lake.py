@@ -111,14 +111,16 @@ def local_lake(spark, tmp_path_factory):
 def test_train_reads_only_gold_and_labels(local_lake, monkeypatch):
     # SCN-ML-03.3 / SCN-ML-03.4 — the local lake, never Silver, never regenerating
     import idp.pipeline as pipeline
+    from idp.transforms import lake
     read_layers = []
-    real = pipeline._read_layer
-    monkeypatch.setattr(pipeline, "_read_layer",
-                        lambda cfg, layer, tables: read_layers.append(layer) or real(cfg, layer, tables))
+    real = lake.read_table                        # training reads the lake with Spark
+    monkeypatch.setattr(lake, "read_table",
+                        lambda spark, cfg, layer, table: read_layers.append(layer) or real(spark, cfg, layer, table))
     monkeypatch.setattr(pipeline, "_gen_dataset", lambda *_: pytest.fail("must not regenerate data"))
     result = train(local_lake, persist=True)
     assert set(read_layers) == {"gold"}
     assert result["credit_metrics"]["n"] > 0
+    assert result["credit_metrics"]["sampled_rows"] > 0 and "sample_seed" in result["credit_metrics"]
     assert storage.model_exists(storage.model_uri(local_lake, "credit_model.joblib"), local_lake)
 
 
@@ -126,7 +128,7 @@ def test_scores_read_gold_from_the_lake(local_lake):
     models = train(local_lake, persist=False)["models"]
     out = to_scores(local_lake, models=models, persist=False)
     assert out["score_tables"] == ["credit_scores", "fraud_scores"]
-    assert len(out["credit_scores"]) == _consenting(local_lake)
+    assert out["counts"]["credit_scores"] == _consenting(local_lake)
 
 
 def test_run_equals_separate_stages(spark, tmp_path, monkeypatch):

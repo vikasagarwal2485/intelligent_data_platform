@@ -49,15 +49,64 @@ def _packages(cfg: PlatformConfig) -> list[str]:
     return pkgs
 
 
-def spark_conf(cfg: PlatformConfig) -> dict[str, str]:
-    """Builder settings for ``cfg``: master, driver memory, and S3A when enabled."""
+def _is_local(master: str) -> bool:
+    return master.startswith("local")
+
+
+def memory_mib(value: str | int) -> int:
+    """A Spark/JVM memory string (``512m``, ``2g``, ``1024k``, or MiB as an int) in MiB."""
+    v = str(value).strip().lower().rstrip("b")
+    units = {"k": 1 / 1024, "m": 1, "g": 1024, "t": 1024 * 1024}
+    if v and v[-1] in units:
+        return int(float(v[:-1]) * units[v[-1]])
+    return int(v)
+
+
+def stage_memory_mib(cfg: PlatformConfig, stage: str) -> dict[str, int]:
+    """Container memory a stage needs in the cluster, from its profile: each pod's
+    limit is heap + overhead (REQ-ORC-07). Returns driver, per-executor and total MiB."""
+    prof = cfg.spark_profile(stage)
+    drv, exe = prof["driver"], prof["executor"]
+    driver = memory_mib(drv.get("memory", cfg.spark["driver_memory"])) + memory_mib(drv.get("memoryOverhead", "384m"))
+    executor = (memory_mib(exe["memory"]) + memory_mib(exe.get("memoryOverhead", "384m"))) if exe else 0
+    instances = int(exe.get("instances", 0)) if exe else 0
+    return {"driver": driver, "executor": executor, "instances": instances,
+            "total": driver + instances * executor}
+
+
+def spark_conf(cfg: PlatformConfig, stage: str | None = None) -> dict[str, str]:
+    """Builder settings for ``cfg``: master, driver (and, off local, executor)
+    resources from the stage's profile (REQ-ORC-07), and S3A when enabled.
+
+    Driver heap precedence: ``IDP_SPARK_DRIVER_MEMORY`` > the stage profile >
+    ``spark.driver_memory``. Executor settings are applied only when the master
+    isn't ``local[...]`` (a local session has no executors).
+    """
+    import os
+
+    master = cfg.spark["master"]
+    prof = cfg.spark_profile(stage) if stage else {"driver": {}, "executor": {}}
+    drv, exe = prof["driver"], prof["executor"]
+    driver_memory = (os.environ.get("IDP_SPARK_DRIVER_MEMORY") or drv.get("memory")
+                     or cfg.spark["driver_memory"])
     conf: dict[str, str] = {
-        "spark.master": cfg.spark["master"],
-        "spark.driver.memory": str(cfg.spark["driver_memory"]),
+        "spark.master": master,
+        "spark.driver.memory": str(driver_memory),
         "spark.ui.showConsoleProgress": "false",
         "spark.sql.extensions": ICEBERG_EXTENSIONS,
         **RUNTIME_CONF,
     }
+    if not _is_local(master):
+        if "cores" in drv:
+            conf["spark.driver.cores"] = str(drv["cores"])
+        if "memoryOverhead" in drv:
+            conf["spark.driver.memoryOverhead"] = str(drv["memoryOverhead"])
+        for key, conf_key in (("instances", "spark.executor.instances"),
+                              ("cores", "spark.executor.cores"),
+                              ("memory", "spark.executor.memory"),
+                              ("memoryOverhead", "spark.executor.memoryOverhead")):
+            if key in exe:
+                conf[conf_key] = str(exe[key])
     s3 = cfg.s3
     if s3.get("enabled"):
         endpoint = str(s3["endpoint"])
@@ -76,7 +125,25 @@ def spark_conf(cfg: PlatformConfig) -> dict[str, str]:
     return conf
 
 
-def get_spark(cfg: PlatformConfig, app_name: str = "idp") -> Any:
+# Settings that spark-submit owns when it launched this process (the Spark
+# Operator's driver pod): the master and the driver/executor resources come from
+# the SparkApplication manifest, so the profile in THIS process's config must not
+# override them (the manifest is the single source of cluster resources).
+_SUBMIT_OWNED = ("spark.master", "spark.driver.", "spark.executor.")
+
+
+def builder_conf(cfg: PlatformConfig, stage: str | None = None) -> dict[str, str]:
+    """``spark_conf`` minus what spark-submit already set, when spark-submit
+    launched this Python process (pyspark's own signal: ``PYSPARK_GATEWAY_PORT``)."""
+    import os
+
+    conf = spark_conf(cfg, stage)
+    if "PYSPARK_GATEWAY_PORT" in os.environ:
+        conf = {k: v for k, v in conf.items() if not k.startswith(_SUBMIT_OWNED)}
+    return conf
+
+
+def get_spark(cfg: PlatformConfig, app_name: str = "idp", stage: str | None = None) -> Any:
     """Build (or reuse) the process's SparkSession for ``cfg``.
 
     Static settings (master, driver memory, jars) take effect when the first
@@ -85,7 +152,7 @@ def get_spark(cfg: PlatformConfig, app_name: str = "idp") -> Any:
     """
     from pyspark.sql import SparkSession
 
-    conf = spark_conf(cfg)
+    conf = builder_conf(cfg, stage)
     builder = SparkSession.builder.appName(app_name)
     for key, value in conf.items():
         builder = builder.config(key, value)

@@ -9,13 +9,16 @@ production **AWS EKS**).
 - Full design: [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
 - Deployment details: [`deploy/README.md`](deploy/README.md) · Kafka setup: [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md)
 
-> **Engines.** Silver and Gold run on **Apache Spark** — one implementation
-> (`src/idp/transforms`) used by the CLI, the Kubernetes Jobs, Airflow and the tests;
-> locally and in CI it runs as `local[*]` (ADR-0027). pandas + scikit-learn are
-> used for ML (training, scoring) only; scikit-learn `HistGradientBoosting*` stands
-> in for LightGBM/XGBoost. The lake is **Apache Iceberg** in a JDBC catalog: the
-> platform Postgres in the cluster, a local SQLite file in dev/CI (ADR-0028). Flink and a distributed
-> Spark cluster are represented by the deployed services and the design docs.
+> **Engines.** Silver and Gold run on **Apache Spark**, with one implementation
+> (`src/idp/transforms`) used by the CLI, the cluster, Airflow and the tests.
+> Locally and in CI it runs as `local[*]`. In the cluster, Silver, Gold, Score,
+> publish and maintenance run as **Spark Operator SparkApplications**: a driver plus
+> executors, sized per stage in `spark.profiles` (ADR-0027, ADR-0029).
+> scikit-learn fits the models on a bounded, stratified sample, and pandas scores
+> one Spark partition at a time; no process holds a whole table.
+> scikit-learn `HistGradientBoosting*` stands in for LightGBM/XGBoost. The lake is **Apache Iceberg** in a JDBC catalog: the
+> platform Postgres in the cluster, a local SQLite file in dev/CI (ADR-0028). Flink is
+> represented by the deployed services and the design docs.
 
 ---
 
@@ -374,12 +377,15 @@ make minio-reset                                # clean re-run: recreate the buc
 - **Airflow** — three dataset-driven DAGs (`idp_features`: `silver >> gold`;
   `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) plus the
   daily `idp_maintenance` DAG (`idp maintain`: compaction, snapshot expiry, orphan
-  cleanup; it triggers nothing), all of which
-  launch pods via `KubernetesPodOperator`. **Airflow is the orchestrator; every
-  stage pod runs the `idp` image.** Silver and Gold run on Spark inside that pod
-  (`local[*]`, fixed driver heap, Spark-sized resources) — the same code as
-  `idp silver` / `idp gold`; there is no engine switch (ADR-0027). `publish`
-  (Gold→TimescaleDB) stays a **separate** task.
+  cleanup; it triggers nothing). **Airflow is the orchestrator, and every stage
+  runs the `idp` image.**
+  - The Spark stages (silver, gold, score, publish, maintain) are submitted as
+    SparkApplications (`SparkKubernetesOperator`) and fail if the application
+    fails.
+  - labels and train run as pods (`KubernetesPodOperator`).
+  - The code is the same as `idp silver` / `idp gold` / …; there is no engine
+    switch (ADR-0027).
+  - `publish` (Gold→TimescaleDB) stays a **separate** task.
   Wire + trigger:
   ```bash
   make airflow-wire       # build DAG image into minikube + install Airflow + RBAC
@@ -396,9 +402,17 @@ make minio-reset                                # clean re-run: recreate the buc
     PostgreSQL/Redis — the retired Bitnami images no longer pull, which otherwise
     leaves `run-airflow-migrations` hanging and the init containers in
     `CrashLoopBackOff`.
-- **spark-submit entrypoints** (`pipelines/spark/{silver,gold}_job.py`) are thin
-  wrappers over the same `idp` stages, for a future Spark cluster / Spark Operator;
-  `make silver` / `make gold` already run the Spark implementation.
+- **Spark in the cluster (ADR-0029).** `make silver|gold|score|publish|maintain`
+  each render the stage's SparkApplication from its profile
+  (`idp spark-manifest <stage>`), apply it, and wait for `COMPLETED` or `FAILED`.
+  - **Entrypoints:** `pipelines/spark/<stage>_job.py`, thin wrappers over the same
+    `idp` stages.
+  - **Scaling:** raise `spark.profiles.<stage>.executor.instances` (or memory),
+    then run `make mk-check` and `make spark-manifests`. There's no code change.
+  - **Distributed stages:** scoring runs per partition with the models broadcast,
+    and publish loads staging tables over JDBC and swaps them in atomically.
+  - **Training** fits on at most `ml.train_max_rows` rows, sampled per
+    (tenant, label).
 - **Upgrading from the engine switch:** remove the old Airflow Variables and script
   ConfigMaps once (`airflow variables delete idp_silver_engine` / `idp_gold_engine`
   in the scheduler; `kubectl -n idp-app delete configmap idp-silver-spark
@@ -625,6 +639,57 @@ over the configured 7/30/90-day windows; the ordered model feature lists are
 The join that makes this work: the tokenized `service_id` is identical in
 `dim_subscriber` and the facts (same tenant salt), so facts aggregate back onto
 the dimension without exposing the raw MSISDN.
+
+#### The `idp-gold` bucket: what's in it
+
+`idp-gold` is the **Gold layer's bucket**: one analytics-ready row per subscriber
+(the model features), plus the history of every scoring run. The ML stages and the
+serving copy in TimescaleDB are built from it. Everything is under `tables/`:
+
+```
+idp-gold/tables/
+├── credit_features/     1 row per (tenant_id, service_id): credit-model features   <- idp gold
+├── fraud_features/      1 row per (tenant_id, service_id): fraud-model features    <- idp gold
+├── credit_scores/       credit limit + default probability, one set per scoring run <- idp score
+└── fraud_scores/        fraud score + flag, one set per scoring run                <- idp score
+```
+
+Each table has the Iceberg layout described for `idp-bronze`: `data/` holds
+Parquet files, and `metadata/` holds the `metadata.json` versions, manifest lists
+and manifests. What differs in Gold:
+
+| | `credit_features` / `fraud_features` | `credit_scores` / `fraud_scores` |
+|---|---|---|
+| Written by | `idp gold` (Spark), from Silver | `idp score` (pandas + the trained models), from the feature tables |
+| Partitioning | `tenant_id` → `data/tenant_id=tenant_a/…parquet` | `tenant_id`, then **day** of `scored_at` → `data/tenant_id=tenant_a/scored_at_day=2026-09-28/…parquet` |
+| How it's written | **Full recompute**, each run: the tenant partitions are overwritten atomically, so each run adds an `overwrite` snapshot | **Append**: each run adds its rows, stamped with the run's `scored_at`, as one snapshot. Old runs stay. |
+| Content | the current features; no history in the table's current state | every scoring run: the history behind the MCP 7/15/30-day score distributions |
+| Key | `(tenant_id, service_id)`, unique | `(tenant_id, service_id, scored_at)` |
+
+What that looks like in practice:
+- **Feature files pile up until maintenance.** Each `idp gold` writes a new file per
+  tenant partition and a new `overwrite` snapshot. The previous run's files leave
+  the current table, but they stay in the bucket because the older snapshot still
+  references them (time travel). So `credit_features/data/tenant_id=tenant_a/` holds
+  one file per run. `idp maintain` expires the old snapshots and deletes their
+  files. `make lake-table-show TABLE=gold.credit_features` shows each run as an
+  `overwrite` with the same 269 rows.
+- **Consent is applied here.** Gold keeps only subscribers who consent to analytics
+  (`consent_analytics`, REQ-FND-05). That's why Gold has fewer rows than Silver's
+  `dim_subscriber` (e.g. 269 of 300), and why the scores and serving tables have
+  that count too.
+- **Scores need a model.** `idp score` loads the trained models from `idp-ml`
+  (`make train`). Without them it writes nothing and says so, so the score tables
+  are missing after a reset until `make labels` and `make train` have run.
+- **Serving reads the latest run only.** `idp publish` copies the feature tables and
+  each tenant's **latest** scoring run (the maximum `scored_at`) into TimescaleDB
+  (`gold.*` tables, keyed by `(tenant_id, service_id)`), replacing the previous
+  copy. The full score history stays in the lake, and only the MCP score tools read
+  it.
+
+What's *not* in this bucket: the trained models and the labels. They live in
+`idp-ml` (`s3://idp-ml/*.joblib`, `s3://idp-ml/labels/`), deliberately outside the
+lake, so that labels never leak into features or serving (REQ-ML-06).
 
 ### 4.4 ML algorithms
 

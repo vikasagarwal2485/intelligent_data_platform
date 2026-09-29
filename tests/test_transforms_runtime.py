@@ -26,6 +26,53 @@ def test_master_from_config(monkeypatch):
     assert conf["spark.driver.memory"] == "3g"
 
 
+def test_stage_profile_applied_off_local(monkeypatch):
+    # SCN-ORC-07.1 at conf level: executors from the stage profile, driver its own
+    monkeypatch.setenv("IDP_SPARK_MASTER", "k8s://https://kubernetes.default.svc")
+    monkeypatch.delenv("IDP_SPARK_DRIVER_MEMORY", raising=False)
+    cfg = load_config()
+    cfg.raw["spark"]["profiles"]["gold"] = {
+        "driver": {"cores": 1, "memory": "1g", "memoryOverhead": "512m"},
+        "executor": {"instances": 3, "cores": 1, "memory": "2g", "memoryOverhead": "512m"}}
+    conf = spark_conf(cfg, stage="gold")
+    assert conf["spark.executor.instances"] == "3"
+    assert conf["spark.executor.memory"] == "2g" and conf["spark.executor.memoryOverhead"] == "512m"
+    assert conf["spark.driver.memory"] == "1g" and conf["spark.driver.memoryOverhead"] == "512m"
+
+
+def test_local_master_ignores_executor_settings(monkeypatch):
+    # SCN-ORC-05.2 — a local session has no executors; only the driver heap applies
+    monkeypatch.delenv("IDP_SPARK_MASTER", raising=False)
+    monkeypatch.delenv("IDP_SPARK_DRIVER_MEMORY", raising=False)
+    cfg = load_config()
+    conf = spark_conf(cfg, stage="silver")
+    assert conf["spark.master"] == "local[*]"
+    assert conf["spark.driver.memory"] == cfg.spark_profile("silver")["driver"]["memory"]
+    assert not any(k.startswith(("spark.executor.", "spark.driver.memoryOverhead")) for k in conf)
+
+
+def test_driver_memory_env_beats_profile(monkeypatch):
+    monkeypatch.setenv("IDP_SPARK_DRIVER_MEMORY", "3g")
+    assert spark_conf(load_config(), stage="train")["spark.driver.memory"] == "3g"
+    monkeypatch.delenv("IDP_SPARK_DRIVER_MEMORY")
+    assert spark_conf(load_config(), stage="train")["spark.driver.memory"] == "2g"   # the train profile
+    assert spark_conf(load_config(), stage="nope")["spark.driver.memory"] == "1g"    # unknown -> spark.driver_memory
+
+
+def test_spark_submit_owns_master_and_resources(monkeypatch):
+    # In the operator's driver pod the manifest's resources must win over the image's
+    # profile, so scaling a stage only needs a re-rendered manifest (REQ-ORC-07)
+    from idp.transforms.session import builder_conf
+    monkeypatch.setenv("IDP_SPARK_MASTER", "k8s://https://kubernetes.default.svc:443")
+    monkeypatch.delenv("PYSPARK_GATEWAY_PORT", raising=False)
+    cfg = load_config()
+    assert "spark.executor.instances" in builder_conf(cfg, "silver")          # not launched by spark-submit
+    monkeypatch.setenv("PYSPARK_GATEWAY_PORT", "12345")                       # launched by spark-submit
+    conf = builder_conf(cfg, "silver")
+    assert not any(k == "spark.master" or k.startswith(("spark.driver.", "spark.executor.")) for k in conf)
+    assert conf["spark.sql.extensions"] and conf["spark.sql.session.timeZone"] == "UTC"   # the rest still applies
+
+
 def test_runtime_settings_always_present(monkeypatch):
     monkeypatch.delenv("IDP_S3_ENDPOINT", raising=False)
     conf = spark_conf(load_config())

@@ -29,40 +29,61 @@ def get_engine(cfg: PlatformConfig):
     return create_engine(make_url(cfg), pool_pre_ping=True)
 
 
-def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None) -> None:
-    """Replace a serving table with ``df``, uniquely indexed by (tenant_id, service_id).
+def _qualified(name: str, schema: str | None) -> str:
+    return f'"{schema}"."{name}"' if schema else f'"{name}"'
 
-    The unique index enforces one serving row per subscriber (REQ-SRV-05). A frame
-    with duplicate keys fails the index build inside the transaction, so the table
-    previously published stays intact.
 
-    Concurrency-safe: ``if_exists="replace"`` does DROP+CREATE, and two publishers
-    running at once (e.g. ``make publish`` overlapping the inference DAG's publish
-    task) would race on the Postgres type catalog — `duplicate key value violates
-    unique constraint "pg_type_typname_nsp_index"`. We serialize per-table writers
-    with a transaction-scoped **advisory lock** and do the whole replace in one
-    transaction, so concurrent publishers wait their turn instead of colliding.
+def staging_name(table: str) -> str:
+    """A per-load staging table name: concurrent publishers never share one."""
+    import uuid
+    return f"{table}__staging_{uuid.uuid4().hex[:8]}"
+
+
+def swap_in(conn, table: str, staging: str, schema: str | None = None,
+            key_columns: tuple[str, ...] | list[str] = KEY_COLUMNS) -> None:
+    """Replace ``table`` with the loaded ``staging`` table, atomically (REQ-SRV-01/05).
+
+    Runs inside the caller's transaction (``engine.begin()``):
+    1. serialize the publishers of THIS table (Postgres advisory lock, released at commit)
+    2. drop the live table (its unique index goes with it)
+    3. build the unique ``(tenant_id, service_id)`` index on staging, under its final
+       name: duplicate keys fail HERE and the transaction rolls back, so the previous
+       table is kept (SCN-SRV-05.2)
+    4. rename staging to the live name
+
+    Readers see the old table until the commit and the new one after it; never a
+    partly loaded table (SCN-SRV-01.5).
     """
     from sqlalchemy import text
 
-    # The advisory lock below is Postgres-only; skip it on other backends (e.g. the
-    # SQLite engine used in tests), which lack pg_advisory_xact_lock/hashtext and
-    # have no cross-process DDL race to guard against.
-    is_postgres = engine.dialect.name == "postgresql"
-    qualified = f'"{schema}"."{name}"' if schema else f'"{name}"'
-    idx_cols = [c for c in KEY_COLUMNS if c in df.columns]
+    if conn.dialect.name == "postgresql":
+        conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"{schema or ''}.{table}"})
+    conn.execute(text(f"DROP TABLE IF EXISTS {_qualified(table, schema)}"))
+    if key_columns:
+        cols = ", ".join(f'"{c}"' for c in key_columns)
+        conn.execute(text(f'CREATE UNIQUE INDEX "ux_{table}_key" ON {_qualified(staging, schema)} ({cols})'))
+    conn.execute(text(f'ALTER TABLE {_qualified(staging, schema)} RENAME TO "{table}"'))
+
+
+def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None) -> None:
+    """Replace a serving table with ``df``, uniquely indexed by (tenant_id, service_id).
+
+    ``df`` is loaded into a fresh staging table and swapped in (``swap_in``), all in
+    one transaction: concurrent publishers queue on the advisory lock, a frame with
+    duplicate keys fails and leaves the previous table intact (REQ-SRV-05), and
+    readers never see a partial table. (The distributed publish loads the staging
+    table with Spark JDBC instead, then calls the same ``swap_in``.)
+    """
+    from sqlalchemy import text
+
+    staging = staging_name(name)
+    key_cols = tuple(c for c in KEY_COLUMNS if c in df.columns)
     with engine.begin() as conn:
         if schema:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-        # Serialize concurrent publishers of THIS table (released at commit).
-        if is_postgres:
-            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                         {"k": f"{schema or ''}.{name}"})
-        df.to_sql(name, conn, schema=schema, if_exists="replace", index=False,
+        df.to_sql(staging, conn, schema=schema, if_exists="replace", index=False,
                   method="multi", chunksize=1000)
-        if idx_cols:
-            cols = ", ".join(f'"{c}"' for c in idx_cols)
-            conn.execute(text(f'CREATE UNIQUE INDEX IF NOT EXISTS "ux_{name}_key" ON {qualified} ({cols})'))
+        swap_in(conn, name, staging, schema, key_cols)
 
 
 def publish_gold(cfg: PlatformConfig, gold: dict[str, pd.DataFrame], engine=None) -> list[str]:
@@ -74,6 +95,51 @@ def publish_gold(cfg: PlatformConfig, gold: dict[str, pd.DataFrame], engine=None
         if df is None or df.empty:
             continue
         publish_frame(eng, name, df, schema)
+        published.append(name)
+    return published
+
+
+def jdbc_target(engine) -> tuple[str, dict[str, str]]:
+    """Spark JDBC URL and connection properties for the engine's database (the same
+    database ``swap_in`` runs on): PostgreSQL/TimescaleDB, or SQLite in tests."""
+    url = engine.url
+    if url.get_backend_name() == "sqlite":
+        return f"jdbc:sqlite:{url.database}", {"driver": "org.sqlite.JDBC"}
+    props = {"driver": "org.postgresql.Driver", "user": url.username or "",
+             "password": url.password or ""}
+    return f"jdbc:postgresql://{url.host}:{url.port or 5432}/{url.database}", props
+
+
+def publish_spark(cfg: PlatformConfig, frames: dict, engine=None) -> list[str]:
+    """Distributed publish (REQ-SRV-01): each Spark DataFrame is loaded in parallel
+    into its own staging table over JDBC, then swapped in (``swap_in``) in one
+    driver transaction. A failed load or swap drops the staging table and leaves the
+    live table as it was. Returns the tables published."""
+    from sqlalchemy import text
+
+    eng = engine or get_engine(cfg)
+    schema = cfg.timescale.get("schema")
+    url, props = jdbc_target(eng)
+    if schema:
+        with eng.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+    published = []
+    for name, df in frames.items():
+        if df is None or df.isEmpty():
+            continue
+        staging = staging_name(name)
+        target = f"{schema}.{staging}" if schema else staging
+        try:
+            (df.write.mode("overwrite")
+               .option("batchsize", "5000").option("numPartitions", "4")
+               .jdbc(url, target, properties=props))
+            key_cols = tuple(c for c in KEY_COLUMNS if c in df.columns)
+            with eng.begin() as conn:
+                swap_in(conn, name, staging, schema, key_cols)
+        except Exception:
+            with eng.begin() as conn:
+                conn.execute(text(f"DROP TABLE IF EXISTS {_qualified(staging, schema)}"))
+            raise
         published.append(name)
     return published
 

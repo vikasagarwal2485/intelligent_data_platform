@@ -66,6 +66,8 @@ def dags(monkeypatch):
         "airflow.providers.cncf.kubernetes": types.SimpleNamespace(),
         "airflow.providers.cncf.kubernetes.operators": types.SimpleNamespace(),
         "airflow.providers.cncf.kubernetes.operators.pod": types.SimpleNamespace(KubernetesPodOperator=_Pod),
+        "airflow.providers.cncf.kubernetes.operators.spark_kubernetes":
+            types.SimpleNamespace(SparkKubernetesOperator=_Pod),
         "kubernetes": types.SimpleNamespace(),
         "kubernetes.client": types.SimpleNamespace(
             models=types.SimpleNamespace(V1EnvVar=_EnvVar, V1ResourceRequirements=dict)),
@@ -81,9 +83,14 @@ def test_four_dags(dags):
     assert set(dags) == {"idp_features", "idp_inference", "idp_training", "idp_maintenance"}
 
 
-def test_every_stage_pod_has_the_lake_env(dags):
+SPARK_TASKS = {"silver", "gold", "score", "publish", "maintain"}
+
+
+def test_pod_tasks_have_the_lake_env(dags):
     for dag in dags.values():
         for task in dag.tasks:
+            if task.task_id in SPARK_TASKS:
+                continue
             env = {e.name: e.value for e in task.kwargs["env_vars"]}
             assert env["IDP_CATALOG_TYPE"] == "sql", task.task_id
             assert env["IDP_CATALOG_URI"].startswith("postgresql+psycopg2://")
@@ -91,10 +98,29 @@ def test_every_stage_pod_has_the_lake_env(dags):
             assert env["IDP_S3_ENDPOINT"].startswith("http://minio.")
 
 
+def test_spark_stages_are_spark_applications(dags):
+    # REQ-ORC-02 / SCN-ORC-02.6: each Spark stage submits its rendered SparkApplication
+    import yaml
+    seen = set()
+    for dag in dags.values():
+        for task in dag.tasks:
+            if task.task_id not in SPARK_TASKS:
+                continue
+            seen.add(task.task_id)
+            assert task.kwargs["namespace"] == "idp-app" and task.kwargs["delete_on_termination"]
+            manifest = DAG_FILE.parent / task.kwargs["application_file"]
+            spec = yaml.safe_load(manifest.read_text())["spec"]
+            env = {e["name"]: e["value"] for e in spec["driver"]["env"]}
+            assert env["IDP_CATALOG_TYPE"] == "sql" and env["IDP_S3_ENDPOINT"].startswith("http://minio.")
+            assert spec["executor"]["instances"] >= 1
+    assert seen == SPARK_TASKS
+    assert dags["idp_features"].kwargs["max_active_runs"] == 1
+
+
 def test_maintenance_runs_daily_and_triggers_nothing(dags):
     # SCN-ORC-02.5
     m = dags["idp_maintenance"]
     assert m.schedule == "0 3 * * *" and m.kwargs["max_active_runs"] == 1
     [task] = m.tasks
-    assert task.kwargs["arguments"] == ["maintain"] and not task.outlets and not task.downstream
-    assert "IDP_SPARK_MASTER" in {e.name for e in task.kwargs["env_vars"]}
+    assert task.kwargs["application_file"] == "spark/maintain.yaml"
+    assert not task.outlets and not task.downstream

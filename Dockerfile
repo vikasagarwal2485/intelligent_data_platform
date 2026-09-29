@@ -2,7 +2,11 @@
 # Silver/Gold run on Spark (single transformation engine, REQ-ORC-05), so the
 # image carries a headless JRE plus pyspark, with the S3A and Iceberg jars
 # pre-installed so no stage downloads anything at run time.
-FROM python:3.11-slim
+# Pinned to bookworm: its default JRE is OpenJDK 17, the Java Spark 3.5 supports
+# with Arrow. The floating `python:3.11-slim` tag moved to trixie (OpenJDK 21), where
+# Arrow-based Spark (mapInPandas scoring) fails: "DirectByteBuffer.<init>(long, int)
+# not available".
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
@@ -48,10 +52,22 @@ COPY src ./src
 COPY config ./config
 RUN pip install -e .
 
+# Spark on Kubernetes (REQ-PLT-10): the Spark Operator runs Silver/Gold/Score/
+# publish/maintain as SparkApplications from THIS image. Their driver and executor
+# pods start the container with `driver ...` / `executor ...`, which the entrypoint
+# turns into spark-submit / the executor backend (pip pyspark ships the Spark
+# jars, incl. spark-kubernetes, but not Spark's docker entrypoint). Any other
+# command (`idp serve`, `idp consume`, ...) runs unchanged.
+ENV SPARK_HOME=/usr/local/lib/python3.11/site-packages/pyspark
+COPY pipelines/spark ./pipelines/spark
+COPY docker/spark-entrypoint.sh /opt/spark-entrypoint.sh
+RUN chmod +x /opt/spark-entrypoint.sh
+
 EXPOSE 8000
 
 # Non-root for safety.
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
+ENTRYPOINT ["/opt/spark-entrypoint.sh"]
 CMD ["idp", "serve", "--host", "0.0.0.0", "--port", "8000"]

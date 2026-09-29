@@ -292,7 +292,7 @@ Consequences. Status: `Accepted` unless noted.
   in the inference DAG (re-pushes features + scores each run — a harmless replace).
 
 ### ADR-0027 — Spark for data transforms; pandas and scikit-learn for ML only
-- **Status:** Accepted (2026-09-26) — supersedes ADR-0010
+- **Status:** Accepted (2026-09-26) — supersedes ADR-0010; the cluster runtime is refined by ADR-0029 (Spark Operator)
 - **Context:** ADR-0010 put the Silver/Gold logic in pandas so the prototype was
   testable without a cluster, with PySpark jobs as the "production" port. That
   left every business rule implemented twice (`curation/silver.py` +
@@ -365,3 +365,53 @@ Consequences. Status: `Accepted` unless noted.
     archive rule is rendered only.
   - Labels stay Parquet in `idp-ml` (ADR-0014).
   - Nessie remains provisioned for a future branch/tag workflow.
+
+### ADR-0029 — Spark Operator runtime; distributed score and publish; bounded training
+- **Status:** Accepted (2026-09-28) — refines ADR-0027's runtime
+- **Context:** After ADR-0027, Silver and Gold ran on Spark, but only as `local[*]`
+  inside one pod. So a stage could process no more than one container's memory, and
+  nothing scaled out. Three stages still pulled whole tables into one Python
+  process: Score (all Gold features into pandas), publish (pandas `to_sql`) and
+  train (the full labelled set). An earlier "Spark OOM" turned out to be the
+  minikube node container's memory cap (6 GB, invisible to Kubernetes), not a pod
+  limit.
+- **Decision:**
+  - **Spark Operator.** Silver, Gold, Score, publish and maintenance run as Kubeflow
+    Spark Operator `SparkApplication`s: a driver plus executors, all from the `idp`
+    image.
+    - Each stage's resources come from `spark.profiles.<stage>`, and every pod's
+      limit is heap plus overhead.
+    - `idp spark-manifest <stage>` renders the manifest. The `make` targets apply it
+      and wait for the final state, and Airflow submits it with
+      `SparkKubernetesOperator`, failing the task if the application fails.
+    - The image gets a Spark-on-Kubernetes entrypoint for the `driver`/`executor`
+      pods.
+    - Local runs and CI keep `local[*]`.
+  - **Distributed scoring.**
+    - The models are broadcast, and each partition of the feature table is scored
+      with `mapInPandas`.
+    - `FraudModel` normalizes its anomaly score over the population's min/max
+      (computed in one Spark pass), so the scores equal whole-table scoring exactly.
+  - **Distributed publish.**
+    - Spark loads each serving table in parallel over JDBC into a uniquely named
+      staging table.
+    - One driver transaction then swaps it in: advisory lock, drop the live table,
+      build the unique `(tenant_id, service_id)` index, rename.
+    - Duplicate keys fail the swap and leave the old table in place.
+  - **Bounded training.** `train` joins features and labels in Spark and fits on at
+    most `ml.train_max_rows` rows. The sample is exact and stratified per
+    (tenant, label class) with a fixed seed, and the metrics record `sampled_rows`
+    and `sample_seed`.
+  - **Node headroom.** `make mk-check` verifies that the node's real memory cap
+    holds the platform plus the largest stage profile.
+- **Consequences:**
+  - No stage holds a whole table in one process, and a stage scales by adding
+    executors, with no code change.
+  - The platform gains the operator (a controller and a webhook). Stage runs are
+    SparkApplications, and the single-pod Jobs remain only for rollback.
+  - The minikube defaults use 1 GiB executors so a stage fits the 12 GB node; EKS
+    profiles use more and larger executors.
+  - Serving tables now come from a Spark JDBC load, so `scored_at` there is a UTC
+    `TIMESTAMP` column. The lake keeps the time zone.
+  - Model loading goes through one seam, `transforms.scoring.load_scoring_models`,
+    which a model registry replaces later.

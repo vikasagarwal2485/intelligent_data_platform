@@ -135,6 +135,14 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/platform/trino-tune.sh idp-platform
 
+.PHONY: spark-operator
+spark-operator: ## Install/upgrade the Kubeflow Spark Operator (pinned, watches idp-app) + Airflow SparkApplication RBAC
+	bash deploy/platform/spark-operator/install.sh idp-platform
+
+.PHONY: mk-check
+mk-check: ## Check the minikube node container's real memory cap can hold the platform + the largest Spark stage profile (REQ-ORC-07)
+	@bash deploy/platform/mk-check.sh
+
 .PHONY: lake-catalog
 lake-catalog: ## Create the lake's Iceberg JDBC catalog database (`iceberg` in TimescaleDB) — idempotent
 	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform
@@ -247,6 +255,36 @@ stream: ## Ingestion (idp-app): in-memory produce -> Kafka, then consume -> Bron
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
 	@echo ">> Bronze ready. Next: make silver, then make gold."
 
+# Spark stages run as Spark Operator SparkApplications (REQ-PLT-10): render the
+# stage's manifest from its profile (idp spark-manifest), apply it, and wait for its
+# final state. $(1)=stage, $(2)=extra stage args (e.g. "-- --full-refresh").
+define run_sparkapp
+	kubectl -n idp-app delete sparkapplication idp-$(1) --ignore-not-found --wait=true
+	$(PY) -m idp.cli spark-manifest $(1) $(2) | kubectl apply -f -
+	$(call wait_sparkapp,idp-$(1),1800)
+endef
+
+# Wait for a SparkApplication: exit 0 on COMPLETED (printing the driver's log tail),
+# exit 1 as soon as it FAILED / SUBMISSION_FAILED (printing why). $(1)=name, $(2)=timeout (s).
+define wait_sparkapp
+	@a=$(1); for i in $$(seq 1 $$(( $(2) / 3 ))); do \
+	  s=$$(kubectl -n idp-app get sparkapplication $$a -o jsonpath='{.status.applicationState.state}' 2>/dev/null); \
+	  case "$$s" in \
+	    COMPLETED) echo ">> $$a COMPLETED (driver + $$(kubectl -n idp-app get sparkapplication $$a -o jsonpath='{.status.executorState}' | tr ',' '\n' | grep -c ':') executor(s))"; \
+	               kubectl -n idp-app logs $$a-driver --tail=25 2>/dev/null | grep -v " WARN \| INFO "; exit 0;; \
+	    FAILED|SUBMISSION_FAILED) echo ">> $$a $$s: $$(kubectl -n idp-app get sparkapplication $$a -o jsonpath='{.status.applicationState.errorMessage}')"; \
+	               kubectl -n idp-app logs $$a-driver --tail=40 2>/dev/null; exit 1;; \
+	  esac; sleep 3; done; echo ">> $$a timed out after $(2)s (state: $$s)"; exit 1
+endef
+
+.PHONY: spark-manifests
+spark-manifests: ## Re-render the committed SparkApplication manifests (deploy/app/spark/, + the DAG image copy) from spark.profiles
+	@mkdir -p deploy/app/spark pipelines/airflow/dags/spark
+	@for st in silver gold score publish maintain; do \
+	  $(PY) -m idp.cli spark-manifest $$st > deploy/app/spark/$$st.yaml; \
+	  cp deploy/app/spark/$$st.yaml pipelines/airflow/dags/spark/$$st.yaml; \
+	done; echo ">> rendered deploy/app/spark/*.yaml (+ pipelines/airflow/dags/spark/)"
+
 # Wait for an idp-app Job to finish: exit 0 when it completes, and exit 1 (printing
 # its log) as soon as it FAILS, instead of `kubectl wait --for=condition=complete`,
 # which would sit out its whole timeout on a failed Job. $(1)=job name, $(2)=timeout (s).
@@ -291,25 +329,16 @@ stream-replay: ## Re-publish the EXISTING landing files (no regenerate) -> Kafka
 	@echo ">> Bronze ready. Next: make silver, then make gold."
 
 .PHONY: silver
-silver: ## Silver stage (idp-app): new Bronze (S3) -> canonical Silver (S3), incremental
-	kubectl -n idp-app delete job idp-silver --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/silver-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=600s
-	kubectl -n idp-app logs job/idp-silver
+silver: mk-check ## Silver stage (SparkApplication in idp-app): new Bronze (S3) -> canonical Silver (S3), incremental
+	$(call run_sparkapp,silver,)
 
 .PHONY: silver-full-refresh
-silver-full-refresh: ## Silver stage with --full-refresh: reset the checkpoints, rebuild the facts from all of Bronze
-	kubectl -n idp-app delete job idp-silver --ignore-not-found
-	sed 's/command: \["idp", "silver"\]/command: ["idp", "silver", "--full-refresh"]/' deploy/app/jobs/silver-job.yaml | kubectl -n idp-app apply -f -
-	kubectl -n idp-app wait --for=condition=complete job/idp-silver --timeout=1200s
-	kubectl -n idp-app logs job/idp-silver
+silver-full-refresh: mk-check ## Silver stage with --full-refresh (SparkApplication): reset the checkpoints, rebuild the facts from all of Bronze
+	$(call run_sparkapp,silver,-- --full-refresh)
 
 .PHONY: maintain
-maintain: ## Lake maintenance (idp-app): compact, expire snapshots, remove orphan files on every table
-	kubectl -n idp-app delete job idp-maintain --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/maintain-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-maintain --timeout=1200s
-	kubectl -n idp-app logs job/idp-maintain
+maintain: mk-check ## Lake maintenance (SparkApplication in idp-app): compact, expire snapshots, remove orphan files on every table
+	$(call run_sparkapp,maintain,)
 
 .PHONY: migrate-lake
 migrate-lake: ## One-off (idp-app): legacy Parquet Bronze -> Iceberg Bronze; then silver-full-refresh + gold
@@ -319,19 +348,13 @@ migrate-lake: ## One-off (idp-app): legacy Parquet Bronze -> Iceberg Bronze; the
 	kubectl -n idp-app logs job/idp-migrate-lake
 
 .PHONY: gold
-gold: ## Gold stage (idp-app): Silver (S3) -> feature tables ONLY (S3)
-	kubectl -n idp-app delete job idp-gold --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/gold-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-gold --timeout=600s
-	kubectl -n idp-app logs job/idp-gold
+gold: mk-check ## Gold stage (SparkApplication in idp-app): Silver (S3) -> feature tables ONLY (S3)
+	$(call run_sparkapp,gold,)
 	@echo ">> Gold features written. Run 'make score' to add credit/fraud scores."
 
 .PHONY: score
-score: ## Score stage (idp-app): Gold features + models (store) -> score tables (S3)
-	kubectl -n idp-app delete job idp-score --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/score-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-score --timeout=600s
-	kubectl -n idp-app logs job/idp-score
+score: mk-check ## Score stage (SparkApplication in idp-app): Gold features + models -> score tables (S3), distributed
+	$(call run_sparkapp,score,)
 
 .PHONY: labels
 labels: ## Seed the labels/outcomes store (idp-app): -> s3://idp-ml/labels (training input)
@@ -349,11 +372,8 @@ train: ## Train stage (idp-app): Gold features + labels store -> models (s3://id
 	@echo ">> Models written to s3://idp-ml. 'make score' now writes credit/fraud scores."
 
 .PHONY: publish
-publish: ## Serving stage (idp-app): Gold (S3) -> TimescaleDB (indexed serving copy)
-	kubectl -n idp-app delete job idp-publish --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/publish-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-publish --timeout=600s
-	kubectl -n idp-app logs job/idp-publish
+publish: mk-check ## Serving stage (SparkApplication in idp-app): Gold (S3) -> TimescaleDB (staging load + atomic swap)
+	$(call run_sparkapp,publish,)
 
 .PHONY: timescale-psql
 timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving tables)

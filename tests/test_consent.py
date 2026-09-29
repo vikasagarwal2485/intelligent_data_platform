@@ -89,7 +89,7 @@ def test_non_consenting_never_trained_scored_or_served(lake, tmp_path, monkeypat
 
     scores = to_scores(lake, models=models)
     for table in ("credit_scores", "fraud_scores"):
-        assert not (_keys(scores[table]) & refused)
+        assert not (_keys(scores[table].toPandas()) & refused)       # test-side materialization
 
     engine = _serving(lake, tmp_path, monkeypatch)
     published = publish_serving(lake)["published"]

@@ -61,3 +61,22 @@ def test_save_and_load(fraud_labeled, tmp_path):
     np.testing.assert_allclose(
         model.predict_proba(fraud_labeled), loaded.predict_proba(fraud_labeled)
     )
+
+
+def test_default_score_unchanged_and_global_range_reproduces_whole_frame(fraud_labeled):
+    # task 2.1 / SCN-ML-07.5 groundwork
+    model = FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])
+    whole = model.score(fraud_labeled)
+    raw = model.raw_anomaly(fraud_labeled)
+    # default = normalize over the frame; passing the frame's own range is the same
+    pd.testing.assert_frame_equal(whole, model.score(fraud_labeled, anomaly_range=(raw.min(), raw.max())))
+    # scoring in partitions with the POPULATION range equals scoring the whole frame
+    rng = (raw.min(), raw.max())
+    parts = [model.score(fraud_labeled.iloc[i::3], anomaly_range=rng) for i in range(3)]
+    stitched = pd.concat(parts).sort_values(["tenant_id", "service_id"]).reset_index(drop=True)
+    expected = whole.sort_values(["tenant_id", "service_id"]).reset_index(drop=True)
+    pd.testing.assert_frame_equal(stitched, expected)
+    # ...whereas per-partition normalization (the old behaviour on a partition) differs
+    naive = pd.concat(model.score(fraud_labeled.iloc[i::3]) for i in range(3))
+    naive = naive.sort_values(["tenant_id", "service_id"]).reset_index(drop=True)
+    assert not np.allclose(naive["anomaly_score"], expected["anomaly_score"])

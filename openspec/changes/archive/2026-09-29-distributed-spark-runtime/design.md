@@ -70,13 +70,20 @@
 
 The pod limit is heap plus overhead; the operator sets it from these values.
 
-Defaults for minikube (8 CPUs, 20 Gi):
+Defaults for minikube, sized for the node's **real 12 GB cap**. Running
+`make mk-check` during apply showed that the originally planned 2 GiB executors
+(about 7 GB for `score`) plus the platform's about 6.2 GB exceed it.
 
-| Stage | Driver | Executors |
-|---|---|---|
-| silver, gold | 1g + 512m | 2 × 2g + 512m |
-| score | 1g + 512m | 2 × 2g + 768m (Python workers run pandas) |
-| publish, maintain | 1g + 512m | 1–2 executors |
+| Stage | Driver | Executors | Total |
+|---|---|---|---|
+| silver, gold | 1g + 512m | 2 × (1g + 512m) | 4.5 GiB |
+| score | 1g + 512m | 2 × (1g + 768m) (Python workers run pandas) | 5.0 GiB |
+| publish, maintain | 1g + 512m | 1 × (1g + 512m) | 3.0 GiB |
+| train | 2g + 1g (local session in a Job) | none | 3.0 GiB |
+
+A whole Silver run peaked at about 1.2 GB in a single JVM, so 1 GiB executors are
+ample for this data volume. EKS-sized profiles use larger executors and more
+instances; only the config changes.
 
 - In `local[*]` mode (tests, `idp run`), `get_spark` ignores the executor settings.
 - **Node headroom check** (task 1.2): `make mk-check` compares the minikube node

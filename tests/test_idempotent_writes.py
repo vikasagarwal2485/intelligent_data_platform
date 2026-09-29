@@ -219,3 +219,99 @@ def test_duplicate_keys_fail_and_keep_previous_table(tmp_path):
         timescale.publish_frame(engine, "credit_scores", dup)
     served = pd.read_sql("SELECT * FROM credit_scores", engine)
     assert len(served) == len(good) and set(served["recommended_limit"]) == {10.0}
+
+
+def _tables(engine):
+    return set(pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", engine)["name"])
+
+
+def _indexes(engine):
+    return set(pd.read_sql("SELECT name FROM sqlite_master WHERE type='index'", engine)["name"])
+
+
+def test_swap_in_replaces_atomically_and_leaves_no_staging(tmp_path):
+    # SCN-SRV-01.5 at unit level: staging loaded separately, swapped in one transaction
+    engine = _transactional_sqlite(tmp_path / "serving.db")
+    timescale.publish_frame(engine, "credit_scores", _scores("2026-09-01", 10.0))
+    staging = timescale.staging_name("credit_scores")
+    _scores("2026-09-02", 20.0).to_sql(staging, engine, index=False)   # e.g. a Spark JDBC load
+    assert set(pd.read_sql("SELECT * FROM credit_scores", engine)["recommended_limit"]) == {10.0}  # readers: old
+    with engine.begin() as conn:
+        timescale.swap_in(conn, "credit_scores", staging)
+    served = pd.read_sql("SELECT * FROM credit_scores", engine)
+    assert set(served["recommended_limit"]) == {20.0} and not served.duplicated(KEY).any()
+    assert not any("__staging" in t for t in _tables(engine))
+    assert "ux_credit_scores_key" in _indexes(engine)
+
+
+def test_swap_in_with_duplicate_keys_keeps_old_table(tmp_path):
+    # SCN-SRV-05.2 through swap_in: the failed swap rolls back, staging stays for cleanup
+    engine = _transactional_sqlite(tmp_path / "serving.db")
+    timescale.publish_frame(engine, "credit_scores", _scores("2026-09-01", 10.0))
+    staging = timescale.staging_name("credit_scores")
+    pd.concat([_scores("2026-09-02", 20.0)] * 2, ignore_index=True).to_sql(staging, engine, index=False)
+    with pytest.raises(Exception):
+        with engine.begin() as conn:
+            timescale.swap_in(conn, "credit_scores", staging)
+    assert set(pd.read_sql("SELECT * FROM credit_scores", engine)["recommended_limit"]) == {10.0}
+    assert staging in _tables(engine)                     # the caller drops it (publish cleanup)
+
+
+def test_staging_names_are_unique_per_load():
+    assert len({timescale.staging_name("credit_scores") for _ in range(50)}) == 50
+
+
+# --- distributed publish: Spark JDBC -> staging -> swap_in (REQ-SRV-01) -------------
+def _lake_with_score_runs(spark, cfg):
+    from idp.transforms import lake
+    for run_ts, limit in (("2026-09-01", 10.0), ("2026-09-02", 20.0)):
+        lake.append(spark.createDataFrame(_scores(run_ts, limit)), cfg, "gold", "credit_scores")
+
+
+def test_spark_publish_serves_latest_run_and_leaves_no_staging(spark, tmp_path, monkeypatch):
+    # SCN-SRV-05.1 / SCN-SRV-01.1 through the distributed path (no gold= hook)
+    cfg = _serving_cfg(tmp_path)
+    _lake_with_score_runs(spark, cfg)
+    engine = _transactional_sqlite(tmp_path / "serving.db")
+    monkeypatch.setattr(timescale, "get_engine", lambda _cfg: engine)
+    assert publish_serving(cfg)["published"] == ["credit_scores"]
+    served = pd.read_sql("SELECT * FROM credit_scores", engine)
+    assert len(served) == 4 and set(served["recommended_limit"]) == {20.0}
+    assert not served.duplicated(KEY).any()
+    assert not any("__staging" in t for t in _tables(engine))
+
+
+def test_spark_publish_duplicate_keys_keep_old_table_and_clean_staging(spark, tmp_path, monkeypatch):
+    # SCN-SRV-05.2 through the distributed path
+    from idp.transforms import lake
+    cfg = _serving_cfg(tmp_path)
+    engine = _transactional_sqlite(tmp_path / "serving.db")
+    monkeypatch.setattr(timescale, "get_engine", lambda _cfg: engine)
+    timescale.publish_frame(engine, "credit_features", _scores("2026-09-01", 10.0).drop(columns="scored_at"))
+    dup = pd.concat([_scores("2026-09-02", 20.0).drop(columns="scored_at")] * 2, ignore_index=True)
+    lake.append(spark.createDataFrame(dup), cfg, "gold", "credit_features")
+    with pytest.raises(Exception):
+        publish_serving(cfg)
+    assert set(pd.read_sql("SELECT * FROM credit_features", engine)["recommended_limit"]) == {10.0}
+    assert not any("__staging" in t for t in _tables(engine))
+
+
+@pytest.mark.postgres
+def test_spark_publish_on_real_postgres(spark, tmp_path, monkeypatch):
+    # the JDBC load + swap on PostgreSQL itself (advisory lock, schema, rename)
+    import os
+
+    from sqlalchemy import create_engine
+    url = os.environ.get("IDP_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("set IDP_TEST_POSTGRES_URL=postgresql+psycopg2://… to run")
+    cfg = _cfg(tmp_path)
+    cfg.raw["timescale"] = {"schema": "gold_test"}
+    _lake_with_score_runs(spark, cfg)
+    engine = create_engine(url)
+    monkeypatch.setattr(timescale, "get_engine", lambda _cfg: engine)
+    publish_serving(cfg)
+    served = pd.read_sql('SELECT * FROM "gold_test"."credit_scores"', engine)
+    assert len(served) == 4 and set(served["recommended_limit"]) == {20.0}
+    with engine.begin() as conn:
+        conn.exec_driver_sql('DROP SCHEMA "gold_test" CASCADE')

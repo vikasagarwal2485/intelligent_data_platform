@@ -8,6 +8,8 @@ tests
 docs
 deploy
 pipelines
+# ...except the Spark entrypoints, which the idp image runs as SparkApplications
+!pipelines/spark
 **/__pycache__
 *.egg-info
 .pytest_cache

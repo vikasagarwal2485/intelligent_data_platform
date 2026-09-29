@@ -72,10 +72,21 @@ class FraudModel:
         ).fit(Xm)
         return self
 
-    def _anomaly_score(self, Xm: pd.DataFrame) -> np.ndarray:
-        # higher = more anomalous, scaled to [0,1]
+    def raw_anomaly(self, X: pd.DataFrame) -> np.ndarray:
+        """The un-normalized IsolationForest anomaly score (higher = more anomalous).
+
+        Distributed scoring computes its population min/max once and passes it as
+        ``anomaly_range``, so every partition is normalized the same way."""
+        if self.iforest is None:
+            raise RuntimeError("Model is not fitted")
+        return -self.iforest.score_samples(X[self.features].astype(float))
+
+    def _anomaly_score(self, Xm: pd.DataFrame,
+                       anomaly_range: tuple[float, float] | None = None) -> np.ndarray:
+        # higher = more anomalous, scaled to [0,1] over ``anomaly_range`` (default:
+        # the min/max of this frame, the single-process behaviour)
         raw = -self.iforest.score_samples(Xm)
-        lo, hi = raw.min(), raw.max()
+        lo, hi = anomaly_range if anomaly_range is not None else (raw.min(), raw.max())
         return (raw - lo) / (hi - lo) if hi > lo else np.zeros_like(raw)
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
@@ -83,11 +94,17 @@ class FraudModel:
             raise RuntimeError("Model is not fitted")
         return self.clf.predict_proba(X[self.features].astype(float))[:, 1]
 
-    def score(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Fuse supervised proba, anomaly score and rules into a fraud score."""
+    def score(self, X: pd.DataFrame,
+              anomaly_range: tuple[float, float] | None = None) -> pd.DataFrame:
+        """Fuse supervised proba, anomaly score and rules into a fraud score.
+
+        ``anomaly_range`` is the population ``(min, max)`` of ``raw_anomaly``. Pass it
+        when ``X`` is one partition of a larger table (distributed scoring), so the
+        result equals scoring the whole table at once. ``None`` normalizes over ``X``.
+        """
         Xm = X[self.features].astype(float)
         proba = self.predict_proba(X)
-        anomaly = self._anomaly_score(Xm)
+        anomaly = self._anomaly_score(Xm, anomaly_range)
         rules = rule_flags(X, self.thresholds)
         fused = 0.6 * proba + 0.2 * anomaly + 0.2 * rules["rule_score"].values
         out = X[["tenant_id", "service_id"]].copy()

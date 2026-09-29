@@ -47,3 +47,4 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["postgres: needs a real PostgreSQL/TimescaleDB (set IDP_TEST_POSTGRES_URL); skipped otherwise"]

@@ -108,6 +108,9 @@ kubectl get crd 2>/dev/null | grep -i strimzi || echo "  WARN: no Strimzi CRDs f
 echo ">> Iceberg catalog (Nessie, in-memory store, tuned)"
 hi nessie nessie/nessie -f "${HERE}/nessie/nessie-values.yaml"
 
+echo ">> Spark Operator (Silver/Gold/Score/publish/maintain as SparkApplications)"
+bash "${HERE}/spark-operator/install.sh" "${NS}"
+
 echo ">> query engine (Trino, tuned small for local)"
 hi trino trino/trino -f "${HERE}/trino/trino-values.yaml"
 

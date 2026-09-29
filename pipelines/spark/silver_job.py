@@ -1,28 +1,17 @@
-"""Silver stage entrypoint for spark-submit (Bronze -> canonical Silver).
+"""Silver stage entrypoint for spark-submit / the Spark Operator (Bronze -> Silver).
 
-Thin wrapper over ``idp.pipeline.to_silver`` — the single Silver implementation
-(``idp.transforms.silver``, REQ-ORC-05) shared with ``idp silver``, the Kubernetes
-Job and Airflow. Requires the ``idp`` package in the Spark runtime (the idp image
-bundles it). The lake location, tenant salts and Spark master/memory come from
-config/platform.yaml + IDP_* env, exactly as for ``idp silver``.
+Thin wrapper over ``idp silver`` (``idp.cli``) -> ``idp.pipeline.to_silver``, the
+single Silver implementation (``idp.transforms``, REQ-ORC-05) shared with the CLI,
+the Kubernetes Job and Airflow. Arguments pass through, e.g. ``--full-refresh``.
+Lake location, catalog and resources come from config/platform.yaml + IDP_* env.
 
-  spark-submit pipelines/spark/silver_job.py [--config path/to/platform.yaml]
+  spark-submit pipelines/spark/silver_job.py [--full-refresh]
 """
 from __future__ import annotations
 
-import argparse
-import json
+import sys
 
-from idp.common.config import load_config
-from idp.pipeline import to_silver
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Silver stage (Bronze -> Silver)")
-    parser.add_argument("--config", default=None, help="Path to platform.yaml")
-    args = parser.parse_args()
-    print(json.dumps(to_silver(load_config(args.config)), indent=2))
-
+from idp.cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(["silver", *sys.argv[1:]]))

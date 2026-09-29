@@ -99,7 +99,7 @@ def to_silver(cfg: PlatformConfig, *, full_refresh: bool = False) -> dict:
     from idp.transforms import incremental
     from idp.transforms.session import get_spark
 
-    spark = get_spark(cfg, app_name="idp-silver")
+    spark = get_spark(cfg, app_name="idp-silver", stage="silver")
     salts = _salts(cfg)
     incremental.build_dim(spark, cfg, salts, full_refresh=full_refresh)
     if full_refresh:
@@ -129,7 +129,7 @@ def to_gold(cfg: PlatformConfig) -> dict:
     from idp.transforms import features, lake
     from idp.transforms.session import get_spark
 
-    spark = get_spark(cfg, app_name="idp-gold")
+    spark = get_spark(cfg, app_name="idp-gold", stage="gold")
     silver = {t: lake.read_table(spark, cfg, "silver", t) for t in SILVER_TABLES}
     silver = {t: df for t, df in silver.items() if df is not None}
     dim = silver.get("dim_subscriber")
@@ -150,50 +150,44 @@ def to_gold(cfg: PlatformConfig) -> dict:
 
 # --- Stage 3b: Scoring / inference (Gold features -> scores) ----------------
 def to_scores(cfg: PlatformConfig, *, models: dict | None = None, persist: bool = True) -> dict:
-    """Gold features -> ML scores (batch inference; pandas is the ML boundary).
+    """Gold features -> ML scores, distributed on Spark (REQ-ML-07).
 
-    Reads the Gold feature tables from the lake and the trained models from the
-    model store (or ``models``, for tests), applies them, and appends
-    ``credit_scores`` / ``fraud_scores`` to Gold. Graceful: a model absent from
-    the store means that score table is simply skipped (Gold keeps its features).
+    Reads the Gold feature tables from the lake as Spark DataFrames and the trained
+    models from the model store (or ``models``, for tests), broadcasts the models,
+    and scores each partition (``transforms.scoring``). The run is appended to
+    ``credit_scores`` / ``fraud_scores``. No process holds a whole table
+    (REQ-ORC-05). Graceful: a model absent from the store means that score table is
+    skipped. Returns ``score_tables``, their row ``counts``, and the scored data as
+    lazy Spark DataFrames under each table name.
     """
-    gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
-    if "credit_features" not in gold or gold["credit_features"].empty:
+    from pyspark.sql import functions as F
+
+    from idp.transforms import lake
+    from idp.transforms.scoring import load_scoring_models, score_features
+    from idp.transforms.session import get_spark
+
+    spark = get_spark(cfg, app_name="idp-score", stage="score")
+    features = {t: lake.read_table(spark, cfg, "gold", t) for t in GOLD_FEATURE_TABLES}
+    credit = features.get("credit_features")
+    if credit is None or credit.isEmpty():
         raise RuntimeError("Gold features are missing. Run the Gold stage ('idp gold') first.")
 
-    credit_model = (models or {}).get("credit")
-    fraud_model = (models or {}).get("fraud")
-    credit_uri = storage.model_uri(cfg, "credit_model.joblib")
-    fraud_uri = storage.model_uri(cfg, "fraud_model.joblib")
-    if credit_model is None and storage.model_exists(credit_uri, cfg):
-        credit_model = storage.load_model(credit_uri, cfg)
-    if fraud_model is None and storage.model_exists(fraud_uri, cfg):
-        fraud_model = storage.load_model(fraud_uri, cfg)
+    # One UTC timestamp per `idp score` run, so analytics can build 7/15/30-day
+    # windows over the accumulating score history.
+    scored_at = pd.Timestamp.now(tz="UTC").to_pydatetime()
+    outputs = score_features(spark, load_scoring_models(cfg, models), features, scored_at)
 
-    outputs: dict[str, pd.DataFrame] = {}
-    if credit_model is not None:
-        outputs["credit_scores"] = credit_model.recommend_limit(gold["credit_features"])
-    ff = gold.get("fraud_features")
-    if fraud_model is not None and ff is not None and not ff.empty:
-        outputs["fraud_scores"] = fraud_model.score(ff)
-
-    # Stamp each scoring run so downstream analytics can build 7/15/30-day
-    # windows; a fresh UTC timestamp per `idp score` run accumulates history.
-    scored_at = pd.Timestamp.now(tz="UTC")
-    for df in outputs.values():
-        df["scored_at"] = scored_at
-
-    if persist:
-        from idp.common import catalog
-        # Append: score tables are the run-by-run history (one snapshot per run).
-        for name, df in outputs.items():
-            catalog.append_table(cfg, "gold", name, df, partition_by=SCORE_PARTITIONS)
-    return {"score_tables": list(outputs), **outputs}
+    counts: dict[str, int] = {}
+    for name, df in outputs.items():
+        if persist:
+            # Append: score tables are the run-by-run history (one snapshot per run).
+            lake.append(df, cfg, "gold", name, partition_by=("tenant_id", F.days("scored_at")))
+        counts[name] = int(df.count())
+    return {"score_tables": list(outputs), "counts": counts, **outputs}
 
 
 # --- Stage 4: Serving (Gold -> TimescaleDB) ---------------------------------
 GOLD_SERVING_TABLES = ("credit_scores", "fraud_scores", "credit_features", "fraud_features")
-SCORE_PARTITIONS = ("tenant_id", "day:scored_at")
 SCORE_TABLES = ("credit_scores", "fraud_scores")
 
 
@@ -210,23 +204,47 @@ def latest_score_run(df: pd.DataFrame) -> pd.DataFrame:
     return df[ts == latest].reset_index(drop=True)
 
 
-def publish_serving(cfg: PlatformConfig, gold: dict | None = None) -> dict:
-    """Publish Gold tables to the TimescaleDB serving layer (plan Q4/Q6).
+def latest_score_run_spark(df):
+    """Spark form of ``latest_score_run``: each tenant's latest ``scored_at`` rows."""
+    from pyspark.sql import Window
+    from pyspark.sql import functions as F
 
-    Reads the Gold tables from storage if not given, reduces the score tables to
-    each tenant's latest run, then replaces the serving tables in TimescaleDB,
-    uniquely indexed by (tenant_id, service_id), for low-latency serving.
+    if "scored_at" not in df.columns:
+        return df
+    latest = F.max("scored_at").over(Window.partitionBy("tenant_id"))
+    return df.withColumn("_latest", latest).where(F.col("scored_at") == F.col("_latest")).drop("_latest")
+
+
+def publish_serving(cfg: PlatformConfig, gold: dict | None = None) -> dict:
+    """Publish Gold tables to the TimescaleDB serving layer (REQ-SRV-01).
+
+    Reads the Gold tables with Spark, reduces the score tables to each tenant's
+    latest run, loads each into a staging table in parallel over JDBC, and swaps it
+    in atomically, uniquely indexed by (tenant_id, service_id). No table is
+    collected on the driver (REQ-ORC-05). ``gold`` (pandas frames) is a test/dev
+    hook that publishes those frames through the same swap instead.
     """
     from idp.serving import timescale
 
-    if gold is None:
-        gold = _read_layer(cfg, "gold", GOLD_SERVING_TABLES)
-    if not gold:
+    if gold is not None:
+        frames = {name: latest_score_run(df) if name in SCORE_TABLES else df
+                  for name, df in gold.items()}
+        if not frames:
+            raise RuntimeError("No Gold tables found to publish. Run the Gold stage ('idp gold') first.")
+        return {"published": timescale.publish_gold(cfg, frames), "target": cfg.timescale.get("host")}
+
+    from idp.transforms import lake
+    from idp.transforms.session import get_spark
+
+    spark = get_spark(cfg, app_name="idp-publish", stage="publish")
+    frames = {}
+    for name in GOLD_SERVING_TABLES:
+        df = lake.read_table(spark, cfg, "gold", name)
+        if df is not None:
+            frames[name] = latest_score_run_spark(df) if name in SCORE_TABLES else df
+    if not frames:
         raise RuntimeError("No Gold tables found to publish. Run the Gold stage ('idp gold') first.")
-    gold = {name: latest_score_run(df) if name in SCORE_TABLES else df
-            for name, df in gold.items()}
-    published = timescale.publish_gold(cfg, gold)
-    return {"published": published, "target": cfg.timescale.get("host")}
+    return {"published": timescale.publish_spark(cfg, frames), "target": cfg.timescale.get("host")}
 
 
 # --- Labels/outcomes store (offline training input; kept out of the lake) ----
@@ -286,6 +304,18 @@ def to_labels(cfg: PlatformConfig, *, dataset: SyntheticDataset | None = None,
     return labels
 
 
+def _read_labels_spark(spark, cfg: PlatformConfig):
+    """The labels store as a Spark DataFrame (None when absent), one row per
+    subscriber: re-seeding appends identical copies, so duplicates are dropped."""
+    uri = storage.labels_uri(cfg)
+    try:
+        df = spark.read.parquet(uri)
+    except Exception:  # noqa: BLE001 - absent labels store
+        return None
+    from pyspark.sql import functions as F
+    return df.withColumn("tenant_id", F.col("tenant_id").cast("string")).dropDuplicates(["tenant_id", "service_id"])
+
+
 def _read_labels(cfg: PlatformConfig) -> pd.DataFrame:
     try:
         df = storage.read_parquet(storage.labels_uri(cfg), cfg)
@@ -313,30 +343,46 @@ def _safe_split(df: pd.DataFrame, target: str):
 def train(cfg: PlatformConfig, *, persist: bool = True) -> dict:
     """Offline model training on the lake (REQ-ML-03/06).
 
-    Reads historical Gold **features** + the **labels store** from the lake (a
-    local lake in dev/tests), joins them, fits the credit and fraud models,
-    evaluates out-of-sample, and saves them to the model store. Never builds
-    features from Silver and never regenerates synthetic data.
+    Reads historical Gold **features** + the **labels store** with Spark (a local
+    lake in dev/tests), joins them, bounds each model's training set to
+    ``ml.train_max_rows`` with a stratified per-(tenant, label) sample (REQ-ML-09),
+    fits the credit and fraud models on that sample, evaluates out-of-sample, and
+    saves them to the model store. The metrics record ``sampled_rows`` and
+    ``sample_seed``. Never builds features from Silver and never regenerates
+    synthetic data.
     """
+    from idp.transforms import lake
+    from idp.transforms.sampling import stratified_cap
+    from idp.transforms.session import get_spark
+
     cfg = cfg or load_config()
-    gold = _read_layer(cfg, "gold", GOLD_FEATURE_TABLES)
-    labels = _read_labels(cfg)
-    credit_feats = gold.get("credit_features")
-    fraud_feats = gold.get("fraud_features")
-    if credit_feats is None or credit_feats.empty or fraud_feats is None or fraud_feats.empty \
-            or labels.empty:
+    spark = get_spark(cfg, app_name="idp-train", stage="train")
+    credit_feats = lake.read_table(spark, cfg, "gold", "credit_features")
+    fraud_feats = lake.read_table(spark, cfg, "gold", "fraud_features")
+    labels = _read_labels_spark(spark, cfg)
+    if credit_feats is None or credit_feats.isEmpty() or fraud_feats is None or fraud_feats.isEmpty() \
+            or labels is None or labels.isEmpty():
         raise RuntimeError(
             "Training needs Gold features and a populated labels store. Run "
             "'idp gold' and seed labels ('idp labels' / make labels) first."
         )
 
-    credit_df = credit_feats.merge(labels, on=["tenant_id", "service_id"])
-    fraud_df = fraud_feats.merge(labels, on=["tenant_id", "service_id"])
+    # Join in Spark, then take at most ml.train_max_rows per model: a stratified
+    # sample per (tenant, label class) with a fixed seed (REQ-ML-09). Only the bounded
+    # sample reaches pandas for fitting.
+    cap, seed = int(cfg.ml["train_max_rows"]), int(cfg.ml["sample_seed"])
+    keys = ["tenant_id", "service_id"]
+    credit_sdf, credit_rows = stratified_cap(credit_feats.join(labels, on=keys),
+                                             ["tenant_id", "will_default"], cap, seed)
+    fraud_sdf, fraud_rows = stratified_cap(fraud_feats.join(labels, on=keys),
+                                           ["tenant_id", "is_fraud"], cap, seed)
+    credit_df = credit_sdf.toPandas().sort_values(keys).reset_index(drop=True)
+    fraud_df = fraud_sdf.toPandas().sort_values(keys).reset_index(drop=True)
 
     if credit_df.empty:
         raise RuntimeError(
             "Training set is empty: labels did not join any Gold features "
-            f"(gold rows={len(credit_feats)}, label rows={len(labels)}). The labels "
+            f"(gold rows={credit_feats.count()}, label rows={labels.count()}). The labels "
             "must be generated with the SAME synthetic params (subscribers/days/seed) "
             "as the data that produced Gold — otherwise the tokenized service_ids "
             "differ. Re-seed labels ('idp labels'/make labels) with matching "
@@ -357,6 +403,8 @@ def train(cfg: PlatformConfig, *, persist: bool = True) -> dict:
         thresholds=cfg.fraud.get("rule_thresholds", {}),
     ).fit(f_train, f_train["is_fraud"])
     fraud_metrics = fraud_model.evaluate(f_test, f_test["is_fraud"])
+    credit_metrics.update(sampled_rows=credit_rows, sample_seed=seed)
+    fraud_metrics.update(sampled_rows=fraud_rows, sample_seed=seed)
 
     if persist:
         storage.save_model(credit_model, storage.model_uri(cfg, "credit_model.joblib"), cfg)
@@ -395,6 +443,9 @@ def run(cfg: PlatformConfig | None = None, *, persist: bool = True) -> dict:
         to_gold(cfg)                                       # features only
         trained = train(cfg)
         scores = to_scores(cfg, models=trained["models"])  # inference on Gold features
+        # local dev summary: materialize the (small) score frames before a temporary
+        # lake is removed below; the stage itself never does this (REQ-ORC-05)
+        scores = {k: (v.toPandas() if hasattr(v, "toPandas") else v) for k, v in scores.items()}
         counts = silver["silver_tables"]
         return {
             "tenants": cfg.tenant_ids,

@@ -33,3 +33,33 @@ roleRef:
   kind: Role
   name: idp-pod-launcher
   apiGroup: rbac.authorization.k8s.io
+---
+# The Spark stages run as SparkApplications (REQ-PLT-10): Airflow's
+# SparkKubernetesOperator creates them in idp-app, watches them to their final
+# state, and deletes them afterwards.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: idp-spark-submitter
+  namespace: idp-app
+rules:
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications", "sparkapplications/status"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: idp-spark-submitter
+  namespace: idp-app
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: idp-platform
+  - kind: ServiceAccount
+    name: airflow-scheduler
+    namespace: idp-platform
+roleRef:
+  kind: Role
+  name: idp-spark-submitter
+  apiGroup: rbac.authorization.k8s.io

@@ -72,6 +72,11 @@ class PlatformConfig:
         return self.raw.get("credit", {})
 
     @property
+    def ml(self) -> dict[str, Any]:
+        """Offline training bounds (REQ-ML-09)."""
+        return {"train_max_rows": 2_000_000, "sample_seed": 42, **self.raw.get("ml", {})}
+
+    @property
     def fraud(self) -> dict[str, Any]:
         return self.raw.get("fraud", {})
 
@@ -132,6 +137,13 @@ class PlatformConfig:
         s["master"] = env.get("IDP_SPARK_MASTER", s.get("master", "local[*]"))
         s["driver_memory"] = env.get("IDP_SPARK_DRIVER_MEMORY", s.get("driver_memory", "1g"))
         return s
+
+    def spark_profile(self, stage: str) -> dict[str, dict[str, Any]]:
+        """Resource profile of a Spark stage (REQ-ORC-07): ``{"driver": {...},
+        "executor": {...}}`` with ``cores``, ``memory``, ``memoryOverhead`` (and the
+        executor's ``instances``). Unknown stages get an empty profile."""
+        prof = dict(self.raw.get("spark", {}).get("profiles", {}).get(stage, {}))
+        return {"driver": dict(prof.get("driver", {})), "executor": dict(prof.get("executor", {}))}
 
     @property
     def s3(self) -> dict[str, Any]:

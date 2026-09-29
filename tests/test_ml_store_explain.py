@@ -189,7 +189,7 @@ def test_score_runs_are_timestamped_and_accumulate(tmp_path, lake, credit_labele
     cm = CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"])
     for _ in range(2):
         out = to_scores(cfg, models={"credit": cm}, persist=True)
-        assert out["credit_scores"]["scored_at"].nunique() == 1
+        assert out["credit_scores"].toPandas()["scored_at"].nunique() == 1
     from idp.common import catalog
     stored = catalog.read_table(cfg, "gold", "credit_scores")
     assert stored["scored_at"].nunique() == 2

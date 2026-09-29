@@ -184,6 +184,13 @@ def _cmd_archive_policy(args: argparse.Namespace) -> None:
     print(json.dumps(policy, indent=2))
 
 
+def _cmd_spark_manifest(args: argparse.Namespace) -> None:
+    """Render a Spark stage's SparkApplication (REQ-PLT-10) from its profile."""
+    from idp.transforms.sparkapp import render
+
+    print(render(load_config(args.config), args.stage, args.stage_args), end="")
+
+
 def _cmd_maintain(args: argparse.Namespace) -> None:
     """Lake maintenance: compaction, snapshot expiry, orphan cleanup (REQ-ORC-06)."""
     from idp.maintenance import maintain
@@ -286,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
     p_silver.set_defaults(func=_cmd_silver)
     sub.add_parser("migrate-lake", help="One-off: legacy Parquet Bronze -> Iceberg Bronze"
                    ).set_defaults(func=_cmd_migrate_lake)
+    p_sm = sub.add_parser("spark-manifest", help="Render a Spark stage's SparkApplication YAML from its profile")
+    p_sm.add_argument("stage", choices=("silver", "gold", "score", "publish", "maintain"))
+    p_sm.add_argument("stage_args", nargs="*", help="arguments for the stage, e.g. -- --full-refresh")
+    p_sm.set_defaults(func=_cmd_spark_manifest)
     p_arch = sub.add_parser("archive-policy", help="Render the Bronze archive rule (S3 lifecycle / MinIO ILM)")
     p_arch.add_argument("--format", choices=("s3", "minio"), default="s3")
     p_arch.add_argument("--storage-class", default="GLACIER_IR",

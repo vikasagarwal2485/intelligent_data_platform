@@ -1,0 +1,34 @@
+# Kubeflow Spark Operator (REQ-PLT-10): runs the Silver/Gold/Score/publish/
+# maintenance stages as SparkApplications (one driver + executors) in idp-app.
+#
+# Install/upgrade (idempotent):  make spark-operator
+#   helm upgrade --install spark-operator spark-operator/spark-operator \
+#     -n idp-platform --version 2.5.2 -f deploy/platform/spark-operator/values.yaml
+spark:
+  # the operator only watches the app namespace
+  jobNamespaces: [idp-app]
+  serviceAccount:
+    create: true
+    name: idp-spark               # the driver's SA: manages its own executor pods in idp-app
+  rbac:
+    create: true
+
+controller:
+  # The controller runs spark-submit (a JVM) in its container for every application;
+  # the JVM takes ~1/4 of the limit as heap. At 256Mi submissions GC-thrashed
+  # ("Thread blocked") until they timed out (SUBMISSION_FAILED).
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+webhook:
+  # mutating webhook: applies the driver/executor env and resources from the
+  # SparkApplication spec to the pods
+  enable: true
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+prometheus:
+  metrics:
+    enable: false                 # not scraped on minikube; keep the footprint small

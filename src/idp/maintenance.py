@@ -105,7 +105,7 @@ def maintain(cfg: PlatformConfig) -> dict[str, dict[str, int]]:
     """Compact, expire and clean every lake table. Returns per-table statistics."""
     from idp.transforms.session import get_spark
 
-    spark = get_spark(cfg, app_name="idp-maintain")
+    spark = get_spark(cfg, app_name="idp-maintain", stage="maintain")
     lake.attach(spark, cfg)
     cat_name = catalog.catalog_name(cfg)
     retention = timedelta(days=float(cfg.lake["snapshot_retention_days"]))
