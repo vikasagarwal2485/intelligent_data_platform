@@ -28,7 +28,7 @@ deploy/
     deployment/             #   scoring-api base (Deployment/Service + kustomization)
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
     overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
-    jobs/                   #   produce/consume/silver/gold/score/labels/train/publish Jobs
+    jobs/                   #   produce/consume/labels Jobs (+ the old Spark-stage Jobs, rollback only)
     spark/                  #   SparkApplications for silver/gold/score/publish/maintain: the one
                             #   copy (`make spark-manifests`); the Airflow DAG image bakes it in
 ```
@@ -107,14 +107,19 @@ Kubernetes Jobs.
   - It pins chart `2.5.2` in `idp-platform`, watching only `idp-app`.
   - It creates the driver ServiceAccount `idp-spark`, with RBAC to manage its own
     executors.
-  - It adds the Airflow Role `idp-spark-submitter` (create/watch/delete
-    `sparkapplications`).
+  - It applies the Airflow Role `idp-spark-submitter`
+    (`deploy/platform/airflow/rbac.yaml`): create/watch/delete `sparkapplications`,
+    and read-only pods, `pods/log` and events, so `SparkKubernetesOperator` can
+    follow the driver and stream its log. Airflow can't create, patch, delete or
+    exec into pods: every Airflow task is a SparkApplication. Upgrading from the
+    pod-launching version, delete the old Role once:
+    `kubectl -n idp-app delete role,rolebinding idp-pod-launcher`.
 - **Profiles:** `spark.profiles.<stage>` in `config/platform.yaml` sets driver and
   executor cores, memory (the JVM heap), `memoryOverhead` and executor
   `instances`. Each pod's memory limit is heap plus overhead. The defaults fit the
   12 GB minikube node.
-- **Run a stage:** `make silver` (also `gold`, `score`, `publish`, `maintain` and
-  `silver-full-refresh`). The target:
+- **Run a stage:** `make silver` (also `gold`, `score`, `publish`, `maintain`,
+  `train` and `silver-full-refresh`). The target:
   1. runs `mk-check`
   2. renders the manifest (`idp spark-manifest <stage>`) and applies it
   3. waits for `COMPLETED` or `FAILED`, and prints the driver log
@@ -125,10 +130,11 @@ Kubernetes Jobs.
   `make mk-check` (does the node still fit it?), then `make spark-manifests` (it
   re-renders `deploy/app/spark/*.yaml`, which a test compares with the profiles).
   No code changes.
-- **Airflow:** the manifests have one copy, `deploy/app/spark/`. The DAG image
-  bakes it in as `dags/spark/` at build time (`--build-context
-  spark=deploy/app/spark`, BuildKit), and the Spark tasks' `SparkKubernetesOperator`
-  reads `spark/<stage>.yaml` there. After changing a profile, run
+- **Airflow:** every task is one of these SparkApplications (the training DAG is
+  `train` only; labels are seeded with `make labels`, outside Airflow). The
+  manifests have one copy, `deploy/app/spark/`. The DAG image bakes it in as
+  `dags/spark/` at build time (`--build-context spark=deploy/app/spark`, BuildKit),
+  and each task's `SparkKubernetesOperator` reads `spark/<stage>.yaml` there. After changing a profile, run
   `make spark-manifests` and then `make airflow-reload`.
 - **The image:** Spark on Kubernetes starts pods with `driver …` / `executor …`,
   and the image's entrypoint (`docker/spark-entrypoint.sh`) handles those. Every
@@ -298,7 +304,8 @@ make mcp-smoke                                     # every tool, both tenants
 and download them directly with their `IDP_S3_*` keys (not proxied).
 - **Endpoint:** Service `mlflow` port 80 (container 5000), so in-cluster
   `http://mlflow.idp-platform.svc:80`. That is `IDP_MLFLOW_TRACKING_URI` on the train
-  and score Jobs, the SparkApplications, the Airflow stage pods and the scoring API.
+  SparkApplications (train, score and the rest; the Airflow tasks submit the same
+  manifests) and the scoring API.
   `make mlflow-ui` forwards it to http://127.0.0.1:5050 (port 5000 is often taken by
   macOS AirPlay).
 - **What to look for:** experiment `idp-training` (one run per `train`, with both

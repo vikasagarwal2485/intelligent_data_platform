@@ -25,9 +25,11 @@ cluster job in `idp-app`:
 - `idp maintain`: lake maintenance (REQ-ORC-06)
 
 The Silver, Gold, Score, publish and maintenance stages SHALL run on the single
-transformation engine (REQ-ORC-05). In the cluster they SHALL run as Spark
-applications, with one driver and executors, submitted through the Spark Operator.
-The other stages run as Kubernetes Jobs.
+transformation engine (REQ-ORC-05). In the cluster they, and the `train` stage,
+SHALL run as Spark applications, with one driver and executors, submitted through
+the Spark Operator: `train` reads, joins and samples its training set on the
+executors and fits the models on the driver, from the bounded sample (REQ-ML-09).
+The other stages (generate, produce, consume, labels) run as Kubernetes Jobs.
 
 Streaming ingestion SHALL be runnable end to end with one command, in two variants:
 - **`make stream`:** in-memory `idp produce`, then `idp consume`
@@ -74,22 +76,30 @@ and consume them, without regenerating.
 - **THEN** the produce step fails and reports the file, consume doesn't run, and
   the command exits with a failure status
 
+#### Scenario: SCN-ORC-01.8 — Train runs as a Spark application
+- **WHEN** `make train` (or the Airflow `train` task) runs in the cluster
+- **THEN** a Spark application with one driver pod and at least one executor pod
+  trains both models on the bounded sample and persists them to the model store
+  (REQ-ML-04), with the same metrics a `local[*]` run reports on the same input
+
 ### Requirement: REQ-ORC-02 — Scheduled orchestration (Airflow) and production Gold (Spark)
 The system SHALL provide **four** Airflow DAGs, decoupled by cadence and wired via
 Airflow **Datasets**:
 
 - **Features DAG** (`silver >> gold`, hourly): produces the gold-features dataset.
-- **Training DAG** (`labels >> train`, daily): produces the model dataset.
+- **Training DAG** (`train`, daily): produces the model dataset. It SHALL NOT seed
+  the labels store: labels are seeded outside Airflow (`make labels`), or supplied
+  by an outcomes feed.
 - **Inference DAG** (`score >> publish`): dataset-driven, scheduled on
   `(gold-features | model)`, so it re-runs on a feature refresh OR a new model
   without a manual re-trigger.
 - **Maintenance DAG** (`maintain`, daily): compacts and expires the lake's tables
   (REQ-ORC-06).
 
-Airflow itself needs neither the `idp` package nor Spark. The Spark stages'
-tasks (silver, gold, score, publish, maintain) SHALL submit a Spark application
-through the Spark Operator and succeed only when that application completes. The
-other tasks run as pods. The Silver and Gold tasks SHALL run the single Spark
+Airflow itself needs neither the `idp` package nor Spark. Every Airflow task
+(silver, gold, score, publish, maintain, train) SHALL submit a Spark application
+through the Spark Operator and succeed only when that application completes; no
+task SHALL start a pod directly. The Silver and Gold tasks SHALL run the single Spark
 implementation of their stage (REQ-ORC-05). There SHALL be no per-stage engine
 selection. The features DAG SHALL run at most one DAG run at a time, so a Silver
 run never overlaps another run's Silver or Gold. That also keeps the fact
@@ -128,6 +138,16 @@ checkpoints single-writer.
 - **WHEN** a Spark stage's application ends in a failed state (e.g. a driver error)
 - **THEN** the Airflow task fails, retries per its policy, and downstream tasks do
   not run
+
+#### Scenario: SCN-ORC-02.7 — Training needs seeded labels
+- **WHEN** the training DAG runs and the labels store is empty
+- **THEN** the `train` task fails with a message to seed the labels (`make labels`),
+  the model dataset is not updated, and the inference DAG is not triggered
+
+#### Scenario: SCN-ORC-02.8 — Airflow only submits Spark applications
+- **WHEN** the four DAGs are parsed
+- **THEN** every task submits a Spark application from its rendered manifest, and
+  no task launches a pod of its own
 
 ### Requirement: REQ-ORC-03 — Local composition remains available
 The system SHALL keep a local `run` orchestrator that composes the same stage

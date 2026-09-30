@@ -309,8 +309,8 @@ endef
 .PHONY: spark-manifests
 spark-manifests: ## Re-render the SparkApplication manifests (deploy/app/spark/, the one copy; the DAG image bakes it in) from spark.profiles
 	@mkdir -p deploy/app/spark
-	@for st in silver gold score publish maintain; do \
-	  $(PY) -m idp.cli spark-manifest $$st > deploy/app/spark/$$st.yaml; \
+	@for st in silver gold score publish maintain train; do \
+	  $(PY) -m idp.cli spark-manifest $$st > deploy/app/spark/$$st.yaml || exit 1; \
 	done; echo ">> rendered deploy/app/spark/*.yaml (run 'make airflow-reload' so the DAG image picks them up)"
 
 # Wait for an idp-app Job to finish: exit 0 when it completes, and exit 1 (printing
@@ -392,11 +392,8 @@ labels: ## Seed the labels/outcomes store (idp-app): -> s3://idp-ml/labels (trai
 	kubectl -n idp-app logs job/idp-labels
 
 .PHONY: train
-train: ## Train stage (idp-app): Gold features + labels store -> models (s3://idp-ml). Needs 'make labels' first.
-	kubectl -n idp-app delete job idp-train --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/train-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-train --timeout=600s
-	kubectl -n idp-app logs job/idp-train
+train: mk-check ## Train stage (SparkApplication in idp-app): Gold features + labels store -> models (MLflow registry). Needs 'make labels' first.
+	$(call run_sparkapp,train,)
 	@echo ">> Models registered (MLflow when IDP_MLFLOW_TRACKING_URI is set, else s3://idp-ml); see 'registry' above for the champion gate. 'make score' scores with the champions."
 
 .PHONY: publish
@@ -454,7 +451,7 @@ airflow-ui: ## Port-forward the Airflow web UI to http://localhost:8080 (admin/a
 	kubectl -n idp-platform port-forward svc/airflow-webserver 8080:8080
 
 .PHONY: airflow-trigger
-airflow-trigger: ## Unpause the 4 DAGs + trigger features & training (inference is dataset-driven)
+airflow-trigger: ## Unpause the 4 DAGs + trigger features & training (inference is dataset-driven). Seed labels first: make labels
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_features
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_inference
 	kubectl -n idp-platform exec deploy/airflow-scheduler -- airflow dags unpause idp_training

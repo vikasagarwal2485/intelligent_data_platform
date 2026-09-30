@@ -163,13 +163,17 @@ def test_score_uses_the_champion(tmp_path, no_env, lake, models):
 # API refresh — SCN-ML-04.5                                                    #
 # --------------------------------------------------------------------------- #
 def test_api_picks_up_a_new_champion_without_restart(mlflow_cfg, models, monkeypatch):
+    # SCN-ML-04.5 — on a fake clock, so the refresh interval is exact: registering a
+    # version takes real seconds, which a wall-clock interval can't be shorter than
     from idp.serving import api
 
+    clock = [1000.0]
+    monkeypatch.setattr(api.time, "monotonic", lambda: clock[0])
     store = model_store(mlflow_cfg)
     cm, _ = models
     _save(store, models, PASS)
     monkeypatch.setenv("IDP_MLFLOW_TRACKING_URI", mlflow_cfg.mlflow["tracking_uri"])
-    monkeypatch.setenv("IDP_MLFLOW_REFRESH_SECONDS", "0.5")
+    monkeypatch.setenv("IDP_MLFLOW_REFRESH_SECONDS", "60")
     client = TestClient(api.create_app())
     payload = {"tenant_id": "tenant_a", "service_id": "tok_x",
                "features": {f: 1.0 for f in CREDIT_FEATURES}}
@@ -180,15 +184,16 @@ def test_api_picks_up_a_new_champion_without_restart(mlflow_cfg, models, monkeyp
     bigger = copy.deepcopy(cm)
     bigger.min_limit = first + 7.0
     assert _save(store, models, PASS, credit=bigger)["credit"].promoted
+    clock[0] += 59                                                  # within the interval
     assert client.post("/credit-limit", json=payload).json()["recommended_limit"] == first  # cached
-    time.sleep(0.6)
+    clock[0] += 2                                                   # past it
     assert client.post("/credit-limit", json=payload).json()["recommended_limit"] != first  # new champion
 
     # an unreachable registry keeps serving the cached model (stale, not 503)
     def down(self, name):
         raise ConnectionError("registry down")
     monkeypatch.setattr(MlflowModelStore, "champion_version", down)
-    time.sleep(0.6)
+    clock[0] += 61
     assert client.post("/credit-limit", json=payload).status_code == 200
 
 

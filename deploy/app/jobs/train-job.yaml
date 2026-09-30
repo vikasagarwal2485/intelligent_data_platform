@@ -1,3 +1,7 @@
+# ROLLBACK ONLY: `make train` and the Airflow training DAG now run train as a Spark
+# Operator SparkApplication (deploy/app/spark/train.yaml, airflow-spark-only). This
+# single-pod Job with a local Spark session is kept to fall back to.
+#
 # On-demand offline training (idp-app): fits the credit + fraud models on the
 # labelled synthetic dataset (labels never enter the lake — ADR-0014) and writes
 # the model artifacts to the MinIO model store (s3://idp-ml) so the Gold job and

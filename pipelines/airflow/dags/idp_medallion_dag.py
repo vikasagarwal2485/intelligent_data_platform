@@ -1,37 +1,41 @@
 """Airflow DAGs that orchestrate the medallion stages (production mode).
 
 Airflow is the ORCHESTRATOR (schedule / order / retries); every stage runs from
-the one `idp` image, the same code as the CLI (REQ-ORC-05):
-  * the Spark stages (silver, gold, score, publish, maintain) are submitted as Spark
-    Operator SparkApplications (REQ-PLT-10): a driver pod plus executor pods, sized by
-    `spark.profiles.<stage>`. The manifests are rendered by `make spark-manifests`
-    into deploy/app/spark/ (their one copy in the repo), and the DAG image bakes them
-    in as ./spark/ next to this file (a named build context). A task succeeds only
-    when its application completes; a failed application fails the task.
-  * labels and train run as single pods (train uses a local Spark session for its
-    bounded, stratified sample, REQ-ML-09).
-There is no engine switch.
+the one `idp` image, the same code as the CLI (REQ-ORC-05). Every task is a Spark
+Operator SparkApplication (REQ-ORC-02, REQ-PLT-10): a driver pod plus executor pods,
+sized by `spark.profiles.<stage>`, for silver, gold, score, publish, maintain and
+train. The manifests are rendered by `make spark-manifests` into deploy/app/spark/
+(their one copy in the repo), and the DAG image bakes them in as ./spark/ next to
+this file (a named build context). A task succeeds only when its application
+completes; a failed application fails the task. No task launches a pod of its own,
+and there is no engine switch.
+
+The non-Spark stages (generate, produce, consume, labels) are CLI stages run by
+`make` as Kubernetes Jobs, outside Airflow. In particular the labels store is seeded
+with `make labels` (it stands in for the business's observed-outcomes feed); the
+training DAG only trains, and fails with a "seed labels" message if it is empty.
 
 Publish is a SEPARATE, independent task (Gold -> TimescaleDB) — never folded into
-Gold. Next step: migrate its target from TimescaleDB to Iceberg tables via the
-Nessie catalog (the serving read path changes, the task stays independent).
+Gold.
 
-This is the correct decoupling: Airflow only needs permission to launch pods — it
-does NOT need the `idp` package or Spark installed. The pods carry code + deps.
+This is the correct decoupling: Airflow only needs permission to submit
+SparkApplications (and read their pods' logs) — it does NOT need the `idp` package
+or Spark installed. The pods carry code + deps.
 
 Prerequisites:
   * `idp/scoring-api:dev` on the node (`make image`; bundles the JRE, pyspark, the
     S3A jars and the Iceberg jars)
   * the lake's Iceberg catalog database (`iceberg` on TimescaleDB, `make lake-catalog`)
   * the Spark Operator watching idp-app (`make spark-operator`)
-  * the Airflow SA may create pods and SparkApplications in `idp-app`
+  * the Airflow SA may submit SparkApplications in `idp-app`
     (deploy/platform/airflow/rbac.yaml)
+  * a seeded labels store for training (`make labels`)
 
 DAGs (four, decoupled by cadence; the first three wired via Airflow Datasets):
   * idp_features  : silver >> gold           (hourly; PRODUCES gold-features dataset)
   * idp_inference : score  >> publish        (DATASET-DRIVEN: runs on new features
                     OR a new model; loads the current model each run)
-  * idp_training  : labels >> train          (daily; PRODUCES model dataset)
+  * idp_training  : train                    (daily; PRODUCES model dataset)
   * idp_maintenance: maintain                (daily; compaction, snapshot expiry,
                     orphan cleanup -- produces no dataset, so it triggers nothing)
 
@@ -45,16 +49,9 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.datasets import Dataset
-from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator
-from kubernetes.client import models as k8s
 
-IMAGE = "idp/scoring-api:dev"
 APP_NS = "idp-app"
-BUCKET_PREFIX = "idp"
-MINIO_ENDPOINT = "http://minio.idp-platform.svc:9000"
-# The lake's Iceberg JDBC catalog: database `iceberg` on the platform Postgres.
-LAKE_CATALOG_URI = "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg"
 
 # Datasets wire the three DAGs together (Airflow data-aware scheduling). The
 # `gold` task produces GOLD_FEATURES; the `train` task produces MODEL; the
@@ -65,58 +62,7 @@ GOLD_FEATURES = Dataset("s3://idp-gold/credit_features")
 MODEL = Dataset("s3://idp-ml/credit_model.joblib")
 
 
-# S3/MinIO env every stage pod needs (platform services are in idp-platform).
-S3_ENV = [
-    k8s.V1EnvVar(name="IDP_S3_ENDPOINT", value=MINIO_ENDPOINT),
-    k8s.V1EnvVar(name="IDP_S3_ACCESS_KEY", value="minioadmin"),
-    k8s.V1EnvVar(name="IDP_S3_SECRET_KEY", value="minioadmin123"),
-    k8s.V1EnvVar(name="IDP_S3_BUCKET_PREFIX", value=BUCKET_PREFIX),
-]
-# The lake's Iceberg catalog (REQ-FND-04), shared by pyiceberg and Spark.
-CATALOG_ENV = [
-    k8s.V1EnvVar(name="IDP_CATALOG_TYPE", value="sql"),
-    k8s.V1EnvVar(name="IDP_CATALOG_URI", value=LAKE_CATALOG_URI),
-]
-# The model registry (REQ-ML-04): train registers versions and moves `champion`
-# through the gate; score loads `champion` (MLflow artifacts use the S3 env above).
-MLFLOW_ENV = [
-    k8s.V1EnvVar(name="IDP_MLFLOW_TRACKING_URI", value="http://mlflow.idp-platform.svc:80"),
-]
-LAKE_ENV = S3_ENV + CATALOG_ENV + MLFLOW_ENV
-# Synthetic-generation volume for the `labels` task. MUST MATCH the produce job
-# (deploy/app/jobs/produce-job.yaml) — labels are regenerated deterministically
-# from these params and must line up with the data that became Gold, or the
-# training join is empty. Keep in lock-step with produce-job.yaml.
-SYN_ENV = [
-    k8s.V1EnvVar(name="IDP_SUBSCRIBERS", value="150"),
-    k8s.V1EnvVar(name="IDP_DAYS", value="14"),
-]
-# train: a local Spark session (train profile: 2g heap + 1g overhead) for the
-# bounded training sample, then scikit-learn on that sample.
-TRAIN_RESOURCES = k8s.V1ResourceRequirements(
-    requests={"cpu": "500m", "memory": "1536Mi"},
-    limits={"cpu": "2", "memory": "3Gi"},
-)
-
 default_args = {"owner": "idp", "retries": 1, "retry_delay": timedelta(minutes=3)}
-
-
-def _stage(task_id: str, arg: str, *, extra_env=None, resources=None) -> KubernetesPodOperator:
-    """A medallion stage: `idp <arg>` in the idp image (Silver/Gold run Spark inside it)."""
-    return KubernetesPodOperator(
-        task_id=task_id,
-        name=f"idp-{arg}",
-        namespace=APP_NS,
-        image=IMAGE,
-        image_pull_policy="Never",          # local image built into minikube
-        cmds=["idp"],
-        arguments=[arg],
-        env_vars=LAKE_ENV + (extra_env or []),
-        container_resources=resources,
-        get_logs=True,
-        on_finish_action="delete_succeeded_pod",  # keep FAILED stage pods in idp-app for debugging
-        in_cluster=True,
-    )
 
 
 def _spark_stage(task_id: str, stage: str) -> SparkKubernetesOperator:
@@ -171,10 +117,11 @@ with DAG(
     _spark_stage("score", "score") >> _spark_stage("publish", "publish")
 
 
-# DAG 3 — TRAINING: labels -> train, on its own (daily) cadence. The train task
-# PRODUCES the `model` dataset (which triggers inference). The `labels` task seeds
-# the outcomes store — in this prototype it stands in for the business's real
-# observed-outcomes feed; in production replace it with that feed and keep `train`.
+# DAG 3 — TRAINING: train, on its own (daily) cadence, as a SparkApplication (the
+# join and the stratified sample on the executors, fitting on the driver). It
+# PRODUCES the `model` dataset (which triggers inference). The labels store it reads
+# is seeded outside Airflow (`make labels`, a stand-in for the business's observed-
+# outcomes feed); with no labels, train fails and the model dataset isn't updated.
 with DAG(
     dag_id="idp_training",
     description="Offline ML training on Gold features + labels store",
@@ -184,9 +131,8 @@ with DAG(
     default_args=default_args,
     tags=["idp", "ml", "training"],
 ) as dag_training:
-    _train = _stage("train", "train", resources=TRAIN_RESOURCES)
+    _train = _spark_stage("train", "train")
     _train.outlets = [MODEL]                 # a new model triggers inference
-    _stage("labels", "labels", extra_env=SYN_ENV) >> _train
 
 
 # DAG 4 — MAINTENANCE: compaction, snapshot expiry and orphan cleanup on every lake

@@ -1,6 +1,6 @@
 """SparkApplication manifests for the Spark stages (REQ-ORC-01/07, REQ-PLT-10).
 
-In the cluster, Silver, Gold, Score, publish and maintenance run as Spark
+In the cluster, Silver, Gold, Score, publish, maintenance and train run as Spark
 Operator ``SparkApplication``s: one driver pod plus executor pods, all from the
 ``idp`` image, running the same stage code as the CLI. The resources come from
 ``spark.profiles.<stage>`` in ``config/platform.yaml``, so profiles live in one
@@ -17,7 +17,7 @@ import yaml
 
 from idp.common.config import PlatformConfig
 
-SPARK_STAGES = ("silver", "gold", "score", "publish", "maintain")
+SPARK_STAGES = ("silver", "gold", "score", "publish", "maintain", "train")
 NAMESPACE = "idp-app"
 IMAGE = "idp/scoring-api:dev"
 SPARK_VERSION = "3.5.3"

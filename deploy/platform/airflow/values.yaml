@@ -11,11 +11,12 @@
 # `make airflow-ui`/`airflow-trigger` would break. The 2.x line keeps the
 # `webserver`, `triggerer` and `dagProcessor` keys below valid.
 #
-# The DAGs are BAKED into a local image (deploy/airflow/Dockerfile), not pulled
-# via git-sync: the source repo is private, so git-sync-init can't clone it
-# without credentials and crashloops with an auth error. The DAGs use
-# KubernetesPodOperator, so Airflow needs the cncf.kubernetes provider (bundled
-# in the official image) and the RBAC in deploy/airflow/rbac.yaml.
+# The DAGs are BAKED into a local image (deploy/platform/airflow/Dockerfile), not
+# pulled via git-sync: the source repo is private, so git-sync-init can't clone it
+# without credentials and crashloops with an auth error. Every DAG task is a
+# SparkKubernetesOperator (a Spark Operator SparkApplication), so Airflow needs the
+# cncf.kubernetes provider (bundled in the official image) and the RBAC in
+# deploy/platform/airflow/rbac.yaml (submit SparkApplications, read pods and logs).
 
 executor: KubernetesExecutor
 

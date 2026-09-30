@@ -295,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("migrate-lake", help="One-off: legacy Parquet Bronze -> Iceberg Bronze"
                    ).set_defaults(func=_cmd_migrate_lake)
     p_sm = sub.add_parser("spark-manifest", help="Render a Spark stage's SparkApplication YAML from its profile")
-    p_sm.add_argument("stage", choices=("silver", "gold", "score", "publish", "maintain"))
+    from idp.transforms.sparkapp import SPARK_STAGES  # no pyspark: manifests are plain YAML
+    p_sm.add_argument("stage", choices=SPARK_STAGES)
     p_sm.add_argument("stage_args", nargs="*", help="arguments for the stage, e.g. -- --full-refresh")
     p_sm.set_defaults(func=_cmd_spark_manifest)
     p_arch = sub.add_parser("archive-policy", help="Render the Bronze archive rule (S3 lifecycle / MinIO ILM)")

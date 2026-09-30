@@ -112,7 +112,7 @@ spark:
     score:    {driver: {cores: 1, memory: 1g, memoryOverhead: 512m}, executor: {instances: 2, cores: 1, memory: 1g, memoryOverhead: 768m}}  # pandas in Python workers
     publish:  {driver: {cores: 1, memory: 1g, memoryOverhead: 512m}, executor: {instances: 1, cores: 1, memory: 1g, memoryOverhead: 512m}}
     maintain: {driver: {cores: 1, memory: 1g, memoryOverhead: 512m}, executor: {instances: 1, cores: 1, memory: 1g, memoryOverhead: 512m}}
-    train:    {driver: {cores: 1, memory: 2g, memoryOverhead: 1g}}   # a Kubernetes Job with a local session: sampling needs Spark, fitting doesn't
+    train:    {driver: {cores: 1, memory: 2g, memoryOverhead: 1g}, executor: {instances: 1, cores: 1, memory: 1g, memoryOverhead: 512m}}  # join + sample on the executor; the driver collects the bounded sample and fits
 
 # Synthetic data generation (Phase 0 - reviewer requirement)
 synthetic:

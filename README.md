@@ -205,7 +205,7 @@ deploy/                      # split by owning team (ADR-0018)
   app/                       #   APPLICATION TEAM — workloads on the platform
     deployment/              #     scoring-api base (Deployment/Service)
     overlays/local|aws/      #     env patches for scoring-api (dev image / ECR+IRSA)
-    jobs/                    #     produce/consume/silver/gold/score/labels/train/publish Jobs
+    jobs/                    #     produce/consume/labels Jobs (+ the old silver/gold/score/train/publish Jobs, rollback only)
     spark/                   #     the Spark stages' SparkApplications (the one copy; `make
                              #     spark-manifests`), also baked into the Airflow DAG image
 pipelines/airflow/dags/      # Airflow DAGs for the batch pipeline (Spark manifests come from deploy/app/spark/)
@@ -338,9 +338,9 @@ Health checks & fixes if a component is unhappy:
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
                    #    (or: make stream-from-landing — via the s3://idp-landing source files)
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
-make labels        # 3) Seed the labels/outcomes store -> s3://idp-ml/labels (training input)
+make labels        # 3) Seed the labels/outcomes store -> s3://idp-ml/labels (training input; once, not in Airflow)
 make gold          # 4) Gold stage:  Silver (S3) -> feature tables ONLY (S3)
-make train         # 5) Train stage: Gold features + labels -> models (s3://idp-ml)
+make train         # 5) Train stage (SparkApplication): Gold features + labels -> models (MLflow registry)
 make score         # 6) Score stage: Gold features + models -> credit/fraud SCORES (S3)
 make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
 ```
@@ -352,11 +352,13 @@ make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by serv
 > `credit_scores`/`fraud_scores`. Skip `score` (or `train`) and Gold/TimescaleDB
 > hold **features only** — which is why a `gold.credit_features`-only TimescaleDB
 > means scoring hasn't run. In Airflow this is **three dataset-driven DAGs**:
-> `idp_features` (`silver → gold`), `idp_training` (`labels → train`), and
+> `idp_features` (`silver → gold`), `idp_training` (`train`), and
 > `idp_inference` (`score → publish`) — the last is scheduled on the *gold-features*
 > **or** *model* dataset, so it re-runs automatically when either refreshes (a new
 > model auto-re-scores; no manual second pass). `make airflow-trigger` unpauses all
-> three and kicks features + training.
+> three and kicks features + training. The training DAG doesn't seed labels: run
+> `make labels` once first (it stands in for an outcomes feed), or `train` fails
+> with "seed labels" and no model is produced.
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
@@ -378,14 +380,17 @@ make minio-reset                                # clean re-run: recreate the buc
 
 **Production (orchestrated Silver/Gold):**
 - **Airflow** — three dataset-driven DAGs (`idp_features`: `silver >> gold`;
-  `idp_inference`: `score >> publish`; `idp_training`: `labels >> train`) plus the
+  `idp_inference`: `score >> publish`; `idp_training`: `train`) plus the
   daily `idp_maintenance` DAG (`idp maintain`: compaction, snapshot expiry, orphan
   cleanup; it triggers nothing). **Airflow is the orchestrator, and every stage
   runs the `idp` image.**
-  - The Spark stages (silver, gold, score, publish, maintain) are submitted as
-    SparkApplications (`SparkKubernetesOperator`) and fail if the application
-    fails.
-  - labels and train run as pods (`KubernetesPodOperator`).
+  - **Every task is a Spark application:** silver, gold, score, publish, maintain
+    and train are submitted as SparkApplications (`SparkKubernetesOperator`) and
+    fail if the application fails. No task launches a pod of its own, so Airflow's
+    RBAC in `idp-app` only submits SparkApplications and reads their pods' logs.
+  - The non-Spark stages (generate, produce, consume, labels) run from `make` as
+    Kubernetes Jobs, outside Airflow. Seed labels with `make labels` before the
+    first training run.
   - The code is the same as `idp silver` / `idp gold` / …; there is no engine
     switch (ADR-0027).
   - `publish` (Gold→TimescaleDB) stays a **separate** task.
@@ -405,7 +410,7 @@ make minio-reset                                # clean re-run: recreate the buc
     PostgreSQL/Redis — the retired Bitnami images no longer pull, which otherwise
     leaves `run-airflow-migrations` hanging and the init containers in
     `CrashLoopBackOff`.
-- **Spark in the cluster (ADR-0029).** `make silver|gold|score|publish|maintain`
+- **Spark in the cluster (ADR-0029).** `make silver|gold|score|publish|maintain|train`
   each render the stage's SparkApplication from its profile
   (`idp spark-manifest <stage>`), apply it, and wait for `COMPLETED` or `FAILED`.
   - **Entrypoints:** `pipelines/spark/<stage>_job.py`, thin wrappers over the same
@@ -736,9 +741,11 @@ champions (and skips a model that has none yet), and the scoring API re-checks
 without a restart and keeps the cached one if the registry is unreachable. Without a
 tracking URI (local dev, tests), models are joblib files in `s3://idp-ml` or the
 local ML dir, and the latest trained model is used. The labels store stays under
-`s3://idp-ml/labels`, shared across the `train`, `score` and `scoring-api` pods. Orchestrated
+`s3://idp-ml/labels`, seeded by `make labels`. `train` runs as a SparkApplication:
+the join with the labels and the stratified sample run on the executors, and the
+driver fits the models on the bounded sample. Orchestrated
 as **three dataset-driven DAGs**: `idp_features` (`silver → gold`), `idp_training`
-(`labels → train`), and `idp_inference` (`score → publish`) — inference is scheduled
+(`train`), and `idp_inference` (`score → publish`) — inference is scheduled
 on the gold-features **or** model dataset, so a new model or fresh features
 auto-re-scores with no manual re-run.
 

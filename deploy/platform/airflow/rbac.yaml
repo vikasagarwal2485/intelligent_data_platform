@@ -1,42 +1,23 @@
-# Let Airflow launch stage pods in the idp-app namespace (KubernetesPodOperator).
-# Airflow runs in idp-platform; its pods must be able to create/watch/delete pods
-# in idp-app.
+# Airflow's access to idp-app (REQ-PLT-10). Every Airflow task is a Spark Operator
+# SparkApplication (REQ-ORC-02): SparkKubernetesOperator creates it, follows its
+# driver pod to the end, streams the driver log, and deletes the application
+# afterwards (which removes its pods through their owner reference). So Airflow may
+# manage SparkApplications and READ pods, pod logs and events, but it can't create,
+# patch, delete or exec into pods: it never launches a pod of its own.
 #
-# NOTE: set the ServiceAccount name to match your Airflow chart. The
+# (The provider, cncf-kubernetes 8.3.3, lists pods to find the driver, reads its
+# status and log, and on a failure lists the pod's events; its optional "already
+# checked" pod patch is non-fatal when denied.)
+#
+# NOTE: set the ServiceAccount names to match your Airflow chart. The
 # apache-airflow chart commonly uses "airflow-worker" (KubernetesExecutor) and
 # "airflow-scheduler". Check with:
 #   kubectl -n idp-platform get sa | grep airflow
 # then edit the subjects below if needed.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: idp-pod-launcher
-  namespace: idp-app
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/log", "pods/exec"]
-    verbs: ["create", "get", "list", "watch", "delete", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: idp-pod-launcher
-  namespace: idp-app
-subjects:
-  - kind: ServiceAccount
-    name: airflow-worker
-    namespace: idp-platform
-  - kind: ServiceAccount
-    name: airflow-scheduler
-    namespace: idp-platform
-roleRef:
-  kind: Role
-  name: idp-pod-launcher
-  apiGroup: rbac.authorization.k8s.io
----
-# The Spark stages run as SparkApplications (REQ-PLT-10): Airflow's
-# SparkKubernetesOperator creates them in idp-app, watches them to their final
-# state, and deletes them afterwards.
+#
+# Upgrading from the pod-launching version: `kubectl apply` doesn't prune, so remove
+# the old Role once:
+#   kubectl -n idp-app delete role,rolebinding idp-pod-launcher --ignore-not-found
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -46,6 +27,16 @@ rules:
   - apiGroups: ["sparkoperator.k8s.io"]
     resources: ["sparkapplications", "sparkapplications/status"]
     verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  # follow the driver: find it, read its status and log, and its events on failure
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
