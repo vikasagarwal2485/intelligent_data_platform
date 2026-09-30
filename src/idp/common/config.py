@@ -140,7 +140,7 @@ class PlatformConfig:
         t["password"] = env.get("IDP_TS_PASSWORD", t.get("password", ""))
         t.setdefault("host", "timescaledb.idp-platform.svc")
         t.setdefault("schema", "gold")
-        t.setdefault("enabled", False)
+        t.setdefault("enabled", True)
         return t
 
     @property
