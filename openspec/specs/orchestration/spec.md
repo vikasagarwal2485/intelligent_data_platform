@@ -29,7 +29,11 @@ transformation engine (REQ-ORC-05). In the cluster they, and the `train` stage,
 SHALL run as Spark applications, with one driver and executors, submitted through
 the Spark Operator: `train` reads, joins and samples its training set on the
 executors and fits the models on the driver, from the bounded sample (REQ-ML-09).
-The other stages (generate, produce, consume, labels) run as Kubernetes Jobs.
+This SHALL be their only cluster execution path, both for manual runs (`make
+<stage>`) and for Airflow: each is submitted from its manifest rendered from
+`spark.profiles.<stage>`, and there SHALL be no alternate Kubernetes Job for a Spark
+stage. The other stages (generate, produce, consume, labels, and the one-off lake
+migration) run as Kubernetes Jobs.
 
 Streaming ingestion SHALL be runnable end to end with one command, in two variants:
 - **`make stream`:** in-memory `idp produce`, then `idp consume`
@@ -81,6 +85,14 @@ and consume them, without regenerating.
 - **THEN** a Spark application with one driver pod and at least one executor pod
   trains both models on the bounded sample and persists them to the model store
   (REQ-ML-04), with the same metrics a `local[*]` run reports on the same input
+
+#### Scenario: SCN-ORC-01.9 — One cluster path per Spark stage
+- **WHEN** the repository's cluster manifests are inspected
+- **THEN** each Spark stage (silver, gold, score, publish, maintain, train) has
+  exactly one: its rendered SparkApplication, which both `make <stage>` and the
+  Airflow task submit. The only Kubernetes Jobs are the non-Spark stages the `make`
+  targets apply (generate, produce, produce from landing, consume, labels, lake
+  migration)
 
 ### Requirement: REQ-ORC-02 — Scheduled orchestration (Airflow) and production Gold (Spark)
 The system SHALL provide **four** Airflow DAGs, decoupled by cadence and wired via

@@ -28,8 +28,8 @@ deploy/
     deployment/             #   scoring-api base (Deployment/Service + kustomization)
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
     overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
-    jobs/                   #   produce/consume/labels Jobs (+ the old Spark-stage Jobs, rollback only)
-    spark/                  #   SparkApplications for silver/gold/score/publish/maintain: the one
+    jobs/                   #   the non-Spark stages' Jobs: generate/produce/consume/labels/migrate-lake
+    spark/                  #   SparkApplications for silver/gold/score/publish/maintain/train: the one
                             #   copy (`make spark-manifests`); the Airflow DAG image bakes it in
 ```
 
@@ -145,8 +145,10 @@ Kubernetes Jobs.
   - `kubectl -n idp-app logs idp-<stage>-driver`
   - An executor OOMKilled below its limit means the node cap is too small; see
     `make mk-check`.
-- **Rollback:** the single-pod Jobs are still in `deploy/app/jobs/`, e.g.
-  `kubectl -n idp-app apply -f deploy/app/jobs/gold-job.yaml`.
+- **Rollback:** through version control (`git revert`, then `make image` and the
+  stage target). The Spark stages have no single-pod Jobs: in every cluster tier,
+  `make <stage>` and Airflow run them only as these SparkApplications (REQ-ORC-01).
+  `deploy/app/jobs/` holds only the non-Spark stages' Jobs.
 
 ## Streaming ingestion: in-memory or through the landing zone
 

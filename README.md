@@ -205,7 +205,7 @@ deploy/                      # split by owning team (ADR-0018)
   app/                       #   APPLICATION TEAM — workloads on the platform
     deployment/              #     scoring-api base (Deployment/Service)
     overlays/local|aws/      #     env patches for scoring-api (dev image / ECR+IRSA)
-    jobs/                    #     produce/consume/labels Jobs (+ the old silver/gold/score/train/publish Jobs, rollback only)
+    jobs/                    #     the non-Spark stages' Jobs: generate/produce/consume/labels/migrate-lake
     spark/                   #     the Spark stages' SparkApplications (the one copy; `make
                              #     spark-manifests`), also baked into the Airflow DAG image
 pipelines/airflow/dags/      # Airflow DAGs for the batch pipeline (Spark manifests come from deploy/app/spark/)
@@ -362,17 +362,19 @@ make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by serv
 - `idp-produce` publishes synthetic records to `t.<tenant>.<entity>` topics
   (small demo volume via `IDP_SUBSCRIBERS`/`IDP_DAYS`).
 - `idp-consume` drains topics and writes **only Bronze**.
-- `idp-silver` (`deploy/app/jobs/silver-job.yaml`) reads Bronze → writes Silver.
-- `idp-gold` (`deploy/app/jobs/gold-job.yaml`) reads Silver → writes Gold.
-- Models: run `idp train` (offline) to populate `ml/artifacts`; then Gold also
-  emits `credit_scores` / `fraud_scores`. Without models, Gold = feature tables only.
+- `idp-silver` (a SparkApplication, `make silver`) reads Bronze → writes Silver.
+- `idp-gold` (a SparkApplication, `make gold`) reads Silver → writes the Gold
+  feature tables only.
+- Models and scores: `make labels` (once), then `make train` registers the models
+  and `make score` writes `credit_scores` / `fraud_scores` from the champions.
+  Without `train` and `score`, Gold holds feature tables only.
 
 **Verify:**
 ```bash
 kubectl -n idp-app logs job/idp-produce         # per-topic message counts
 kubectl -n idp-app logs job/idp-consume         # bronze counts
-kubectl -n idp-app logs job/idp-silver          # silver counts
-kubectl -n idp-app logs job/idp-gold            # gold tables
+kubectl -n idp-app logs idp-silver-driver       # silver counts (Spark driver; also idp-gold-driver, idp-score-driver, …)
+kubectl -n idp-app get sparkapplications        # each Spark stage's final state
 make kafka-ui                                   # browse topics/messages/schemas
 make minio-ls                                   # objects in idp-bronze / idp-silver / idp-gold
 make minio-reset                                # clean re-run: recreate the buckets AND clear the Iceberg catalog

@@ -53,3 +53,23 @@ def test_stage_args_and_unknown_stage():
     assert spark_manifest(load_config(), "silver", ["--full-refresh"])["spec"]["arguments"] == ["--full-refresh"]
     with pytest.raises(ValueError):
         spark_manifest(load_config(), "consume")
+
+
+def test_one_cluster_path_per_spark_stage():
+    # SCN-ORC-01.9 — each Spark stage runs in the cluster only as its rendered
+    # SparkApplication; the only Kubernetes Jobs are the non-Spark stages `make` applies
+    import re
+    import yaml
+
+    jobs = sorted((ROOT / "deploy/app/jobs").glob("*.yaml"))
+    for job in jobs:
+        for doc in yaml.safe_load_all(job.read_text()):
+            if doc and doc.get("kind") == "Job":
+                [container] = doc["spec"]["template"]["spec"]["containers"]
+                assert container["command"][:2][-1] not in SPARK_STAGES, job.name
+    applied = set(re.findall(r"deploy/app/jobs/([\w-]+\.yaml)", (ROOT / "Makefile").read_text()))
+    assert {j.name for j in jobs} == applied == {
+        "generate-job.yaml", "produce-job.yaml", "produce-from-landing-job.yaml",
+        "consume-job.yaml", "labels-job.yaml", "migrate-lake-job.yaml"}
+    for stage in SPARK_STAGES:
+        assert (ROOT / "deploy/app/spark" / f"{stage}.yaml").exists(), stage
