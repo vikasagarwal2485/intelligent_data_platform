@@ -42,6 +42,20 @@ spec:
               value: "sql"
             - name: IDP_CATALOG_URI
               value: "postgresql+psycopg2://postgres:idp-dev-password@timescaledb.idp-platform.svc:5432/iceberg"
+            # The serving store (REQ-SRV-04): GET /serving/... reads the gold.* tables the
+            # publish stage writes, so these MUST match its env (sparkapp.SERVING_ENV).
+            # IDP_TS_HOST is what enables the lookup (cfg.timescale). Dev credentials;
+            # External Secrets on EKS.
+            - name: IDP_TS_HOST
+              value: "timescaledb.idp-platform.svc"
+            - name: IDP_TS_PORT
+              value: "5432"
+            - name: IDP_TS_DB
+              value: "idp"
+            - name: IDP_TS_USER
+              value: "postgres"
+            - name: IDP_TS_PASSWORD
+              value: "idp-dev-password"
           ports:
             - containerPort: 8000
           readinessProbe:

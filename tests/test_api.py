@@ -82,3 +82,31 @@ def test_serving_lookup_returns_published_row(monkeypatch):
     monkeypatch.setattr(timescale, "read_score", lambda *a, **k: row)
     resp = TestClient(create_app()).get("/serving/credit_scores/tenant_a/tok_x")
     assert resp.status_code == 200 and resp.json() == row
+
+
+def test_deployed_api_reads_the_serving_store_publish_writes():
+    # REQ-SRV-04 — the scoring-api Deployment enables the lookup (IDP_TS_HOST) and
+    # points at the same TimescaleDB/database/user as the publish stage
+    from pathlib import Path
+
+    import yaml
+
+    from idp.transforms.sparkapp import SERVING_ENV
+
+    root = Path(__file__).resolve().parents[1]
+    [dep] = [d for d in yaml.safe_load_all((root / "deploy/app/deployment/scoring-api.yaml").read_text())
+             if d and d["kind"] == "Deployment"]
+    [container] = dep["spec"]["template"]["spec"]["containers"]
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    assert {k: env.get(k) for k in SERVING_ENV} == SERVING_ENV
+
+
+def test_timescale_off_without_host(monkeypatch):
+    # the serving store is enabled by IDP_TS_HOST, never by default
+    from idp.common.config import PlatformConfig, StorageConfig
+    monkeypatch.delenv("IDP_TS_HOST", raising=False)
+    assert load_config().timescale["enabled"] is False
+    bare = PlatformConfig(raw={}, tenants=[], storage=StorageConfig("", "", "", "", "", ""))
+    assert bare.timescale["enabled"] is False
+    monkeypatch.setenv("IDP_TS_HOST", "db")
+    assert load_config().timescale["enabled"] is True
