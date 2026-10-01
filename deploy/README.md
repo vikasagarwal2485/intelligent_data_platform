@@ -400,7 +400,7 @@ secrets and passwords, never for EKS):
 **Get a token and call each endpoint:**
 ```bash
 TOKEN=$(make -s keycloak-token TENANT=tenant_a)      # client credentials of idp-tenant-a
-kubectl -n idp-app port-forward svc/scoring-api 18000:80 &
+make serve-cluster &        # = kubectl -n idp-app port-forward svc/scoring-api 18000:80
 AUTH="Authorization: Bearer $TOKEN"
 
 curl -s localhost:18000/health                                               # open

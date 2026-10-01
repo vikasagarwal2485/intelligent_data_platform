@@ -795,7 +795,7 @@ In the cluster, get a tenant's token first (`deploy/README.md`, "Calling the sco
 API"):
 ```bash
 TOKEN=$(make -s keycloak-token TENANT=tenant_a)
-kubectl -n idp-app port-forward svc/scoring-api 18000:80 &
+make serve-cluster &        # = kubectl -n idp-app port-forward svc/scoring-api 18000:80
 curl -s -X POST localhost:18000/credit-limit -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"service_id":"tok_demo","features":{"recharge_avg_amount":40}}'
 ```

@@ -45,7 +45,7 @@ run: ## Run the end-to-end batch pipeline (Bronze->Silver->Features->ML->Gold)
 	$(PY) -m idp.cli run
 
 .PHONY: serve
-serve: ## Start the FastAPI scoring service on :8000
+serve: ## Start the FastAPI scoring service locally on :8000 (auth off; serving lookup needs IDP_TS_*; the cluster API: make serve-cluster)
 	$(PY) -m idp.cli serve
 
 .PHONY: mcp
@@ -253,6 +253,16 @@ lake-archive-policy: ## Render the Bronze archive rule; apply it to idp-bronze w
 minio-console: ## Port-forward the MinIO web console to http://localhost:9001 (minioadmin/minioadmin123)
 	@echo "Open http://localhost:9001  (user: minioadmin  pass: minioadmin123)"
 	kubectl -n idp-platform port-forward svc/minio-console 9001:9001
+
+CLUSTER_API_PORT ?= 18000
+.PHONY: serve-cluster
+serve-cluster: ## Port-forward the cluster's scoring API to 127.0.0.1:18000 (auth on: needs `make keycloak-token`); local `make serve` stays on :8000
+	@echo "Cluster scoring API on http://127.0.0.1:$(CLUSTER_API_PORT)  (keep this running; Ctrl-C to stop)"
+	@echo "Every endpoint except /health needs a tenant token:"
+	@echo '  TOKEN=$$(make -s keycloak-token TENANT=tenant_a)'
+	@echo '  curl -s localhost:$(CLUSTER_API_PORT)/serving/credit_scores/tenant_a/<service_id> -H "Authorization: Bearer $$TOKEN"'
+	kubectl -n idp-app rollout status deploy/scoring-api --timeout=120s
+	kubectl -n idp-app port-forward svc/scoring-api $(CLUSTER_API_PORT):80
 
 .PHONY: trino-api
 trino-api: ## Port-forward Trino to 127.0.0.1:8085 (for the host MCP server's analytics queries)
