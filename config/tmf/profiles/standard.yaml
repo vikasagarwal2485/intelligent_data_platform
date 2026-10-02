@@ -1,0 +1,211 @@
+# The standard TM Forum mapping profile (REQ-BRZ-06): canonical records <-> TMF
+# Open API resources of the landing zone. One entry per canonical entity variant,
+# with every canonical field, in canonical column order. The writer and the adapter
+# both run from this file (src/idp/ingestion/tmf/profile.py explains the field kinds).
+#
+# Standard fields and typed characteristics only, plus the platform extension
+# Idp<Resource> (config/tmf/extensions/): tenantId everywhere, and TopupBalance's
+# rechargeType and agreement, which have no standard home (TMF654 has no
+# characteristics). A customer profile copies this file and adds its own @type
+# subtypes; it must not change the meaning of a standard field.
+#
+# Resource versions: TMF632/629/666/637/678/635 v5; Agreement (TMF651) and
+# TopupBalance (TMF654) follow v4.0.0 with v5 conventions (config/tmf/schemas/).
+name: standard
+version: 1
+
+customer:                       # TMF629 Customer: the party role accounts and agreements reference
+  resource: Customer
+  file: customer.json
+  href: /tmf-api/customerManagement/v5/customer/{id}
+  set:
+    status: approved
+    tenantId: "{tenant_id}"     # the role isn't a canonical entity: its tenant comes from the record that creates it
+
+resources:
+  # --- parties: TMF632 Individual / Organization -----------------------------
+  - entity: parties
+    resource: Individual
+    file: individual.json
+    href: /tmf-api/partyManagement/v5/individual/{id}
+    when: {party_type: individual}
+    set: {status: validated}
+    fields: &individual_fields
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      role: {via: customer, path: role}
+      first_name: {path: givenName}
+      last_name: {path: familyName}
+      date_of_birth: {path: birthDate, as: date}      # TMF birthDate is a date-time
+      language:
+        path: "languageAbility[0].languageCode"
+        with: {"languageAbility[0].@type": LanguageAbility, "languageAbility[0].isFavouriteLanguage": true}
+      phone: {item: phone, in: contactMedium, match: {"@type": PhoneContactMedium}, attr: phoneNumber,
+              set: {contactType: mobile, preferred: true}}
+      email: {item: email, in: contactMedium, match: {"@type": EmailContactMedium}, attr: emailAddress,
+              set: {contactType: email}}
+      consent_marketing: {char: consentMarketing, in: partyCharacteristic, type: boolean}
+      consent_analytics: {char: consentAnalytics, in: partyCharacteristic, type: boolean}
+      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
+      party_type: {const: individual}
+      organization_name: absent
+      organization_type: absent
+
+  - entity: parties
+    resource: Organization
+    file: organization.json
+    href: /tmf-api/partyManagement/v5/organization/{id}
+    when: {party_type: organization}
+    set: {status: validated, isLegalEntity: true}
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      role: {via: customer, path: role}
+      first_name: absent          # an organization has no person fields
+      last_name: absent
+      date_of_birth: absent
+      language: {char: preferredLanguage, in: partyCharacteristic, type: string}   # Organization has no languageAbility
+      phone: {item: phone, in: contactMedium, match: {"@type": PhoneContactMedium}, attr: phoneNumber,
+              set: {contactType: mobile, preferred: true}}
+      email: {item: email, in: contactMedium, match: {"@type": EmailContactMedium}, attr: emailAddress,
+              set: {contactType: email}}
+      consent_marketing: {char: consentMarketing, in: partyCharacteristic, type: boolean}
+      consent_analytics: {char: consentAnalytics, in: partyCharacteristic, type: boolean}
+      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
+      party_type: {const: organization}
+      organization_name: {path: name}
+      organization_type: {path: organizationType}
+
+  # --- accounts: TMF666 BillingAccount (its party, segment and start live on the Customer)
+  - entity: accounts
+    resource: BillingAccount
+    file: billingAccount.json
+    href: /tmf-api/accountManagement/v5/billingAccount/{id}
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      account_type: {path: accountType}
+      account_segment: {via: customer, char: accountSegment, in: characteristic, type: string}
+      lifecycle_status: {path: state}
+      valid_from: {via: customer, path: validFor.startDateTime}
+      party_id: {via: customer, path: engagedParty.id, with: {"engagedParty.@type": PartyRef}}
+      is_company: {via: customer, path: "engagedParty.@referredType", map: {true: Organization, false: Individual}}
+
+  # --- agreements: TMF651 Agreement (v4.0 shape, v5 references) --------------
+  - entity: agreements
+    resource: Agreement
+    file: agreement.json
+    href: /tmf-api/agreementManagement/v4/agreement/{id}
+    set:
+      name: "Agreement {id}"
+      "agreementItem[0].@type": AgreementItem
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      agreement_type: {path: agreementType}
+      business_line: {char: businessLine, in: characteristic, type: string}
+      lifecycle_status: {path: status}
+      valid_from: {path: agreementPeriod.startDateTime}
+      msisdn: {char: msisdn, in: characteristic, type: string}
+      imsi: {char: imsi, in: characteristic, type: string}
+      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
+
+  # --- products: TMF637 Product ----------------------------------------------
+  - entity: products
+    resource: Product
+    file: product.json
+    href: /tmf-api/productInventory/v5/product/{id}
+    set:
+      "productPrice[0].@type": ProductPrice
+      "productPrice[0].priceType": recurring
+      "productPrice[0].recurringChargePeriod": month
+      "productPrice[0].price.@type": Price
+      "productPrice[0].price.taxIncludedAmount.unit": EUR
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      product_type: {char: productType, in: productCharacteristic, type: string}
+      name: {path: name}
+      category: {char: category, in: productCharacteristic, type: string}
+      monthly_fee: {path: "productPrice[0].price.taxIncludedAmount.value"}
+      lifecycle_status: {path: status}
+      agreement_id: {path: "agreementItem[0].agreementId", with: {"agreementItem[0].@type": AgreementItemRef}}
+
+  # --- voice and data usage: TMF635 ProductUsage, one file, by usageType -----
+  - entity: voice_events
+    resource: ProductUsage
+    file: productUsage.json
+    href: /tmf-api/productUsageManagement/v5/productUsage/{id}
+    when: {event_type: voice}
+    set: &usage_set
+      status: rated
+      "usageProductPrice[0].@type": ProductPrice
+      "usageProductPrice[0].priceType": usage
+      "usageProductPrice[0].price.@type": Price
+    fields: &usage_fields
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      service_id: {char: msisdn, in: usageCharacteristic, type: string}
+      agreement_id: {char: agreementId, in: usageCharacteristic, type: string}
+      event_type: {path: usageType}
+      started_at: {char: startDateTime, in: usageCharacteristic, type: string}   # v5 has no usageDate
+      created_at: {path: creationDate}
+      net_amount: {path: "usageProductPrice[0].price.dutyFreeAmount.value"}
+      tax_amount: {sum: "usageProductPrice[0].price.taxIncludedAmount.value", of: net_amount, round: 6}
+      currency: {path: "usageProductPrice[0].price.dutyFreeAmount.unit",
+                 also: ["usageProductPrice[0].price.taxIncludedAmount.unit"]}
+      qty: {char: quantity, in: usageCharacteristic, type: integer}
+      unit: {char: unit, in: usageCharacteristic, type: string}
+      is_roaming: {char: isRoaming, in: usageCharacteristic, type: boolean}
+      network_tech: {char: networkTechnology, in: usageCharacteristic, type: string}
+      traffic_case: {char: trafficCase, in: usageCharacteristic, type: string}
+      other_party_number: {char: otherPartyNumber, in: usageCharacteristic, type: string}
+      imei: {char: imei, in: usageCharacteristic, type: string}
+
+  - entity: data_events
+    resource: ProductUsage
+    file: productUsage.json
+    href: /tmf-api/productUsageManagement/v5/productUsage/{id}
+    when: {event_type: data}
+    set: *usage_set
+    fields: *usage_fields
+
+  # --- recharges: TMF654 TopupBalance (v4.0 shape) ---------------------------
+  - entity: recharge_events
+    resource: TopupBalance
+    file: topupBalance.json
+    href: /tmf-api/prepayBalanceManagement/v4/topupBalance/{id}
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      service_id:
+        path: "logicalResource[0].id"
+        with: {"logicalResource[0].@type": LogicalResourceRef, "logicalResource[0].@referredType": MSISDN}
+      agreement_id: {ext: agreement.id, with: {"agreement.@referredType": Agreement}}
+      created_at: {path: requestedDate}
+      amount: {path: amount.amount}
+      currency: {path: amount.units}
+      payment_method:
+        path: paymentMethod.id
+        with: {"paymentMethod.@type": PaymentMethodRef, "paymentMethod.@referredType": PaymentMethod}
+      status: {path: status, map: {successful: completed, failed: failed}}
+      failure_reason_code: {path: reason}
+      source: {path: channel.id, with: {"channel.@type": ChannelRef}}
+      recharge_type: {ext: rechargeType}
+
+  # --- fee charges: TMF678 AppliedCustomerBillingRate ------------------------
+  - entity: fee_charges
+    resource: AppliedCustomerBillingRate
+    file: appliedCustomerBillingRate.json
+    href: /tmf-api/customerBillManagement/v5/appliedCustomerBillingRate/{id}
+    set: {isBilled: false}
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      product_id: {path: product.id, with: {"product.@type": ProductRef}}
+      charge_type:
+        path: appliedBillingRateType
+        map: {one_time: oneTime, recurring: recurring, overage: overage, discount: discount}
+      amount: {path: taxIncludedAmount.value}
+      currency: {path: taxIncludedAmount.unit}
+      charged_at: {path: date}

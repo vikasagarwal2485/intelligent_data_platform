@@ -1,0 +1,26 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpCustomer.schema.json",
+ "title": "IdpCustomer",
+ "description": "Platform extension of Customer: adds tenantId.",
+ "x-baseType": "Customer",
+ "x-baseSchema": "TMF629-v5.0.1.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF629-v5.0.1.schema.json#/$defs/Customer"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

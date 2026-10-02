@@ -1,0 +1,84 @@
+{
+  "@type": "IdpProductUsage",
+  "@baseType": "ProductUsage",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpProductUsage.schema.json",
+  "href": "/tmf-api/productUsageManagement/v5/productUsage/tenant_a-agr-000000-v-0-0",
+  "status": "rated",
+  "usageProductPrice": [
+    {
+      "@type": "ProductPrice",
+      "priceType": "usage",
+      "price": {
+        "@type": "Price",
+        "dutyFreeAmount": {
+          "value": 0.005,
+          "unit": "EUR"
+        },
+        "taxIncludedAmount": {
+          "value": 0.0055,
+          "unit": "EUR"
+        }
+      }
+    }
+  ],
+  "tenantId": "tenant_a",
+  "id": "tenant_a-agr-000000-v-0-0",
+  "usageCharacteristic": [
+    {
+      "@type": "StringCharacteristic",
+      "name": "msisdn",
+      "valueType": "string",
+      "value": "595950846137"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "agreementId",
+      "valueType": "string",
+      "value": "tenant_a-agr-000000"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "startDateTime",
+      "valueType": "string",
+      "value": "2026-01-01T13:41:52.000Z"
+    },
+    {
+      "@type": "IntegerCharacteristic",
+      "name": "quantity",
+      "valueType": "integer",
+      "value": 6
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "unit",
+      "valueType": "string",
+      "value": "seconds"
+    },
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "isRoaming",
+      "valueType": "boolean",
+      "value": false
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "trafficCase",
+      "valueType": "string",
+      "value": "originating"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "otherPartyNumber",
+      "valueType": "string",
+      "value": "595959363562"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "imei",
+      "valueType": "string",
+      "value": "355024631279268"
+    }
+  ],
+  "usageType": "voice",
+  "creationDate": "2026-01-01T13:41:52.000Z"
+}

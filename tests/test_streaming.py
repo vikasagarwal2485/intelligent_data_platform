@@ -227,7 +227,7 @@ def test_landing_and_in_memory_production_send_the_same_messages(monkeypatch, tm
 
 
 def test_rejected_landing_files_are_not_published_and_fail_the_run(monkeypatch, tmp_path, capsys):
-    # SCN-STR-01.4 / SCN-STR-01.5
+    # SCN-STR-01.4 / 01.5 / 01.6
     import json
     import sys
     import types
@@ -238,21 +238,27 @@ def test_rejected_landing_files_are_not_published_and_fail_the_run(monkeypatch, 
     cfg = _small_config(tmp_path)
     assert main(["--config", cfg, "generate"]) == 0
     land = tmp_path / "landing"
-    bad = land / "tenant=tenant_a" / "recharge_events.json"
-    records = json.loads(bad.read_text())
-    records[0]["tenant_id"] = "tenant_b"                    # one foreign record poisons the file
-    bad.write_text(json.dumps(records))
+    bad = land / "tenant=tenant_a" / "topupBalance.json"
+    resources = json.loads(bad.read_text())
+    resources[0]["tenantId"] = "tenant_b"                   # one foreign resource poisons the file
+    bad.write_text(json.dumps(resources))
+    agreements = land / "tenant=tenant_b" / "agreement.json"   # SCN-STR-01.6: a dangling reference
+    resources = json.loads(agreements.read_text())
+    resources[0]["engagedParty"][0]["partyOrPartyRole"]["id"] = "tenant_b-cust-gone"
+    agreements.write_text(json.dumps(resources))
     (land / "tenant=tenant_x").mkdir()
-    (land / "tenant=tenant_x" / "parties.json").write_text(json.dumps([{"tenant_id": "tenant_x", "id": "p"}]))
+    (land / "tenant=tenant_x" / "individual.json").write_text(json.dumps([]))
 
     _FakeProducer.instances = []
     assert main(["--config", cfg, "produce", "--from-landing"]) == 1
     topics = {t for t, _, _ in _sent(_FakeProducer.instances)}
     assert "t.tenant_a.recharge" not in topics                # nothing from the rejected file
+    assert "t.tenant_b.agreements" not in topics              # nor from the dangling reference
     assert not any(t.startswith("t.tenant_x.") for t in topics)
-    assert {"t.tenant_a.parties", "t.tenant_b.recharge"} <= topics   # the good files still go
+    assert {"t.tenant_a.parties", "t.tenant_b.recharge", "t.tenant_a.agreements"} <= topics   # the rest goes
     out = capsys.readouterr().out
-    assert "REJECTED 2 landing file(s)" in out and "tenant mismatch" in out and "unknown tenant" in out
+    assert "tenant mismatch" in out and "unknown tenant" in out and "tenant_b-cust-gone" in out
+    assert "depends on rejected file 'topupBalance.json'" in out
 
 
 def test_empty_landing_zone_fails(monkeypatch, tmp_path, capsys):
@@ -317,13 +323,19 @@ def test_landing_path_end_to_end_lands_exactly_the_landing_records(monkeypatch, 
     assert main(["--config", cfg_path, "produce", "--from-landing"]) == 0
     assert main(["--config", cfg_path, "consume", "--idle-timeout", "0.1"]) == 0
 
-    landed = Counter()
-    for f in (tmp_path / "landing").rglob("*.json"):
-        landed[(f.parent.name.split("=", 1)[1], f.stem)] = len(json.loads(f.read_text()))
+    # Bronze holds exactly the canonical records the generator produced (the landing
+    # files are TMF resources; the adapter maps them back)
+    from idp.pipeline import ENTITIES, _gen_dataset
     cfg = load_config(cfg_path)
-    bronze = Counter()
-    for entity in {e for _, e in landed}:
+    generated = _gen_dataset(cfg)
+    expected, bronze = Counter(), Counter()
+    for entity in ENTITIES:
+        gen = getattr(generated, entity)
+        for tenant, n in gen.groupby("tenant_id").size().items():
+            expected[(tenant, entity)] = n
         df = catalog.read_table(cfg, "bronze", entity)
         for tenant, n in df.groupby("tenant_id").size().items():
             bronze[(tenant, entity)] = n
-    assert landed and bronze == landed
+        assert set(df["id"]) == set(gen["id"]), entity
+    assert expected and bronze == expected
+    assert json.loads((tmp_path / "landing" / "tenant=tenant_a" / "customer.json").read_text())

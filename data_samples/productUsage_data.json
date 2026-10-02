@@ -1,0 +1,78 @@
+{
+  "@type": "IdpProductUsage",
+  "@baseType": "ProductUsage",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpProductUsage.schema.json",
+  "href": "/tmf-api/productUsageManagement/v5/productUsage/tenant_a-agr-000000-d-0-0",
+  "status": "rated",
+  "usageProductPrice": [
+    {
+      "@type": "ProductPrice",
+      "priceType": "usage",
+      "price": {
+        "@type": "Price",
+        "dutyFreeAmount": {
+          "value": 0.06323,
+          "unit": "EUR"
+        },
+        "taxIncludedAmount": {
+          "value": 0.06955,
+          "unit": "EUR"
+        }
+      }
+    }
+  ],
+  "tenantId": "tenant_a",
+  "id": "tenant_a-agr-000000-d-0-0",
+  "usageCharacteristic": [
+    {
+      "@type": "StringCharacteristic",
+      "name": "msisdn",
+      "valueType": "string",
+      "value": "595950846137"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "agreementId",
+      "valueType": "string",
+      "value": "tenant_a-agr-000000"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "startDateTime",
+      "valueType": "string",
+      "value": "2026-01-01T10:56:50.000Z"
+    },
+    {
+      "@type": "IntegerCharacteristic",
+      "name": "quantity",
+      "valueType": "integer",
+      "value": 6630400
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "unit",
+      "valueType": "string",
+      "value": "bytes"
+    },
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "isRoaming",
+      "valueType": "boolean",
+      "value": false
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "networkTechnology",
+      "valueType": "string",
+      "value": "3G"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "imei",
+      "valueType": "string",
+      "value": "355024631279268"
+    }
+  ],
+  "usageType": "data",
+  "creationDate": "2026-01-01T10:56:50.000Z"
+}

@@ -1,0 +1,26 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpAppliedCustomerBillingRate.schema.json",
+ "title": "IdpAppliedCustomerBillingRate",
+ "description": "Platform extension of AppliedCustomerBillingRate: adds tenantId.",
+ "x-baseType": "AppliedCustomerBillingRate",
+ "x-baseSchema": "TMF678-v5.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF678-v5.0.0.schema.json#/$defs/AppliedCustomerBillingRate"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

@@ -180,9 +180,9 @@ src/idp/                     # the platform package
   common/                    #   config, multi-tenancy guards, GDPR PII, S3/local storage,
                              #   model feature contract (feature_contract.py)
   synthetic/generator.py     #   synthetic data generator (labelled, multi-tenant)
-  ingestion/                 #   source side: file landing zone for `idp generate` (landing.py);
-                             #   TM Forum JSON:API source adapter (jsonapi.py). Bronze itself
-                             #   is written by pipeline.to_bronze (Iceberg), not here
+  ingestion/                 #   source side: the TM Forum landing zone (landing.py) and the
+                             #   profile-driven TMF writer/adapter (tmf/). Bronze itself is
+                             #   written by pipeline.to_bronze (Iceberg), not here
   transforms/                #   Spark Silver/Gold (single engine): silver.py, features.py,
                              #   tokens.py, session.py, lake.py (Iceberg writes),
                              #   incremental.py (incremental Silver facts)
@@ -192,8 +192,9 @@ src/idp/                     # the platform package
   mcp/                       #   MCP analytics server + tools
   pipeline.py                #   stage functions (to_silver/to_gold/to_scores/train/...) + local run()
   cli.py                     #   `idp` entrypoint
-config/                      # platform.yaml + Avro schema contracts (config/avro)
-data_samples/                # reference TM Forum JSON:API documents
+config/                      # platform.yaml, Avro contracts (config/avro), TM Forum schemas,
+                             #   extensions and mapping profiles (config/tmf)
+data_samples/                # one TM Forum Open API v5 sample per landing resource type
 deploy/                      # split by owning team (ADR-0018)
   platform/                  #   PLATFORM TEAM — shared infrastructure
     base/ overlays/ argocd/  #     namespaces, RBAC, isolation; base local/aws overlays; GitOps
@@ -241,11 +242,15 @@ Run `make help` to list every target with a description.
    ```bash
    make stream-from-landing   # generate -> s3://idp-landing -> produce --from-landing -> consume
    ```
-   - `idp-generate` writes the synthetic source files to
-     `s3://idp-landing/tenant=<id>/<entity>.json`, one tenant at a time.
-   - `idp-produce-from-landing` checks every file's tenant and publishes it. A file
-     whose folder names an unknown tenant, or whose records belong to another
-     tenant, is **not published**; the Job fails and consume doesn't run.
+   - `idp-generate` writes the synthetic source files as **TM Forum Open API v5
+     resources** to `s3://idp-landing/tenant=<id>/<resource>.json`, one tenant at a
+     time (see "Landing files are TM Forum resources" below).
+   - `idp-produce-from-landing` validates every file and adapts the resources back
+     to the canonical records it publishes. A file is **not published** when its
+     folder names an unknown tenant, it isn't a known resource file, a resource fails
+     its schema or belongs to another tenant (`tenantId`), or it holds a reference
+     that doesn't resolve; the entities that depend on it aren't published either,
+     the Job fails and consume doesn't run.
    - `idp-consume` lands the records in Bronze, exactly as with `make stream`.
    - `make stream-replay` re-publishes the landing files already there, without
      regenerating them (replay). `make generate-job` writes them only.
@@ -253,6 +258,41 @@ Run `make help` to list every target with a description.
      `idp generate` writes them to `data/landing/`, and
      `idp produce --from-landing` publishes them.
    - Run one streaming target at a time. They share the topics and the consumer.
+
+   **Landing files are TM Forum resources** (REQ-BRZ-03/05/06). Each tenant folder
+   holds one JSON array per resource type:
+
+   | File | TMF API | Canonical entity |
+   |---|---|---|
+   | `individual.json`, `organization.json` | TMF632 Party (v5) | parties |
+   | `customer.json` | TMF629 Customer (v5), a `PartyRole` | (links accounts and agreements to their party) |
+   | `billingAccount.json` | TMF666 Account (v5) | accounts |
+   | `agreement.json` | TMF651 Agreement (v4.0 shape, v5 conventions) | agreements |
+   | `product.json` | TMF637 Product Inventory (v5) | products |
+   | `appliedCustomerBillingRate.json` | TMF678 Customer Bill (v5) | fee_charges |
+   | `topupBalance.json` | TMF654 Prepay Balance (v4.0 shape, v5 conventions) | recharge_events |
+   | `productUsage.json` | TMF635 Usage (v5), `usageType` voice/data | voice_events, data_events |
+
+   - **One mapping, both ways.** `config/tmf/profiles/standard.yaml` says where each
+     canonical field lives (a standard field, a typed characteristic, or an extension
+     attribute). `idp generate` writes with it, and the producer adapts back with it,
+     so the round trip is exact and Kafka, Bronze and Silver keep the canonical model.
+     `IDP_TMF_PROFILE` (or `tmf.profile`) selects another profile.
+   - **Extensions.** Every resource is the platform subtype `Idp<Resource>`
+     (`@type`, `@baseType`, `@schemaLocation`) adding `tenantId`; TopupBalance also
+     carries `rechargeType` and its agreement (TMF654 has no characteristics). A
+     customer profile adds its own `@type` subtypes with their JSON Schemas in
+     `config/tmf/extensions/`, without changing standard fields.
+   - **Validation.** Resources are checked against the TMF schemas vendored (pinned to
+     upstream commits) in `config/tmf/schemas/` plus their extension schemas;
+     `config/tmf/vendor_schemas.py` regenerates them. Examples: `data_samples/`.
+   - **Customer role.** Accounts and agreements reference a `Customer` (TMF629
+     `PartyRole`), whose `engagedParty` is the Individual or Organization. The
+     adapter resolves these references per tenant.
+   - **Organizations.** Company accounts' parties are `Organization`s, so their
+     canonical `first_name`/`last_name`/`date_of_birth` are null (no model feature
+     uses them).
+   - Look at a file: `make landing-show ENTITY=productUsage LINES=40`.
 3. **Watch / verify** (jobs are in `idp-app`):
    ```bash
    kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
@@ -542,10 +582,10 @@ duplicates. `dim_subscriber` is rebuilt in full each run.
 `idp silver --full-refresh` resets the checkpoints and replays all of Bronze.
 
 **Transformations:**
-- **Id canonicalization:** strip `UUID(...)` wrappers from entity and relationship
-  ids so relationships join their targets. (Unwrapping whole TM Forum JSON:API
-  envelopes is the ingestion adapter's job, `ingestion/jsonapi.py`; Silver curates
-  canonical records.)
+- **Id canonicalization:** strip `UUID(...)` wrappers (as some operator feeds send
+  ids) from entity and relationship ids so relationships join their targets.
+  (Adapting TM Forum source resources into canonical records is the ingestion
+  adapter's job, `ingestion/tmf/`; Silver curates canonical records.)
 - **Money normalization:** `gross_amount = net_amount + tax_amount`.
 - **GDPR PII tokenization** (`common/pii.py`): MSISDN/IMSI/IMEI/other-party →
   `tok_<sha256(per-tenant-salt + value)>`. Deterministic per tenant, so tokens
@@ -921,7 +961,8 @@ Make targets: `make mcp` (start), `make mcp-smoke` (verify against Trino),
 make test        # 63 pytest tests
 ```
 Covers synthetic generation & referential integrity, tenant isolation, GDPR
-tokenization, JSON:API unwrap (against the real `data_samples/`), ingestion,
+tokenization, the TM Forum landing format (schemas, profile round trip, samples),
+ingestion,
 Silver curation, feature engineering, both ML models, the streaming
 `process_bronze`, the end-to-end batch pipeline, and the scoring API.
 

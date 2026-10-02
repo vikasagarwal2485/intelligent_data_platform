@@ -62,3 +62,22 @@ def test_fraud_subscribers_show_elevated_behaviour(small_dataset):
     vc = ds.voice_events.groupby("service_id").size()
     if len(fraud_simbox) and len(normal):
         assert vc.reindex(fraud_simbox).mean() > vc.reindex(normal).mean()
+
+
+def test_company_accounts_have_organization_parties():
+    # SCN-SYN-01.3 — company parties are organizations without person fields; the
+    # organization values come from the suffix, so nothing else changes
+    from idp.synthetic.generator import generate
+    ds = generate("tenant_a", subscribers=150, days=5, seed=7)
+    parties = ds.parties.set_index("id")
+    company = set(ds.accounts.loc[ds.accounts["is_company"], "party_id"])
+    assert company, "the sample should contain company accounts"
+    orgs = parties[parties["party_type"] == "organization"]
+    assert set(orgs.index) == company
+    assert orgs[["first_name", "last_name", "date_of_birth"]].isna().all().all()
+    assert orgs["organization_name"].str.startswith("Company ").all()
+    assert (orgs["organization_type"] == "company").all()
+    people = parties[parties["party_type"] == "individual"]
+    assert len(people) + len(orgs) == len(parties)
+    assert people[["first_name", "last_name", "date_of_birth"]].notna().all().all()
+    assert people[["organization_name", "organization_type"]].isna().all().all()

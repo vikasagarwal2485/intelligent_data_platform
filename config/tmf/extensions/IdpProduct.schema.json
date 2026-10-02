@@ -1,0 +1,26 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpProduct.schema.json",
+ "title": "IdpProduct",
+ "description": "Platform extension of Product: adds tenantId.",
+ "x-baseType": "Product",
+ "x-baseSchema": "TMF637-v5.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF637-v5.0.0.schema.json#/$defs/Product"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

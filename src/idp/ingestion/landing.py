@@ -1,24 +1,37 @@
-"""File landing zone (REQ-BRZ-03): a simulated source file drop, written by
-``idp generate``.
+"""File landing zone (REQ-BRZ-03): a simulated source file drop of TM Forum
+Open API resources, written by ``idp generate``.
 
-Each generated entity is written as a JSON array of records to
-``<landing>/tenant=<tenant_id>/<entity>.json``, one file per tenant and entity.
-The landing zone is a local directory, or the bucket ``s3://<prefix>-landing`` when
-S3 is enabled (``storage.landing_uri``). ``idp produce --from-landing`` publishes it
-to Kafka (``read_landing`` checks each file first). The layout mirrors a
-per-tenant source pickup (in production, e.g. NiFi). It doesn't write Bronze: Bronze is the Iceberg tables ``bronze.<entity>``, written by
+Each tenant's data is written as TMF v5 resources, one JSON array per resource type,
+to ``<landing>/tenant=<tenant_id>/<resource>.json`` (``individual.json``,
+``customer.json``, ``productUsage.json`` ...). The canonical records are mapped to
+the resources by the active mapping profile (``idp.ingestion.tmf``). The landing
+zone is a local directory, or the bucket ``s3://<prefix>-landing`` when S3 is
+enabled (``storage.landing_uri``).
+
+``idp produce --from-landing`` reads it back through :func:`read_landing`, which
+validates the files and adapts the resources to the canonical records the producer
+publishes (REQ-BRZ-05). So Kafka, Bronze and Silver keep the canonical model. The
+layout mirrors a per-tenant source pickup (in production, e.g. NiFi). It doesn't
+write Bronze: Bronze is the Iceberg tables ``bronze.<entity>``, written by
 ``pipeline.to_bronze`` (from ``idp consume``, ``idp run`` and ``idp migrate-lake``).
 """
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Iterator, NamedTuple
 
 import fsspec
 
+from idp.common.records import to_records
 from idp.common.tenancy import TENANT_COLUMN, require_tenant_column
+from idp.ingestion.tmf import schemas
+from idp.ingestion.tmf.profile import (Profile, ReferenceError_, entity_file_dependencies,
+                                       from_tmf, load_profile, to_tmf)
 from idp.synthetic.generator import ENTITIES, SyntheticDataset
+
+TENANT_ATTRIBUTE = "tenantId"          # the platform extension attribute on every resource
 
 
 def _fs(landing: str | Path, storage_options: dict[str, Any] | None):
@@ -27,36 +40,45 @@ def _fs(landing: str | Path, storage_options: dict[str, Any] | None):
 
 
 def write_landing(dataset: SyntheticDataset, landing: str | Path, *,
-                  storage_options: dict[str, Any] | None = None) -> dict[str, list[str]]:
-    """Write source records as JSON files to the landing zone (simulates NiFi pickup).
+                  storage_options: dict[str, Any] | None = None,
+                  profile: Profile | None = None) -> dict[str, list[str]]:
+    """Write the dataset as TMF resource files to the landing zone, per tenant.
 
-    Files are written per ``tenant=<id>/{entity}.json`` so the layout mirrors the
-    per-tenant landing structure in plan 3.2. ``landing`` is a local directory or
-    an ``s3://`` URI (``storage.landing_uri``). Returns the written paths per entity.
+    Every resource is validated against its schema before it is written: an invalid
+    resource is a bug in the profile, so it raises rather than landing. ``landing``
+    is a local directory or an ``s3://`` URI. Returns the written paths per file name.
     """
+    profile = profile or load_profile()
     fs, root = _fs(landing, storage_options)
-    written: dict[str, list[str]] = {}
-    for entity in ENTITIES:
-        df = getattr(dataset, entity)
-        if df.empty:
-            continue
-        require_tenant_column(df)
-        paths = []
-        for tenant_id, part in df.groupby(TENANT_COLUMN):
-            out_dir = f"{root.rstrip('/')}/tenant={tenant_id}"
-            fs.makedirs(out_dir, exist_ok=True)
-            path = f"{out_dir}/{entity}.json"
-            records = part.to_dict(orient="records")
+    frames = {e: getattr(dataset, e) for e in ENTITIES}
+    tenants: set[str] = set()
+    for df in frames.values():
+        if df is not None and not df.empty:
+            require_tenant_column(df)
+            tenants |= set(df[TENANT_COLUMN].astype(str))
+    written: dict[str, list[str]] = defaultdict(list)
+    for tenant_id in sorted(tenants):
+        records = {e: to_records(df[df[TENANT_COLUMN].astype(str) == tenant_id])
+                   for e, df in frames.items() if df is not None and not df.empty}
+        out_dir = f"{root.rstrip('/')}/tenant={tenant_id}"
+        fs.makedirs(out_dir, exist_ok=True)
+        for fname, resources in to_tmf(profile, records).items():
+            for resource in resources:
+                err = schemas.first_error(resource)
+                if err:
+                    raise ValueError(f"{fname} {resource.get('id')}: invalid TMF resource ({err})")
+            path = f"{out_dir}/{fname}"
             with fs.open(path, "wb") as f:
-                f.write(json.dumps(records, indent=2, default=str).encode("utf-8"))
-            paths.append(path)
-        written[entity] = paths
-    return written
+                f.write(json.dumps(resources, indent=2).encode("utf-8"))
+            written[fname].append(path)
+    return dict(written)
 
 
 class LandingFile(NamedTuple):
-    """One landing file as read for publishing: ``records`` is None when the file
-    is rejected, and ``reason`` says why."""
+    """One canonical entity of a tenant, as read for publishing (``entity`` names
+    it; ``path`` is the landing file(s) it was adapted from). ``records`` is None
+    when it is rejected, and ``reason`` says why. A rejected landing file is also
+    reported on its own, under the file's stem."""
     tenant: str
     entity: str
     path: str
@@ -64,17 +86,42 @@ class LandingFile(NamedTuple):
     reason: str | None
 
 
-def read_landing(landing: str | Path, tenants: Iterable[str], *,
-                 storage_options: dict[str, Any] | None = None) -> Iterator[LandingFile]:
-    """Yield every landing file, checked, one at a time (REQ-STR-01).
+def _check_file(raw: bytes, tenant: str) -> tuple[list[dict] | None, str | None]:
+    """The resources of one landing file, or why it is rejected."""
+    try:
+        resources = json.loads(raw)
+    except ValueError as e:
+        return None, f"invalid json: {e}"
+    if not isinstance(resources, list) or not all(isinstance(r, dict) for r in resources):
+        return None, "invalid json: not an array of objects"
+    mismatched = sum(1 for r in resources if r.get(TENANT_ATTRIBUTE) != tenant)
+    if mismatched:
+        return None, f"tenant mismatch: {mismatched} resource(s) not {tenant!r}"
+    for r in resources:
+        err = schemas.first_error(r)
+        if err:
+            return None, f"invalid resource {r.get('id')!r}: {err}"
+    return resources, None
 
-    Tenant folders are read in sorted order and, within a folder, entities in
-    ``ENTITIES`` order (the same order the in-memory producer publishes). A file is
-    rejected, with ``records=None``, when its folder isn't ``tenant=<configured
-    tenant>``, when it isn't ``<entity>.json`` for a known entity, when it isn't a
-    JSON array of objects, or when any record's ``tenant_id`` differs from its
-    folder. A rejected file is never partly returned.
+
+def read_landing(landing: str | Path, tenants: Iterable[str], *,
+                 storage_options: dict[str, Any] | None = None,
+                 profile: Profile | None = None) -> Iterator[LandingFile]:
+    """Yield every tenant's canonical entities from the landing zone, checked and
+    adapted, one entity at a time (REQ-STR-01, REQ-BRZ-05).
+
+    Tenant folders are read in sorted order, and each folder's entities in
+    ``ENTITIES`` order (the order the in-memory producer publishes). A landing file
+    is rejected (and reported) when its folder isn't ``tenant=<configured tenant>``,
+    when it isn't a file of the mapping profile, when it isn't a JSON array of
+    resources that validate against their schemas, or when any resource's
+    ``tenantId`` differs from its folder. An entity is rejected when a file it is
+    adapted from was rejected, or when one of its references doesn't resolve. A
+    rejected entity is never partly returned.
     """
+    profile = profile or load_profile()
+    known = set(profile.files())
+    needs = entity_file_dependencies(profile)
     fs, root = _fs(landing, storage_options)
     root = root.rstrip("/")
     if not fs.exists(root):
@@ -87,28 +134,36 @@ def read_landing(landing: str | Path, tenants: Iterable[str], *,
             continue
         tenant = name[len("tenant="):]
         files = {f.rsplit("/", 1)[-1]: f for f in fs.find(entry["name"])}
-        known = [f"{e}.json" for e in ENTITIES if f"{e}.json" in files]
-        others = sorted(set(files) - set(known))
-        for fname in known + others:
-            path = files[fname]
-            entity = fname[:-len(".json")] if fname.endswith(".json") else fname
-            if tenant not in configured:
-                yield LandingFile(tenant, entity, path, None, f"unknown tenant {tenant!r}")
-                continue
+        if tenant not in configured:
+            for fname in sorted(files):
+                yield LandingFile(tenant, fname.removesuffix(".json"), files[fname], None,
+                                  f"unknown tenant {tenant!r}")
+            continue
+        loaded: dict[str, list[dict]] = {}
+        rejected: dict[str, str] = {}
+        for fname in sorted(files):
             if fname not in known:
-                yield LandingFile(tenant, entity, path, None, f"unknown entity file {fname!r}")
+                rejected[fname] = f"unknown landing file {fname!r}"
+                continue
+            resources, reason = _check_file(fs.cat_file(files[fname]), tenant)
+            if reason:
+                rejected[fname] = reason
+            else:
+                loaded[fname] = resources
+        for fname, reason in rejected.items():
+            yield LandingFile(tenant, fname.removesuffix(".json"), files[fname], None, reason)
+        for entity in profile.entities:
+            own = list(dict.fromkeys(r.file for r in profile.resources if r.entity == entity))
+            if not any(f in files for f in own):
+                continue                                   # nothing landed for this entity
+            path = ",".join(files[f] for f in own if f in files)
+            broken = sorted(f for f in needs[entity] if f in rejected)
+            if broken:
+                yield LandingFile(tenant, entity, path, None, f"depends on rejected file {broken[0]!r}")
                 continue
             try:
-                records = json.loads(fs.cat_file(path))
-            except ValueError as e:
-                yield LandingFile(tenant, entity, path, None, f"invalid json: {e}")
-                continue
-            if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
-                yield LandingFile(tenant, entity, path, None, "invalid json: not an array of objects")
-                continue
-            mismatched = sum(1 for r in records if r.get(TENANT_COLUMN) != tenant)
-            if mismatched:
-                yield LandingFile(tenant, entity, path, None,
-                                  f"tenant mismatch: {mismatched} record(s) not {tenant!r}")
+                records = from_tmf(profile, loaded, entities=[entity])[entity]
+            except ReferenceError_ as e:
+                yield LandingFile(tenant, entity, path, None, f"unresolved reference in {e.file!r}: {e}")
                 continue
             yield LandingFile(tenant, entity, path, records, None)

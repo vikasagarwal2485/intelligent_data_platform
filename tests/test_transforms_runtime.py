@@ -158,12 +158,12 @@ def test_spark_tokens_equal_python_tokens(spark):
     assert got[0] != got[1] and got[2] is None
 
 
-def test_strip_uuid_matches_python(spark):
+def test_strip_uuid(spark):
+    # REQ-SLV-02 — an operator feed may still send ids as UUID(...): Silver unwraps them
     from pyspark.sql import functions as F
 
-    from idp.ingestion.jsonapi import strip_uuid_wrapper
     from idp.transforms.tokens import strip_uuid
     vals = ["UUID(116100030984920447)", "plain-id", "UUID()"]
     df = spark.createDataFrame([(v,) for v in vals], "v string")
     got = [r[0] for r in df.select(strip_uuid(F.col("v"))).collect()]
-    assert got == [strip_uuid_wrapper(v) for v in vals]
+    assert got == ["116100030984920447", "plain-id", ""]

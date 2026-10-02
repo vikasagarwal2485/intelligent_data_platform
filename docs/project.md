@@ -10,10 +10,12 @@ and Kubernetes-native (local minikube, production AWS EKS).
 
 ## Source data (ground truth)
 
-Reference records live in [`data_samples/`](../../data_samples): TM Forum
-JSON:API documents for `parties`, `accounts`, `agreements`, `products`,
-`voice_usage_events`, `data_usage_events`, `recharge_events`. All downstream
-schemas derive from these.
+Reference records live in [`data_samples/`](../../data_samples): one TM Forum Open
+API v5 resource per landing file type (Individual, Organization, Customer,
+BillingAccount, Agreement, Product, AppliedCustomerBillingRate, TopupBalance,
+ProductUsage). The landing adapter maps them to the canonical entities (`parties`,
+`accounts`, `agreements`, `products`, voice/data usage, recharges, fees) with the
+profile in `config/tmf/profiles/`; everything downstream uses the canonical model.
 
 ## Tech stack & standing choices (see decisions/decision-log.md)
 

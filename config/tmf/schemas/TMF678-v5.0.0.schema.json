@@ -1,0 +1,649 @@
+{
+ "$defs": {
+  "Addressable": {
+   "description": "Base schema for adressable entities",
+   "properties": {
+    "href": {
+     "description": "Hyperlink reference",
+     "type": "string"
+    },
+    "id": {
+     "description": "unique identifier",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "AppliedBillingTaxRate": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "The applied billing tax rate represents taxes applied billing rate it refers to. It is calculated during the billing process.",
+     "properties": {
+      "taxAmount": {
+       "$ref": "#/$defs/Money"
+      },
+      "taxCategory": {
+       "description": "A categorization of the tax rate",
+       "type": "string"
+      },
+      "taxRate": {
+       "description": "Applied rate",
+       "format": "float",
+       "type": "number"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AppliedCustomerBillingRate": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "A customer bill displays applied billing rates created before or during the billing process.",
+     "properties": {
+      "appliedBillingRateType": {
+       "description": "Type of the applied billing rate : appliedBillingCharge (any kind of charge except taxation charges : recurringCharge, oneTimeCharge, usageCharge),  appliedBillingCredit (any kind of credit : rebate or productAlteration) or appliedPenaltyCharge (penalty charges such as late fees, payment rejection fees,...)",
+       "type": "string"
+      },
+      "appliedTax": {
+       "items": {
+        "$ref": "#/$defs/AppliedBillingTaxRate"
+       },
+       "type": "array"
+      },
+      "bill": {
+       "$ref": "#/$defs/CustomerBillRef"
+      },
+      "billingAccount": {
+       "$ref": "#/$defs/BillingAccountRef"
+      },
+      "characteristic": {
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "date": {
+       "description": "Creation date of the applied billing rate",
+       "format": "date-time",
+       "type": "string"
+      },
+      "description": {
+       "description": "Additional data to be displayed on the bill for this customer applied billing rate",
+       "type": "string"
+      },
+      "isBilled": {
+       "description": "Indicates if this applied billing rate has been presented on a bill or not. If isBilled = true then bill should be provided, if false then billingAccount should be provided",
+       "type": "boolean"
+      },
+      "name": {
+       "description": "Name of the customer applied billing rate",
+       "type": "string"
+      },
+      "periodCoverage": {
+       "$ref": "#/$defs/TimePeriod"
+      },
+      "product": {
+       "$ref": "#/$defs/ProductRef"
+      },
+      "taxExcludedAmount": {
+       "$ref": "#/$defs/Money"
+      },
+      "taxIncludedAmount": {
+       "$ref": "#/$defs/Money"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillingAccountRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "BillingAccount reference. A BillingAccount is a detailed description of a bill structure.",
+     "properties": {
+      "ratingType": {
+       "description": "Indicates whether the account follows a specific payment option such as prepaid or postpaid",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BooleanCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Boolean.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "boolean"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Characteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BooleanCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BooleanCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "FloatCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/FloatCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "IntegerArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/IntegerArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "IntegerCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/IntegerCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "NumberArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/NumberArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "NumberCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/NumberCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "ObjectArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/ObjectArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "ObjectCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/ObjectCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "StringArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/StringArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "StringCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/StringCharacteristic"
+     }
+    }
+   ]
+  },
+  "CharacteristicRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Another Characteristic that is related to the current Characteristic;",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "relationshipType": {
+       "description": "The type of relationship",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Characteristic__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Describes a given characteristic of an object or entity through a name/value pair.",
+     "properties": {
+      "characteristicRelationship": {
+       "items": {
+        "$ref": "#/$defs/CharacteristicRelationship"
+       },
+       "type": "array"
+      },
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the characteristic",
+       "type": "string"
+      },
+      "valueType": {
+       "description": "Data type of the value of the characteristic",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "CustomerBillRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Bill reference.",
+   "type": "object"
+  },
+  "Entity": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    }
+   ],
+   "description": "Base entity schema for use in TMForum Open-APIs. Property.",
+   "type": "object"
+  },
+  "EntityRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    },
+    {
+     "description": "Entity reference schema to be use for all entityRef class.",
+     "properties": {
+      "@referredType": {
+       "description": "The actual type of the target instance when needed for disambiguation.",
+       "type": "string"
+      },
+      "href": {
+       "description": "The URI of the referred entity.",
+       "type": "string"
+      },
+      "id": {
+       "description": "The identifier of the referred entity.",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the referred entity.",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "Extensible": {
+   "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
+   "properties": {
+    "@baseType": {
+     "description": "When sub-classing, this defines the super-class",
+     "type": "string"
+    },
+    "@schemaLocation": {
+     "description": "A URI to a JSON-Schema file that defines additional attributes and relationships",
+     "type": "string"
+    },
+    "@type": {
+     "description": "When sub-classing, this defines the sub-class Extensible name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "@type"
+   ],
+   "type": "object"
+  },
+  "FloatCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Float.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "format": "float",
+       "type": "number"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IntegerArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Integer(s).",
+     "properties": {
+      "value": {
+       "items": {
+        "type": "integer"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IntegerCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Integer.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "integer"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Money": {
+   "description": "A base / value business entity used to represent money",
+   "properties": {
+    "unit": {
+     "description": "Currency (ISO4217 norm uses 3 letters to define the currency)",
+     "type": "string"
+    },
+    "value": {
+     "description": "A signed floating point number, the meaning of the sign is according to the context of the API that uses this Data type",
+     "format": "float",
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "NumberArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Number(s).",
+     "properties": {
+      "value": {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "NumberCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Number.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "number"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ObjectArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Object(s).",
+     "properties": {
+      "value": {
+       "items": {
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ObjectCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Object.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "object"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ProductRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "A Product reference",
+   "type": "object"
+  },
+  "StringArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of String(s).",
+     "properties": {
+      "value": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "StringCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a String.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TimePeriod": {
+   "description": "A period of time, either as a deadline (endDateTime only) a startDateTime only, or both",
+   "properties": {
+    "endDateTime": {
+     "description": "End of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    },
+    "startDateTime": {
+     "description": "Start of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "$id": "https://idp.local/tmf/schemas/TMF678-v5.0.0.schema.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "TMF678 v5.0.0 resources used by the IDP landing zone",
+ "x-resources": [
+  "AppliedCustomerBillingRate"
+ ],
+ "x-source": {
+  "commit": "eb90402dc362a602225476245398887ce484f9cb",
+  "file": "TMF678-CustomerBill-v5.0.0.oas.yaml",
+  "license": "Apache-2.0",
+  "repo": "tmforum-apis/TMF678_CustomerBill",
+  "v5Conventions": "native",
+  "version": "5.0.0"
+ }
+}

@@ -1,0 +1,45 @@
+{
+  "@type": "IdpOrganization",
+  "@baseType": "Organization",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpOrganization.schema.json",
+  "href": "/tmf-api/partyManagement/v5/organization/tenant_a-party-000004",
+  "status": "validated",
+  "isLegalEntity": true,
+  "tenantId": "tenant_a",
+  "id": "tenant_a-party-000004",
+  "partyCharacteristic": [
+    {
+      "@type": "StringCharacteristic",
+      "name": "preferredLanguage",
+      "valueType": "string",
+      "value": "en-US"
+    },
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "consentMarketing",
+      "valueType": "boolean",
+      "value": true
+    },
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "consentAnalytics",
+      "valueType": "boolean",
+      "value": true
+    }
+  ],
+  "contactMedium": [
+    {
+      "@type": "PhoneContactMedium",
+      "contactType": "mobile",
+      "preferred": true,
+      "phoneNumber": "+595913809249"
+    },
+    {
+      "@type": "EmailContactMedium",
+      "contactType": "email",
+      "emailAddress": "user000004@example.com"
+    }
+  ],
+  "name": "Company 000004",
+  "organizationType": "company"
+}

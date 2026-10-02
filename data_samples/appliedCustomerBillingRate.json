@@ -1,0 +1,19 @@
+{
+  "@type": "IdpAppliedCustomerBillingRate",
+  "@baseType": "AppliedCustomerBillingRate",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpAppliedCustomerBillingRate.schema.json",
+  "href": "/tmf-api/customerBillManagement/v5/appliedCustomerBillingRate/tenant_a-agr-000000-fc-1",
+  "isBilled": false,
+  "tenantId": "tenant_a",
+  "id": "tenant_a-agr-000000-fc-1",
+  "product": {
+    "id": "tenant_a-prod-000000-0",
+    "@type": "ProductRef"
+  },
+  "appliedBillingRateType": "recurring",
+  "taxIncludedAmount": {
+    "value": 7.99,
+    "unit": "EUR"
+  },
+  "date": "2026-01-01T00:00:00.000Z"
+}

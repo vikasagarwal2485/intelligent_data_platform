@@ -134,6 +134,14 @@ ml:
   train_max_rows: 2000000
   sample_seed: 42
 
+# TM Forum landing format (REQ-BRZ-03/06): the landing files are TMF Open API v5
+# resources, mapped to and from the canonical records by this profile
+# (config/tmf/profiles/<name>.yaml). `standard` = standard fields + characteristics +
+# the platform extension (tenantId); a customer profile adds its own @type subtypes.
+# Env: IDP_TMF_PROFILE.
+tmf:
+  profile: standard
+
 # Scoring-API authentication (REQ-SRV-03). When enabled, every endpoint except
 # GET /health needs a Bearer JWT from the Keycloak realm `idp`, validated against the
 # realm's JWKS (signature, iss, aud, exp); the caller's tenant is the `tenant_claim`

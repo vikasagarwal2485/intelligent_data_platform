@@ -1,0 +1,21 @@
+{
+  "@type": "IdpBillingAccount",
+  "@baseType": "BillingAccount",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpBillingAccount.schema.json",
+  "href": "/tmf-api/accountManagement/v5/billingAccount/tenant_a-acct-000004",
+  "tenantId": "tenant_a",
+  "id": "tenant_a-acct-000004",
+  "accountType": "company",
+  "state": "active",
+  "relatedParty": [
+    {
+      "@type": "RelatedPartyRefOrPartyRoleRef",
+      "role": "customer",
+      "partyOrPartyRole": {
+        "@type": "PartyRoleRef",
+        "id": "tenant_a-cust-000004",
+        "@referredType": "Customer"
+      }
+    }
+  ]
+}

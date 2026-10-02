@@ -1,0 +1,1330 @@
+{
+ "$defs": {
+  "Account": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Account__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillingAccount"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillingAccount"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "FinancialAccount"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/FinancialAccount"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyAccount"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyAccount"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "SettlementAccount"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/SettlementAccount"
+     }
+    }
+   ]
+  },
+  "AccountBalance": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Balances linked to the account",
+     "properties": {
+      "amount": {
+       "$ref": "#/$defs/Money"
+      },
+      "balanceType": {
+       "description": "Type of the balance : deposit balance, disputed balance, loyalty balance, receivable balance...",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier of the balance within list of the balances (for entities with list)",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AccountRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Account reference. A account may be a party account or a financial account.",
+   "type": "object"
+  },
+  "AccountRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Significant connection between accounts. For instance an aggregating account for a list of shop branches each having its own billing account.",
+     "properties": {
+      "account": {
+       "$ref": "#/$defs/AccountRef"
+      },
+      "relationshipType": {
+       "description": "Type of relationship",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Account__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Generic Account structure used to define commonalities between sub concepts of PartyAccount and Financial Account, or other type of account supported by the API.",
+     "properties": {
+      "accountBalance": {
+       "description": "List of balances for the account, for example regular postpaid balance, deposit balance, write-off balance.",
+       "items": {
+        "$ref": "#/$defs/AccountBalance"
+       },
+       "type": "array"
+      },
+      "accountRelationship": {
+       "description": "List of balances related to the account. For example a list of billing accounts that contribute to a financial account",
+       "items": {
+        "$ref": "#/$defs/AccountRelationship"
+       },
+       "type": "array"
+      },
+      "accountType": {
+       "description": "A categorization of an account, such as individual, joint, and so forth, whose instances share some of the same characteristics. Note: for flexibility we use a String here but an implementation may use an enumeration with a limited list of valid values.",
+       "type": "string"
+      },
+      "contact": {
+       "description": "List of people who could be contacted regarding the account, for example the accountant who authorizes payments",
+       "items": {
+        "$ref": "#/$defs/Contact"
+       },
+       "type": "array"
+      },
+      "creditLimit": {
+       "$ref": "#/$defs/Money"
+      },
+      "description": {
+       "description": "Detailed description of the account",
+       "type": "string"
+      },
+      "lastUpdate": {
+       "description": "The date and time that the account was last updated",
+       "format": "date-time",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the account",
+       "type": "string"
+      },
+      "relatedParty": {
+       "description": "List of parties that have some relationship with the account, for example the customer to whom the account belongs",
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "state": {
+       "description": "Contains the lifecycle state such as: Active, Closed, Suspended and so on.",
+       "type": "string"
+      },
+      "taxExemption": {
+       "description": "List of tax exemptions that can be applied when calculating charges levied to the account.",
+       "items": {
+        "$ref": "#/$defs/TaxExemptionCertificate"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Addressable": {
+   "description": "Base schema for adressable entities",
+   "properties": {
+    "href": {
+     "description": "Hyperlink reference",
+     "type": "string"
+    },
+    "id": {
+     "description": "unique identifier",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Attachment": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Complements the description of an element (for instance a product) through video, pictures...",
+     "properties": {
+      "attachmentType": {
+       "description": "a business characterization of the purpose of the attachment, for example logo, instructionManual, contractCopy",
+       "type": "string"
+      },
+      "content": {
+       "description": "The actual contents of the attachment object, if embedded, encoded as base64",
+       "format": "base64",
+       "type": "string"
+      },
+      "description": {
+       "description": "A narrative text describing the content of the attachment",
+       "type": "string"
+      },
+      "mimeType": {
+       "description": "a technical characterization of the attachment content format using IETF Mime Types",
+       "type": "string"
+      },
+      "name": {
+       "description": "The name of the attachment",
+       "type": "string"
+      },
+      "size": {
+       "$ref": "#/$defs/Quantity"
+      },
+      "url": {
+       "description": "Uniform Resource Locator, is a web page address (a subset of URI)",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AttachmentRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "Attachment reference. An attachment complements the description of an element (for instance a product) through video, pictures",
+     "properties": {
+      "description": {
+       "description": "A narrative text describing the content of the attachment",
+       "type": "string"
+      },
+      "url": {
+       "description": "Link to the attachment media/content",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AttachmentRefOrValue": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/AttachmentRefOrValue__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Attachment"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Attachment"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "AttachmentRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/AttachmentRef"
+     }
+    }
+   ]
+  },
+  "AttachmentRefOrValue__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/Attachment"
+    },
+    {
+     "$ref": "#/$defs/AttachmentRef"
+    }
+   ],
+   "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the Attachment entity and not the AttachmentRefOrValue class itself",
+   "type": "object"
+  },
+  "BillFormat": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "A detailed description of the way in which a bill is presented.",
+     "properties": {
+      "description": {
+       "description": "An explanatory text for this bill format",
+       "type": "string"
+      },
+      "name": {
+       "description": "A short descriptive name",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillFormatRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "BillFormat reference. A bill format is a description of the way in which a bill is presented.",
+   "type": "object"
+  },
+  "BillFormatRefOrValue": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/BillFormatRefOrValue__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillFormat"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillFormat"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillFormatRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillFormatRef"
+     }
+    }
+   ]
+  },
+  "BillFormatRefOrValue__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/BillFormat"
+    },
+    {
+     "$ref": "#/$defs/BillFormatRef"
+    }
+   ],
+   "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the BillFormat entity and not the BillFormatRefOrValue class itself",
+   "type": "object"
+  },
+  "BillPresentationMedia": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "A mean of communicating a bill, supported by the associated bill format. For example, post mail, email, web page.",
+     "properties": {
+      "description": {
+       "description": "An explanatory text describing this bill presentation media",
+       "type": "string"
+      },
+      "name": {
+       "description": "A short descriptive name",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillPresentationMediaRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "PresentationMedia reference. A mean of communicating a bill, supported by the associated bill format. For example, post mail, email, web page.",
+   "type": "object"
+  },
+  "BillPresentationMediaRefOrValue": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/BillPresentationMediaRefOrValue__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillPresentationMedia"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillPresentationMedia"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillPresentationMediaRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillPresentationMediaRef"
+     }
+    }
+   ]
+  },
+  "BillPresentationMediaRefOrValue__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/BillPresentationMedia"
+    },
+    {
+     "$ref": "#/$defs/BillPresentationMediaRef"
+    }
+   ],
+   "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the BillPresentationMedia entity and not the BillPresentationMediaRefOrValue class itself",
+   "type": "object"
+  },
+  "BillStructure": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "The structure of the bill for party accounts (billing or settlement).",
+     "properties": {
+      "cycleSpecification": {
+       "$ref": "#/$defs/BillingCycleSpecificationRefOrValue"
+      },
+      "format": {
+       "$ref": "#/$defs/BillFormatRefOrValue"
+      },
+      "presentationMedia": {
+       "items": {
+        "$ref": "#/$defs/BillPresentationMediaRefOrValue"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillingAccount": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyAccount"
+    },
+    {
+     "description": "A party account used for billing purposes. It includes a description of the bill structure (frequency, presentation media, format and so on). It is a specialization of entity PartyAccount.",
+     "properties": {
+      "ratingType": {
+       "description": "Indicates whether the account follows a specific payment option such as prepaid or postpaid",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillingCycleSpecification": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "A detailed description of when to initiate a billing cycle and the various sub steps of a billing cycle.",
+     "properties": {
+      "billingDateShift": {
+       "description": "An offset of a billing/settlement date. The offset is expressed as number of days with regard to the start of the billing/settlement period.",
+       "type": "integer"
+      },
+      "billingPeriod": {
+       "description": "A billing time period. It can be recurring, for example: week, month, quarter of year, year .",
+       "type": "string"
+      },
+      "chargeDateOffset": {
+       "description": "An offset of a date through which charges previously received by the billing system will appear on the bill. The offset is expressed as number of days with regard to the start of the BillingPeriod.",
+       "type": "integer"
+      },
+      "creditDateOffset": {
+       "description": "An offset of a date through which credits previously received by the billing system will appear on the bill. The offset is expressed as number of days with regard to the start of the BillingPeriod.",
+       "type": "integer"
+      },
+      "description": {
+       "description": "An explanation regarding this billing cycle specification",
+       "type": "string"
+      },
+      "frequency": {
+       "description": "Frequency of the billing cycle (monthly for instance)",
+       "type": "string"
+      },
+      "mailingDateOffset": {
+       "description": "An offset of a customer bill mailing date. The offset is expressed as number of days with regard to the start of the BillingPeriod.",
+       "type": "integer"
+      },
+      "name": {
+       "description": "A short descriptive name",
+       "type": "string"
+      },
+      "paymentDueDateOffset": {
+       "description": "An offset of a payment due date. The offset is expressed as number of days with regard to the start of the BillingPeriod.",
+       "type": "integer"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillingCycleSpecificationRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "BillingCycleSpecification reference. A description of when to initiate a billing cycle and the various sub steps of a billing cycle.",
+   "type": "object"
+  },
+  "BillingCycleSpecificationRefOrValue": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/BillingCycleSpecificationRefOrValue__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillingCycleSpecification"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillingCycleSpecification"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BillingCycleSpecificationRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BillingCycleSpecificationRef"
+     }
+    }
+   ]
+  },
+  "BillingCycleSpecificationRefOrValue__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/BillingCycleSpecification"
+    },
+    {
+     "$ref": "#/$defs/BillingCycleSpecificationRef"
+    }
+   ],
+   "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the BillingCycleSpecification entity and not the BillingCycleSpecificationRefOrValue class itself",
+   "type": "object"
+  },
+  "Contact": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "An individual or an organization used as a contact point for a given account and accessed via some contact medium.",
+     "properties": {
+      "contactMedium": {
+       "description": "List of contact mediums for the contact, such as mobile phone number, email addreess, etc.",
+       "items": {
+        "$ref": "#/$defs/ContactMedium"
+       },
+       "type": "array"
+      },
+      "contactName": {
+       "description": "A displayable name for that contact",
+       "type": "string"
+      },
+      "contactType": {
+       "description": "Type of contact (primary, secondary...)",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier of the contact within list of the contacts (for entities with list)",
+       "type": "string"
+      },
+      "partyRoleType": {
+       "description": "Identifies what kind of party role type is linked to the contact (a account manager...)",
+       "type": "string"
+      },
+      "relatedParty": {
+       "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "EmailContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/EmailContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "FaxContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/FaxContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "GeographicAddressContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/GeographicAddressContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PhoneContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PhoneContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "SocialContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/SocialContactMedium"
+     }
+    }
+   ]
+  },
+  "ContactMedium__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Indicates the contact medium that could be used to contact the party.",
+     "properties": {
+      "contactType": {
+       "description": "Type of the contact medium to qualifiy it like pro email / personal email. This is not used to define the contact medium used.",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier for this contact medium.",
+       "type": "string"
+      },
+      "preferred": {
+       "description": "If true, indicates that is the preferred contact medium",
+       "type": "boolean"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "EmailContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes an email that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "emailAddress": {
+       "description": "Full email address in standard format",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Entity": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    }
+   ],
+   "description": "Base entity schema for use in TMForum Open-APIs. Property.",
+   "type": "object"
+  },
+  "EntityRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    },
+    {
+     "description": "Entity reference schema to be use for all entityRef class.",
+     "properties": {
+      "@referredType": {
+       "description": "The actual type of the target instance when needed for disambiguation.",
+       "type": "string"
+      },
+      "href": {
+       "description": "The URI of the referred entity.",
+       "type": "string"
+      },
+      "id": {
+       "description": "The identifier of the referred entity.",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the referred entity.",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "Extensible": {
+   "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
+   "properties": {
+    "@baseType": {
+     "description": "When sub-classing, this defines the super-class",
+     "type": "string"
+    },
+    "@schemaLocation": {
+     "description": "A URI to a JSON-Schema file that defines additional attributes and relationships",
+     "type": "string"
+    },
+    "@type": {
+     "description": "When sub-classing, this defines the sub-class Extensible name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "@type"
+   ],
+   "type": "object"
+  },
+  "FaxContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a fax that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "faxNumber": {
+       "description": "The fax number of the contact",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "FinancialAccount": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Account__core"
+    }
+   ],
+   "description": "An account of money owed by a party to another entity in exchange for goods or services that have been delivered or used. A financial (account receivable account/account payable) aggregates the amounts of one or more party accounts (billing or settlement) owned by a given party. It is a specialization of entity Account.",
+   "type": "object"
+  },
+  "FinancialAccountRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "AccountReceivable reference. An account of money owed by a party to another entity in exchange for goods or services that have been delivered or used. An account receivable aggregates the amounts of one or more party accounts (billing or settlement) owned by a given party.",
+   "type": "object"
+  },
+  "GeographicAddressContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a geographical address that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "city": {
+       "description": "The city",
+       "type": "string"
+      },
+      "country": {
+       "description": "The country",
+       "type": "string"
+      },
+      "geographicAddress": {
+       "$ref": "#/$defs/GeographicAddressRef"
+      },
+      "postCode": {
+       "description": "Postcode",
+       "type": "string"
+      },
+      "stateOrProvince": {
+       "description": "State or province",
+       "type": "string"
+      },
+      "street1": {
+       "description": "Describes the street",
+       "type": "string"
+      },
+      "street2": {
+       "description": "Complementary street description",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "GeographicAddressRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Reference to a Geographic Address.",
+   "type": "object"
+  },
+  "Money": {
+   "description": "A base / value business entity used to represent money",
+   "properties": {
+    "unit": {
+     "description": "Currency (ISO4217 norm uses 3 letters to define the currency)",
+     "type": "string"
+    },
+    "value": {
+     "description": "A signed floating point number, the meaning of the sign is according to the context of the API that uses this Data type",
+     "format": "float",
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "PartyAccount": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Account__core"
+    },
+    {
+     "description": "Account used for billing or for settlement purposes concerning a given party (an organization or an individual). It is a specialization of entity Account.",
+     "properties": {
+      "billStructure": {
+       "$ref": "#/$defs/BillStructure"
+      },
+      "defaultPaymentMethod": {
+       "$ref": "#/$defs/PaymentMethodRef"
+      },
+      "financialAccount": {
+       "$ref": "#/$defs/FinancialAccountRef"
+      },
+      "paymentPlan": {
+       "description": "A list of payment plans that are active or expired for the account, for example if the customer had difficulty in paying",
+       "items": {
+        "$ref": "#/$defs/PaymentPlan"
+       },
+       "type": "array"
+      },
+      "paymentStatus": {
+       "description": "The condition of the account, such as due, paid, in arrears.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PartyRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "A Party reference",
+   "type": "object"
+  },
+  "PartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRefOrPartyRoleRef__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRef"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRoleRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRoleRef"
+     }
+    }
+   ]
+  },
+  "PartyRefOrPartyRoleRef__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/PartyRef"
+    },
+    {
+     "$ref": "#/$defs/PartyRoleRef"
+    }
+   ],
+   "description": "",
+   "type": "object"
+  },
+  "PartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "Party role reference. A party role represents the part played by a party in a given context.",
+     "properties": {
+      "partyId": {
+       "description": "The identifier of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      },
+      "partyName": {
+       "description": "The name of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PaymentMethodRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "PaymentMethod reference. A payment method defines a specific mean of payment (e.g direct debit).",
+   "type": "object"
+  },
+  "PaymentPlan": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Defines a plan for payment (when a party wants to spread his payments)",
+     "properties": {
+      "id": {
+       "description": "Identifier of the plan within list of the plans (for entities with list)",
+       "type": "string"
+      },
+      "numberOfPayments": {
+       "description": "Number of payments used to spread the global payment",
+       "type": "integer"
+      },
+      "paymentFrequency": {
+       "description": "Frequency of the payments, such as monthly and bimonthly",
+       "type": "string"
+      },
+      "paymentMethod": {
+       "$ref": "#/$defs/PaymentMethodRef"
+      },
+      "planType": {
+       "description": "Type of payment plan",
+       "type": "string"
+      },
+      "priority": {
+       "description": "Priority of the payment plan",
+       "type": "integer"
+      },
+      "status": {
+       "description": "Status of the payment plan (effective, ineffective)",
+       "type": "string"
+      },
+      "totalAmount": {
+       "$ref": "#/$defs/Money"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PhoneContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a phone number that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "phoneNumber": {
+       "description": "The phone number of the contact",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Quantity": {
+   "description": "An amount in a given unit",
+   "properties": {
+    "amount": {
+     "default": 1,
+     "description": "Numeric value in a given unit",
+     "format": "float",
+     "type": "number"
+    },
+    "units": {
+     "description": "Unit",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "RelatedPartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "RelatedParty reference. A related party defines party or party role or its reference, linked to a specific entity",
+     "properties": {
+      "partyOrPartyRole": {
+       "$ref": "#/$defs/PartyRefOrPartyRoleRef"
+      },
+      "role": {
+       "description": "Role played by the related party or party role in the context of the specific entity it is linked to. Such as 'initiator', 'customer',  'salesAgent', 'user'",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "SettlementAccount": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyAccount"
+    }
+   ],
+   "description": "A party account used for settlement purposes. It includes a description of the bill structure (frequency, presentation media, format and so on). It is a specialization of entity PartyAccount.",
+   "type": "object"
+  },
+  "SocialContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a social media identifier that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "socialNetworkId": {
+       "description": "Identifier as a member of a social network",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TaxDefinition": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Reference of a tax definition. A tax is levied by an authorized tax jurisdiction. For example, there are many different types of tax (Federal Tax levied by the US Government, State Tax levied by the State of California, City Tax levied by the City of Los Angeles, etc.).",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the tax.",
+       "type": "string"
+      },
+      "jurisdictionLevel": {
+       "description": "Level of the jurisdiction that levies the tax",
+       "type": "string"
+      },
+      "jurisdictionName": {
+       "description": "Name of the jurisdiction that levies the tax",
+       "type": "string"
+      },
+      "name": {
+       "description": "Tax name.",
+       "type": "string"
+      },
+      "taxType": {
+       "description": "Type of the tax.",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TaxExemptionCertificate": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "A tax exemption certificate represents a tax exemption granted to a party (individual or organization) by a tax jurisdiction which may be a city, state, country,... An exemption has a certificate identifier (received from the jurisdiction that levied the tax) and a validity period. An exemption is per tax types and determines for each type of tax what portion of the tax is exempted (partial by percentage or complete) via the tax definition.",
+     "properties": {
+      "attachment": {
+       "$ref": "#/$defs/AttachmentRefOrValue"
+      },
+      "certificateNumber": {
+       "description": "Identifier of a document that shows proof of exemption from taxes for the taxing jurisdiction",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier of the tax exemption within list of the exemptions",
+       "type": "string"
+      },
+      "issuingJurisdiction": {
+       "description": "Name of the jurisdiction that issued the exemption",
+       "type": "string"
+      },
+      "reason": {
+       "description": "Reason for the tax exemption",
+       "type": "string"
+      },
+      "taxDefinition": {
+       "description": "A list of taxes that are covered by the exemption, e.g. City Tax, State Tax. The definition would include the exemption (e.g. for a rate exemption 0% would be a full exemption, 5% could be a partial exemption if the actual rate was 10%).",
+       "items": {
+        "$ref": "#/$defs/TaxDefinition"
+       },
+       "type": "array"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TimePeriod": {
+   "description": "A period of time, either as a deadline (endDateTime only) a startDateTime only, or both",
+   "properties": {
+    "endDateTime": {
+     "description": "End of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    },
+    "startDateTime": {
+     "description": "Start of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "$id": "https://idp.local/tmf/schemas/TMF666-v5.0.0.schema.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "TMF666 v5.0.0 resources used by the IDP landing zone",
+ "x-resources": [
+  "BillingAccount"
+ ],
+ "x-source": {
+  "commit": "8c85948d31c73ad7408595dd485cf7f00573f59f",
+  "file": "TMF666-Account_Management-v5.0.0.oas.yaml",
+  "license": "Apache-2.0",
+  "repo": "tmforum-apis/TMF666_AccountManagement",
+  "v5Conventions": "native",
+  "version": "5.0.0"
+ }
+}

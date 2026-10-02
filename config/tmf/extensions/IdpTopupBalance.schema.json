@@ -1,0 +1,48 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpTopupBalance.schema.json",
+ "title": "IdpTopupBalance",
+ "description": "Platform extension of TopupBalance: adds tenantId. TMF654 has no characteristics, so it also carries rechargeType and the agreement reference.",
+ "x-baseType": "TopupBalance",
+ "x-baseSchema": "TMF654-v4.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF654-v4.0.0.schema.json#/$defs/TopupBalance"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    },
+    "rechargeType": {
+     "type": "string",
+     "description": "Kind of recharge (canonical recharge_type); TMF654 has no characteristics."
+    },
+    "agreement": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string"
+      },
+      "href": {
+       "type": "string"
+      },
+      "@referredType": {
+       "type": "string"
+      }
+     },
+     "description": "The agreement the recharge applies to (canonical agreement_id)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

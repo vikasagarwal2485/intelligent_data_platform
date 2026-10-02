@@ -156,13 +156,20 @@ def generate(
 
         birth_year = int(rng.integers(1955, 2005))
 
+        # A company account's party is an organization (TMF632 Organization): no
+        # person fields. Its name/type come from the suffix, not the rng, so no other
+        # generated value changes (REQ-SYN-01).
         parties.append({
             "tenant_id": tenant_id, "id": party_id, "role": "owner",
-            "first_name": "First", "last_name": f"User{suffix}",
-            "date_of_birth": f"{birth_year}-01-01", "language": "en-US",
+            "first_name": None if is_company else "First",
+            "last_name": None if is_company else f"User{suffix}",
+            "date_of_birth": None if is_company else f"{birth_year}-01-01", "language": "en-US",
             "phone": f"+{msisdn}", "email": f"user{suffix}@example.com",
             "consent_marketing": consent_marketing, "consent_analytics": consent_analytics,
             "account_id": account_id,
+            "party_type": "organization" if is_company else "individual",
+            "organization_name": f"Company {suffix}" if is_company else None,
+            "organization_type": "company" if is_company else None,
         })
         accounts.append({
             "tenant_id": tenant_id, "id": account_id, "account_type": account_type,

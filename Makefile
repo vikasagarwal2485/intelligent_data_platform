@@ -229,11 +229,11 @@ minio-reset: ## Reset the lake for a clean re-run: recreate the buckets (idp-bro
 	# with the bucket, so the next Silver run starts from all of Bronze.)
 	bash deploy/platform/timescaledb/lake-catalog.sh idp-platform --reset
 
-ENTITY ?= agreements
+ENTITY ?= agreement
 LINES ?= 30
-LANDING_ENTITIES := parties accounts agreements products voice_events data_events recharge_events fee_charges
+LANDING_ENTITIES := individual organization customer billingAccount agreement product appliedCustomerBillingRate topupBalance productUsage
 .PHONY: landing-show
-landing-show: ## Show a landing file from MinIO (raw, untokenized PII): TENANT=tenant_a ENTITY=agreements LINES=30 (LINES=0 = whole file)
+landing-show: ## Show a TM Forum landing file from MinIO (raw, untokenized PII): TENANT=tenant_a ENTITY=agreement LINES=30 (LINES=0 = whole file)
 	@case " $(LANDING_ENTITIES) " in *" $(ENTITY) "*) ;; *) echo "ENTITY must be one of: $(LANDING_ENTITIES)" >&2; exit 1;; esac
 	@case "$(TENANT)" in *[!a-z0-9_]*|"") echo "TENANT must be a tenant id like tenant_a" >&2; exit 1;; esac
 	@case "$(LINES)" in *[!0-9]*|"") echo "LINES must be a number (0 = whole file)" >&2; exit 1;; esac

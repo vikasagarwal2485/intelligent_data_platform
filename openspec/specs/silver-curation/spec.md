@@ -29,9 +29,9 @@ The Silver stage SHALL:
 - normalize timestamps to UTC
 - de-duplicate on natural keys
 
-Silver curates canonical Bronze records; it does not parse JSON:API envelopes.
-Unwrapping envelopes into canonical records is the ingestion adapter's job
-(REQ-BRZ-04).
+Silver curates canonical Bronze records; it does not parse source resources.
+Adapting source resources (the TM Forum landing files) into canonical records is
+the ingestion adapter's job (REQ-BRZ-05).
 
 #### Scenario: SCN-SLV-02.1 — Money normalization
 - **WHEN** a usage/recharge record with net + tax amounts is curated
@@ -39,7 +39,7 @@ Unwrapping envelopes into canonical records is the ingestion adapter's job
 
 #### Scenario: SCN-SLV-02.2 — UUID unwrap from real samples
 - **WHEN** a Bronze record carries a relationship id wrapped as `"UUID(123...)"`,
-  as in the real TM Forum documents in `data_samples/`, and is curated
+  as some operator feeds send it, and is curated
 - **THEN** the Silver id is the inner value without the wrapper, so the
   relationship joins its target (e.g. an agreement's `account_id` joins
   `accounts`)

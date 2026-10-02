@@ -8,24 +8,34 @@ from idp.ingestion import landing
 from idp.synthetic.generator import ENTITIES
 
 
+TMF_FILES = {"individual.json", "organization.json", "customer.json", "billingAccount.json",
+             "agreement.json", "product.json", "appliedCustomerBillingRate.json", "topupBalance.json",
+             "productUsage.json"}
+
+
 def test_write_landing_partitions_by_tenant(multi_tenant_dataset, tmp_path):
     written = landing.write_landing(multi_tenant_dataset, tmp_path)
-    assert "parties" in written
-    assert (tmp_path / "tenant=tenant_a" / "parties.json").exists()
-    assert (tmp_path / "tenant=tenant_b" / "parties.json").exists()
+    assert set(written) <= TMF_FILES and "productUsage.json" in written
+    assert (tmp_path / "tenant=tenant_a" / "individual.json").exists()
+    assert (tmp_path / "tenant=tenant_b" / "customer.json").exists()
 
 
-def test_landing_has_one_file_per_tenant_entity(multi_tenant_dataset, tmp_path):
+def test_landing_files_are_tmf_resources_of_their_tenant(multi_tenant_dataset, tmp_path):
+    # SCN-BRZ-03.1 / 03.5 — TMF resource files, each resource valid and tenant-stamped
     import json
+
+    from idp.ingestion.tmf import schemas
 
     landing.write_landing(multi_tenant_dataset, tmp_path)
     for tenant_id in ("tenant_a", "tenant_b"):
-        for entity in ENTITIES:
-            if getattr(multi_tenant_dataset, entity).empty:
-                continue
-            path = tmp_path / f"tenant={tenant_id}" / f"{entity}.json"
-            records = json.loads(path.read_text(encoding="utf-8"))
-            assert records and {r["tenant_id"] for r in records} == {tenant_id}
+        folder = tmp_path / f"tenant={tenant_id}"
+        names = {p.name for p in folder.iterdir()}
+        assert names <= TMF_FILES and {"customer.json", "productUsage.json", "agreement.json"} <= names
+        for path in folder.iterdir():
+            resources = json.loads(path.read_text(encoding="utf-8"))
+            assert resources and {r["tenantId"] for r in resources} == {tenant_id}
+            assert all(r["@baseType"] and r["href"].endswith(r["id"]) for r in resources)
+            assert all(schemas.first_error(r) is None for r in resources), path.name
 
 
 def test_generate_command_writes_landing_not_bronze(tmp_path):
@@ -42,7 +52,7 @@ def test_generate_command_writes_landing_not_bronze(tmp_path):
     cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     assert main(["--config", str(cfg_path), "generate"]) == 0
-    assert (tmp_path / "landing" / "tenant=tenant_a" / "parties.json").exists()
+    assert (tmp_path / "landing" / "tenant=tenant_a" / "customer.json").exists()
     assert not (tmp_path / "bronze").exists()
 
 
@@ -90,7 +100,11 @@ def _read(root, tenants=("tenant_a", "tenant_b")):
 
 
 def test_read_landing_round_trip_in_publish_order(multi_tenant_dataset, tmp_path):
+    # SCN-BRZ-05.1 through files: the canonical records, entity by entity, in publish order
     import json
+
+    from idp.common.records import to_records
+
     landing.write_landing(multi_tenant_dataset, tmp_path)
     files = _read(tmp_path)
     assert all(f.reason is None for f in files)
@@ -99,8 +113,15 @@ def test_read_landing_round_trip_in_publish_order(multi_tenant_dataset, tmp_path
         mine = [f for f in files if f.tenant == tenant]
         assert [f.entity for f in mine] == [e for e in ENTITIES if any(m.entity == e for m in mine)]
         for f in mine:
-            on_disk = json.loads((tmp_path / f"tenant={tenant}" / f"{f.entity}.json").read_text())
-            assert f.records == on_disk
+            df = getattr(multi_tenant_dataset, f.entity)
+            assert json.dumps(f.records) == json.dumps(to_records(df[df["tenant_id"] == tenant]))
+
+
+def _land(dataset, root):
+    import json
+    landing.write_landing(dataset, root)
+    folder = root / "tenant=tenant_a"
+    return folder, (lambda name: json.loads((folder / name).read_text()))
 
 
 def _write(path, payload):
@@ -109,27 +130,42 @@ def _write(path, payload):
     path.write_text(payload if isinstance(payload, str) else json.dumps(payload))
 
 
-def test_read_landing_rejects_bad_files_and_keeps_good_ones(tmp_path):
-    good = [{"tenant_id": "tenant_a", "id": "1"}]
-    _write(tmp_path / "tenant=tenant_a" / "parties.json", good)
-    _write(tmp_path / "tenant=tenant_a" / "recharge_events.json",               # SCN-STR-01.4
-           [{"tenant_id": "tenant_a", "id": "r1"}, {"tenant_id": "tenant_b", "id": "r2"}])
-    _write(tmp_path / "tenant=tenant_a" / "notes.json", good)                   # unknown entity
-    _write(tmp_path / "tenant=tenant_a" / "accounts.json", "{not json")         # invalid json
-    _write(tmp_path / "tenant=tenant_a" / "products.json", {"tenant_id": "tenant_a"})   # not an array
-    _write(tmp_path / "tenant=tenant_x" / "parties.json", [{"tenant_id": "tenant_x"}])  # SCN-STR-01.5
-    _write(tmp_path / "stray.json", good)                                       # not a tenant folder
+def test_read_landing_rejects_bad_files_and_keeps_good_ones(multi_tenant_dataset, tmp_path):
+    folder, load = _land(multi_tenant_dataset, tmp_path)
+    topups = load("topupBalance.json")
+    topups[0]["tenantId"] = "tenant_b"                                     # SCN-STR-01.4
+    _write(folder / "topupBalance.json", topups)
+    fees = load("appliedCustomerBillingRate.json")
+    fees[0]["taxIncludedAmount"]["value"] = "lots"                         # SCN-BRZ-06.3
+    _write(folder / "appliedCustomerBillingRate.json", fees)
+    agreements = load("agreement.json")
+    agreements[0]["engagedParty"][0]["partyOrPartyRole"]["id"] = "tenant_a-cust-gone"   # SCN-BRZ-05.4
+    _write(folder / "agreement.json", agreements)
+    _write(folder / "notes.json", [])                                      # unknown file
+    _write(folder / "billingAccount.json", "{not json")                    # invalid json
+    _write(folder / "product.json", {"id": "x"})                           # not an array
+    _write(tmp_path / "tenant=tenant_x" / "individual.json", [])           # SCN-STR-01.5
+    _write(tmp_path / "stray.json", [])                                    # not a tenant folder
     by_name = {(f.tenant, f.entity or f.path.rsplit("/", 1)[-1]): f for f in _read(tmp_path)}
 
-    assert by_name[("tenant_a", "parties")].records == good
     reasons = {k: f.reason for k, f in by_name.items() if f.reason}
-    assert reasons[("tenant_a", "recharge_events")].startswith("tenant mismatch: 1")
-    assert by_name[("tenant_a", "recharge_events")].records is None           # never partly returned
-    assert reasons[("tenant_a", "notes")].startswith("unknown entity")
-    assert reasons[("tenant_a", "accounts")].startswith("invalid json")
-    assert reasons[("tenant_a", "products")].startswith("invalid json")
-    assert reasons[("tenant_x", "parties")].startswith("unknown tenant")
+    assert reasons[("tenant_a", "topupBalance")].startswith("tenant mismatch: 1")
+    assert reasons[("tenant_a", "appliedCustomerBillingRate")].startswith("invalid resource")
+    assert reasons[("tenant_a", "notes")].startswith("unknown landing file")
+    assert reasons[("tenant_a", "billingAccount")].startswith("invalid json")
+    assert reasons[("tenant_a", "product")].startswith("invalid json")
+    assert reasons[("tenant_x", "individual")].startswith("unknown tenant")
     assert reasons[("", "stray.json")] == "not a tenant folder"
+    # the entities adapted from rejected files, or holding a dangling reference
+    for entity, file in (("recharge_events", "topupBalance.json"), ("fee_charges", "appliedCustomerBillingRate.json"),
+                         ("accounts", "billingAccount.json"), ("products", "product.json")):
+        assert reasons[("tenant_a", entity)] == f"depends on rejected file {file!r}"
+        assert by_name[("tenant_a", entity)].records is None                 # never partly returned
+    assert "tenant_a-cust-gone" in reasons[("tenant_a", "agreements")]
+    # everything else still goes, including the other tenant
+    for entity in ("parties", "voice_events", "data_events"):
+        assert by_name[("tenant_a", entity)].records
+    assert all(f.reason is None for k, f in by_name.items() if k[0] == "tenant_b")
 
 
 def test_read_landing_missing_zone_yields_nothing(tmp_path):

@@ -23,6 +23,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
     "trino==0.340.0",                 # SQL engine client for the MCP analytics tools
+    "fastjsonschema>=2.19,<3",        # TMF landing resources validated against vendored schemas (REQ-BRZ-06)
     "PyJWT[crypto]>=2.8,<3",          # scoring-API JWT validation against Keycloak JWKS (REQ-SRV-03)
     "mlflow-skinny==3.14.0",          # model registry client (REQ-ML-04), = the server version
     "boto3>=1.43.3,<1.43.47",         # MLflow S3 artifacts; botocore within aiobotocore's range

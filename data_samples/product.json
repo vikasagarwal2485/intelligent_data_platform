@@ -1,0 +1,44 @@
+{
+  "@type": "IdpProduct",
+  "@baseType": "Product",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpProduct.schema.json",
+  "href": "/tmf-api/productInventory/v5/product/tenant_a-prod-000000-0",
+  "productPrice": [
+    {
+      "@type": "ProductPrice",
+      "priceType": "recurring",
+      "recurringChargePeriod": "month",
+      "price": {
+        "@type": "Price",
+        "taxIncludedAmount": {
+          "unit": "EUR",
+          "value": 7.99
+        }
+      }
+    }
+  ],
+  "tenantId": "tenant_a",
+  "id": "tenant_a-prod-000000-0",
+  "productCharacteristic": [
+    {
+      "@type": "StringCharacteristic",
+      "name": "productType",
+      "valueType": "string",
+      "value": "addon"
+    },
+    {
+      "@type": "StringCharacteristic",
+      "name": "category",
+      "valueType": "string",
+      "value": "addon"
+    }
+  ],
+  "name": "Unlimited Social",
+  "status": "active",
+  "agreementItem": [
+    {
+      "agreementId": "tenant_a-agr-000000",
+      "@type": "AgreementItemRef"
+    }
+  ]
+}

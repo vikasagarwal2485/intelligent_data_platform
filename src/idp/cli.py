@@ -1,7 +1,7 @@
 """Command-line entrypoint for the platform.
 
 Usage (separated medallion stages):
-    idp produce    # synthetic data -> Kafka topics (--from-landing: the landing files)
+    idp produce    # synthetic data -> Kafka topics (--from-landing: the TMF landing files)
     idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
     idp silver     # new Bronze -> Silver (incremental; --full-refresh replays all)  [Silver stage]
     idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
@@ -10,7 +10,7 @@ Usage (separated medallion stages):
     idp labels     # seed the labels/outcomes store (training input)
     idp train      # Gold features + labels -> saved models  [offline ML]
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
-    idp generate   # write synthetic data to the landing zone (files)
+    idp generate   # write synthetic data to the landing zone (TM Forum resource files)
     idp serve      # start the FastAPI scoring service
     idp migrate-lake  # one-off: legacy Parquet Bronze -> Iceberg Bronze
     idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
@@ -28,11 +28,13 @@ from idp.common.config import load_config
 def _cmd_generate(args: argparse.Namespace) -> None:
     from idp.common import storage
     from idp.ingestion.landing import write_landing
+    from idp.ingestion.tmf.profile import load_profile
     from idp.synthetic.generator import generate
 
     cfg = load_config(args.config)
     syn = cfg.synthetic
     landing = storage.landing_uri(cfg)
+    profile = load_profile(cfg.tmf["profile"])
     # One tenant at a time, like `idp produce`, to cap peak memory.
     total = 0
     for tenant_id in cfg.tenant_ids:
@@ -44,10 +46,12 @@ def _cmd_generate(args: argparse.Namespace) -> None:
             default_rate=float(syn.get("default_rate", 0.12)),
             seed=int(syn.get("seed", 42)),
         )
-        written = write_landing(dataset, landing, storage_options=storage.storage_options(cfg))
+        written = write_landing(dataset, landing, storage_options=storage.storage_options(cfg),
+                                profile=profile)
         total += sum(len(v) for v in written.values())
         del dataset
-    print(f"Wrote {total} landing files for {len(cfg.tenant_ids)} tenant(s) to {landing}")
+    print(f"Wrote {total} TM Forum landing files ({profile.name} profile) for "
+          f"{len(cfg.tenant_ids)} tenant(s) to {landing}")
     print("Next: 'idp produce --from-landing' publishes them to Kafka.")
 
 
@@ -94,18 +98,22 @@ def _cmd_produce(args: argparse.Namespace) -> int | None:
 def _produce_from_landing(cfg, bootstrap: str) -> int:
     """Publish the landing zone's files (REQ-STR-01), one tenant at a time.
 
-    A rejected file (unknown tenant or entity, invalid JSON, tenant mismatch) is
-    not published at all; the other files are. Returns 1 when anything was
+    The landing files are TM Forum resources, adapted to canonical records with the
+    configured mapping profile. A rejected file (unknown tenant or file, invalid
+    JSON or resource, tenant mismatch) and the entities that depend on it, or an
+    entity with an unresolved reference, are not published at all; the rest is. Returns 1 when anything was
     rejected or the landing zone holds no tenant folder, else 0.
     """
     from itertools import groupby
 
     from idp.common import storage
     from idp.ingestion.landing import read_landing
+    from idp.ingestion.tmf.profile import load_profile
     from idp.streaming.producer import publish_records
 
     landing = storage.landing_uri(cfg)
-    files = read_landing(landing, cfg.tenant_ids, storage_options=storage.storage_options(cfg))
+    files = read_landing(landing, cfg.tenant_ids, storage_options=storage.storage_options(cfg),
+                         profile=load_profile(cfg.tmf["profile"]))
     rejected: list[tuple[str, str]] = []
     totals: dict[str, int] = {}
     tenants_seen = 0
@@ -127,7 +135,7 @@ def _produce_from_landing(cfg, bootstrap: str) -> int:
     print(f"Published from {landing} to Kafka at {bootstrap}:")
     print(json.dumps(totals, indent=2))
     if rejected:
-        print(f"REJECTED {len(rejected)} landing file(s) (not published):")
+        print(f"REJECTED {len(rejected)} landing file(s) or entities (not published):")
         for path, reason in rejected:
             print(f"  {path}: {reason}")
     if not tenants_seen:
@@ -268,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None, help="Path to platform.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("generate", help="Generate synthetic data into the landing zone").set_defaults(func=_cmd_generate)
+    sub.add_parser("generate", help="Generate synthetic data into the landing zone as TM Forum resource files").set_defaults(func=_cmd_generate)
 
     p_run = sub.add_parser("run", help="Run the end-to-end batch pipeline")
     p_run.add_argument("--no-persist", action="store_true",
@@ -278,8 +286,9 @@ def main(argv: list[str] | None = None) -> int:
     p_prod = sub.add_parser("produce", help="Publish synthetic data to Kafka topics")
     p_prod.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_prod.add_argument("--from-landing", action="store_true",
-                        help="Publish the landing zone's files (written by 'idp generate') "
-                             "instead of generating in memory")
+                        help="Publish the landing zone's TM Forum files (written by 'idp generate'), "
+                             "validated and adapted to canonical records with the "
+                             "active TMF profile, instead of generating in memory")
     p_prod.set_defaults(func=_cmd_produce)
 
     p_cons = sub.add_parser("consume", help="Bronze stage: drain Kafka topics -> Bronze (S3)")

@@ -15,8 +15,8 @@ UUID_PATTERN = r"^UUID\((.*)\)$"
 
 
 def strip_uuid(col: Any) -> Any:
-    """``UUID(123)`` -> ``123``; everything else passes through
-    (``idp.ingestion.jsonapi.strip_uuid_wrapper``)."""
+    """``UUID(123)`` -> ``123``; everything else passes through (REQ-SLV-02: some
+    operator feeds wrap ids this way)."""
     from pyspark.sql import functions as F
     return F.regexp_replace(col, UUID_PATTERN, "$1")
 

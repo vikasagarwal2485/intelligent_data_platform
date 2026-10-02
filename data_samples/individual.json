@@ -1,0 +1,46 @@
+{
+  "@type": "IdpIndividual",
+  "@baseType": "Individual",
+  "@schemaLocation": "https://idp.local/tmf/extensions/IdpIndividual.schema.json",
+  "href": "/tmf-api/partyManagement/v5/individual/tenant_a-party-000000",
+  "status": "validated",
+  "tenantId": "tenant_a",
+  "id": "tenant_a-party-000000",
+  "givenName": "First",
+  "familyName": "User000000",
+  "birthDate": "1971-01-01T00:00:00Z",
+  "languageAbility": [
+    {
+      "languageCode": "en-US",
+      "@type": "LanguageAbility",
+      "isFavouriteLanguage": true
+    }
+  ],
+  "contactMedium": [
+    {
+      "@type": "PhoneContactMedium",
+      "contactType": "mobile",
+      "preferred": true,
+      "phoneNumber": "+595950846137"
+    },
+    {
+      "@type": "EmailContactMedium",
+      "contactType": "email",
+      "emailAddress": "user000000@example.com"
+    }
+  ],
+  "partyCharacteristic": [
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "consentMarketing",
+      "valueType": "boolean",
+      "value": true
+    },
+    {
+      "@type": "BooleanCharacteristic",
+      "name": "consentAnalytics",
+      "valueType": "boolean",
+      "value": true
+    }
+  ]
+}

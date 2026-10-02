@@ -161,17 +161,23 @@ Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same dat
 | `make stream-replay` | `idp-produce-from-landing` → `idp-consume`: re-publish the landing files already there |
 | `make generate-job` | `idp-generate` only |
 
-- **The `idp-landing` bucket** holds the source files, laid out as
-  `tenant=<id>/<entity>.json`. It's created by `install-infra.sh` and
+- **The `idp-landing` bucket** holds the source files, TM Forum Open API resources
+  laid out as `tenant=<id>/<resource>.json` (`individual`, `organization`,
+  `customer`, `billingAccount`, `agreement`, `product`,
+  `appliedCustomerBillingRate`, `topupBalance`, `productUsage`; see the README's
+  "Landing files are TM Forum resources"). `make landing-show ENTITY=<resource>`
+  prints one. It's created by `install-infra.sh` and
   `make minio-mkbuckets`, and emptied by `make minio-reset` (which also clears the
   lake's Iceberg catalog, see below). It's not a lake layer,
   so Bronze archiving and maintenance never touch it.
 - **Each step waits for the previous one,** and the chain **stops at the first
   failed Job** without sitting out a timeout.
 - **A rejected landing file fails the chain:** its folder names a tenant that isn't
-  configured, it isn't a known entity, it isn't a JSON array, or any record belongs
-  to another tenant. The produce Job publishes the good files, lists the rejected
-  ones in its log, and exits 1, so consume doesn't run. Fix or remove the file,
+  configured, it isn't a known resource file, it isn't a JSON array, a resource fails
+  its TMF/extension schema or has another tenant's `tenantId`, or a reference
+  doesn't resolve. The entities that depend on a rejected file are rejected too. The
+  produce Job publishes the rest, lists the rejections in its log, and exits 1, so
+  consume doesn't run. Fix or remove the file,
   then `make stream-replay`.
 - **Keep `IDP_SUBSCRIBERS`/`IDP_DAYS` equal** in `generate-job.yaml`,
   `produce-job.yaml` and `labels-job.yaml`, because labels are regenerated from

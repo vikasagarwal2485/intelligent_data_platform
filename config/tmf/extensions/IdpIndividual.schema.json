@@ -1,0 +1,26 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpIndividual.schema.json",
+ "title": "IdpIndividual",
+ "description": "Platform extension of Individual: adds tenantId.",
+ "x-baseType": "Individual",
+ "x-baseSchema": "TMF632-v5.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF632-v5.0.0.schema.json#/$defs/Individual"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

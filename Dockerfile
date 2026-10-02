@@ -65,7 +65,7 @@ RUN pip install -e .
 ENV SPARK_HOME=/usr/local/lib/python3.11/site-packages/pyspark
 COPY pipelines/spark ./pipelines/spark
 COPY docker/spark-entrypoint.sh /opt/spark-entrypoint.sh
-RUN chmod +x /opt/spark-entrypoint.sh
+RUN chmod 755 /opt/spark-entrypoint.sh   # readable too: bash runs it as appuser
 
 EXPOSE 8000
 

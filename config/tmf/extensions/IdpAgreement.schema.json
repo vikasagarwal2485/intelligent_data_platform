@@ -1,0 +1,26 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/extensions/IdpAgreement.schema.json",
+ "title": "IdpAgreement",
+ "description": "Platform extension of Agreement: adds tenantId.",
+ "x-baseType": "Agreement",
+ "x-baseSchema": "TMF651-v4.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF651-v4.0.0.schema.json#/$defs/Agreement"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "tenantId": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The tenant the resource belongs to (platform extension)."
+    }
+   },
+   "required": [
+    "tenantId"
+   ]
+  }
+ ]
+}

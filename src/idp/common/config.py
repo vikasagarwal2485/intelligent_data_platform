@@ -81,6 +81,14 @@ class PlatformConfig:
         return self.raw.get("fraud", {})
 
     @property
+    def tmf(self) -> dict[str, Any]:
+        """TM Forum landing format (REQ-BRZ-06): the mapping profile, by name
+        (``config/tmf/profiles/<name>.yaml``). Env: IDP_TMF_PROFILE."""
+        t = {"profile": "standard", **self.raw.get("tmf", {})}
+        t["profile"] = os.environ.get("IDP_TMF_PROFILE", t["profile"])
+        return t
+
+    @property
     def auth(self) -> dict[str, Any]:
         """API authentication (REQ-SRV-03): Keycloak-issued Bearer JWTs, with the
         caller's tenant from a token claim. Off by default (local dev and tests);

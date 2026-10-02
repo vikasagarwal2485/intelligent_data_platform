@@ -11,6 +11,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from idp.common.records import to_records
 from idp.synthetic.generator import SyntheticDataset
 
 
@@ -77,6 +78,6 @@ def produce_to_kafka(
             df: pd.DataFrame = getattr(dataset, table)
             if df is None or df.empty:
                 continue
-            yield table, df.to_dict("records")  # faster than iterrows for big frames
+            yield table, to_records(df)          # missing values as None (valid JSON)
 
     return publish_records(items(), bootstrap, topic_prefix=topic_prefix, acks=acks)

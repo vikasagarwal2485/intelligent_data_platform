@@ -1,0 +1,2148 @@
+{
+ "$defs": {
+  "AccountRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Account reference. A account may be a party account or a financial account.",
+   "type": "object"
+  },
+  "Addressable": {
+   "description": "Base schema for addressable entities",
+   "properties": {
+    "href": {
+     "description": "Hyperlink reference",
+     "type": "string"
+    },
+    "id": {
+     "description": "unique identifier",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "AgreementRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Agreement reference. An agreement represents a contract or arrangement, either written or verbal and sometimes enforceable by law, such as a service level agreement or a customer price agreement. An agreement involves a number of other business entities, such as products, services, and resources and/or their specifications.",
+   "type": "object"
+  },
+  "Attachment": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Complements the description of an element (for instance a product) through video, pictures...",
+     "properties": {
+      "attachmentType": {
+       "description": "a business characterization of the purpose of the attachment, for example logo, instructionManual, contractCopy",
+       "type": "string"
+      },
+      "content": {
+       "description": "The actual contents of the attachment object, if embedded, encoded as base64",
+       "format": "base64",
+       "type": "string"
+      },
+      "description": {
+       "description": "A narrative text describing the content of the attachment",
+       "type": "string"
+      },
+      "mimeType": {
+       "description": "a technical characterization of the attachment content format using IETF Mime Types",
+       "type": "string"
+      },
+      "name": {
+       "description": "The name of the attachment",
+       "type": "string"
+      },
+      "size": {
+       "$ref": "#/$defs/Quantity"
+      },
+      "url": {
+       "description": "Uniform Resource Locator, is a web page address (a subset of URI)",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AttachmentRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "Attachment reference. An attachment complements the description of an element (for instance a product) through video, pictures",
+     "properties": {
+      "description": {
+       "description": "A narrative text describing the content of the attachment",
+       "type": "string"
+      },
+      "url": {
+       "description": "Link to the attachment media/content",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "AttachmentRefOrValue": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/AttachmentRefOrValue__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Attachment"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Attachment"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "AttachmentRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/AttachmentRef"
+     }
+    }
+   ]
+  },
+  "AttachmentRefOrValue__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/Attachment"
+    },
+    {
+     "$ref": "#/$defs/AttachmentRef"
+    }
+   ],
+   "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the Attachment entity and not the AttachmentRefOrValue class itself",
+   "type": "object"
+  },
+  "BooleanArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Boolean(s).",
+     "properties": {
+      "value": {
+       "description": "A characteristic which value is an array of Boolean(s).",
+       "items": {
+        "description": "Characteristic item boolean value",
+        "type": "boolean"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BooleanCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Boolean.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "boolean"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BusinessPartner": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    }
+   ],
+   "description": "When business partner is the BusinessPartner ",
+   "type": "object"
+  },
+  "Characteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BooleanArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BooleanArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BooleanCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BooleanCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "FloatCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/FloatCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "IntegerArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/IntegerArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "IntegerCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/IntegerCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "NumberArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/NumberArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "NumberCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/NumberCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "ObjectArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/ObjectArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "ObjectCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/ObjectCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "StringArrayCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/StringArrayCharacteristic"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "StringCharacteristic"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/StringCharacteristic"
+     }
+    }
+   ]
+  },
+  "CharacteristicRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Another Characteristic that is related to the current Characteristic;",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "relationshipType": {
+       "description": "The type of relationship",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Characteristic__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Describes a given characteristic of an object or entity through a name/value pair. This is an abstract base class, the actual value is in one of the strongly-typed subclasses : StringCharacteristic, ObjectCharacteristic, FloatCharacteristic, BooleanCharacteristic, NumberCharacteristic, IntegerCharacteristic, StringArrayCharacteristic, ObjectArrayCharacteristic, BooleanArrayCharacteristic, NumberArrayCharacteristic, IntegerArrayCharacteristic...",
+     "properties": {
+      "characteristicRelationship": {
+       "description": "Collection of characteristic relationships",
+       "items": {
+        "$ref": "#/$defs/CharacteristicRelationship"
+       },
+       "type": "array"
+      },
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the characteristic",
+       "type": "string"
+      },
+      "valueType": {
+       "description": "Data type of the value of the characteristic",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Consumer": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    }
+   ],
+   "type": "object"
+  },
+  "ContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "EmailContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/EmailContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "FaxContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/FaxContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "GeographicAddressContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/GeographicAddressContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PhoneContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PhoneContactMedium"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "SocialContactMedium"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/SocialContactMedium"
+     }
+    }
+   ]
+  },
+  "ContactMedium__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Indicates the contact medium that could be used to contact the party. This is an abstract base class, the actual value is in one of the strongly-typed subclasses : EmailContactMedium, FaxContactMedium, PhoneContactMedium, GeographicAddressContactMedium, SocialMediaContactMedium...",
+     "properties": {
+      "contactType": {
+       "description": "Type of the contact medium to qualify it like pro email / personal email. This is not used to define the contact medium used.",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier for this contact medium.",
+       "type": "string"
+      },
+      "preferred": {
+       "description": "If true, indicates that is the preferred contact medium",
+       "type": "boolean"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "CreditProfile": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Credit profile for the party (containing credit scoring, ...). By default only the current credit profile  is retrieved. It can be used as a list to give the party credit profiles history, the first one in the list will be the current one.",
+     "properties": {
+      "creditProfileDate": {
+       "description": "The date the profile was established",
+       "format": "date-time",
+       "type": "string"
+      },
+      "creditRiskRating": {
+       "description": "This is an integer whose value is used to rate the risk",
+       "type": "integer"
+      },
+      "creditScore": {
+       "description": "A measure of a person or organizations creditworthiness calculated on the basis of a combination of factors such as their income and credit history",
+       "type": "integer"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Customer": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    }
+   ],
+   "type": "object"
+  },
+  "Disability": {
+   "description": "Lack or inadequate strength or ability.",
+   "properties": {
+    "disabilityCode": {
+     "description": "Code of the disability",
+     "type": "string"
+    },
+    "disabilityName": {
+     "description": "Name of the disability",
+     "type": "string"
+    },
+    "validFor": {
+     "$ref": "#/$defs/TimePeriod"
+    }
+   },
+   "type": "object"
+  },
+  "EmailContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes an email that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "emailAddress": {
+       "description": "Full email address in standard format",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Entity": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    }
+   ],
+   "description": "Base entity schema for use in TMForum Open-APIs. Property.",
+   "type": "object"
+  },
+  "EntityRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "$ref": "#/$defs/Addressable"
+    },
+    {
+     "description": "Entity reference schema to be use for all entityRef class.",
+     "properties": {
+      "@referredType": {
+       "description": "The actual type of the target instance when needed for disambiguation.",
+       "type": "string"
+      },
+      "href": {
+       "description": "The URI of the referred entity.",
+       "type": "string"
+      },
+      "id": {
+       "description": "The identifier of the referred entity.",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the referred entity.",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "Extensible": {
+   "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
+   "properties": {
+    "@baseType": {
+     "description": "When sub-classing, this defines the super-class",
+     "type": "string"
+    },
+    "@schemaLocation": {
+     "description": "A URI to a JSON-Schema file that defines additional attributes and relationships",
+     "type": "string"
+    },
+    "@type": {
+     "description": "When sub-classing, this defines the sub-class Extensible name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "@type"
+   ],
+   "type": "object"
+  },
+  "ExternalIdentifier": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "An identification of an entity that is owned by or originates in a software system different from the current system, for example a ProductOrder handed off from a commerce platform into an order handling system. The structure identifies the system itself, the nature of the entity within the system (e.g. class name) and the unique ID of the entity within the system. It is anticipated that multiple external IDs can be held for a single entity, e.g. if the entity passed through multiple systems on the way to the current system. In this case the consumer is expected to sequence the IDs in the array in reverse order of provenance, i.e. most recent system first in the list.",
+     "properties": {
+      "externalIdentifierType": {
+       "description": "Type of the identification, typically would be the type of the entity within the external system",
+       "type": "string"
+      },
+      "id": {
+       "description": "identification of the entity within the external system.",
+       "type": "string"
+      },
+      "owner": {
+       "description": "Name of the external system that owns the entity.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "FaxContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a fax that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "faxNumber": {
+       "description": "The fax number of the contact",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "FloatCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Float.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "format": "float",
+       "type": "number"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "GeographicAddressContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a geographical address that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "city": {
+       "description": "The city",
+       "type": "string"
+      },
+      "country": {
+       "description": "The country",
+       "type": "string"
+      },
+      "geographicAddress": {
+       "$ref": "#/$defs/GeographicAddressRef"
+      },
+      "postCode": {
+       "description": "Postcode",
+       "type": "string"
+      },
+      "stateOrProvince": {
+       "description": "State or province",
+       "type": "string"
+      },
+      "street1": {
+       "description": "Describes the street",
+       "type": "string"
+      },
+      "street2": {
+       "description": "Complementary street description",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "GeographicAddressRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Reference to a Geographic Address.",
+   "type": "object"
+  },
+  "Individual": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Party__core"
+    },
+    {
+     "description": "Individual represents a single human being (a man, woman or child). The individual can be a customer, an employee or any other person that the organization needs to store information about.",
+     "properties": {
+      "aristocraticTitle": {
+       "description": "e.g. Baron, Graf, Earl",
+       "type": "string"
+      },
+      "birthDate": {
+       "description": "Birth date",
+       "format": "date-time",
+       "type": "string"
+      },
+      "countryOfBirth": {
+       "description": "Country where the individual was born",
+       "type": "string"
+      },
+      "deathDate": {
+       "description": "Date of death",
+       "format": "date-time",
+       "type": "string"
+      },
+      "disability": {
+       "description": "List of disabilities suffered by the individual",
+       "items": {
+        "$ref": "#/$defs/Disability"
+       },
+       "type": "array"
+      },
+      "familyName": {
+       "description": "Contains the non-chosen or inherited name. Also known as last name in the Western context",
+       "type": "string"
+      },
+      "familyNamePrefix": {
+       "description": "Family name prefix",
+       "type": "string"
+      },
+      "formattedName": {
+       "description": "A fully formatted name in one string with all of its pieces in their proper place and all of the necessary punctuation. Useful for specific contexts (Chinese, Japanese, Korean)",
+       "type": "string"
+      },
+      "gender": {
+       "description": "Gender",
+       "type": "string"
+      },
+      "generation": {
+       "description": "e.g.. Sr, Jr, III (the third)",
+       "type": "string"
+      },
+      "givenName": {
+       "description": "First name of the individual",
+       "type": "string"
+      },
+      "individualIdentification": {
+       "description": "List of official identifications issued to the individual, such as passport, driving licence, social security number",
+       "items": {
+        "$ref": "#/$defs/IndividualIdentification"
+       },
+       "type": "array"
+      },
+      "languageAbility": {
+       "description": "List of national languages known by the individual",
+       "items": {
+        "$ref": "#/$defs/LanguageAbility"
+       },
+       "type": "array"
+      },
+      "legalName": {
+       "description": "Legal name or birth name (name one has for official purposes)",
+       "type": "string"
+      },
+      "location": {
+       "description": "Temporary current location of the individual (may be used if the individual has approved its sharing)",
+       "type": "string"
+      },
+      "maritalStatus": {
+       "description": "Marital status (married, divorced, widow ...)",
+       "type": "string"
+      },
+      "middleName": {
+       "description": "Middles name or initial",
+       "type": "string"
+      },
+      "name": {
+       "description": "Full name flatten (first, middle, and last names) - this is the name that is expected to be presented in reference data types such as PartyRef, RelatedParty, etc. that refer to Individual",
+       "type": "string"
+      },
+      "nationality": {
+       "description": "Nationality",
+       "type": "string"
+      },
+      "otherName": {
+       "description": "List of other names by which this individual is known",
+       "items": {
+        "$ref": "#/$defs/OtherNameIndividual"
+       },
+       "type": "array"
+      },
+      "placeOfBirth": {
+       "description": "Reference to the place where the individual was born",
+       "type": "string"
+      },
+      "preferredGivenName": {
+       "description": "Contains the chosen name by which the individual prefers to be addressed. Note: This name may be a name other than a given name, such as a nickname",
+       "type": "string"
+      },
+      "skill": {
+       "description": "List of skills exhibited by the individual",
+       "items": {
+        "$ref": "#/$defs/Skill"
+       },
+       "type": "array"
+      },
+      "status": {
+       "$ref": "#/$defs/IndividualStateType"
+      },
+      "title": {
+       "description": "Useful for titles (aristocratic, social,...) Pr, Dr, Sir, ...",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IndividualIdentification": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Represents our registration of information used as proof of identity by an individual (passport, national identity card, drivers license, social security number, birth certificate)",
+     "properties": {
+      "attachment": {
+       "$ref": "#/$defs/AttachmentRefOrValue"
+      },
+      "identificationId": {
+       "description": "Identifier",
+       "type": "string"
+      },
+      "identificationType": {
+       "description": "Identification type (passport, national identity card, drivers license, social security number, birth certificate)",
+       "type": "string"
+      },
+      "issuingAuthority": {
+       "description": "Authority which has issued the identifier, such as: social security, town hall",
+       "type": "string"
+      },
+      "issuingDate": {
+       "description": "Date at which the identifier was issued",
+       "format": "date-time",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IndividualStateType": {
+   "description": "Valid values for the lifecycle state of the individual",
+   "enum": [
+    "initialized",
+    "validated",
+    "deceased"
+   ],
+   "type": "string"
+  },
+  "IntegerArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Integer(s).",
+     "properties": {
+      "value": {
+       "description": "A characteristic which value is an array of Integer(s).",
+       "items": {
+        "description": "Characteristic value",
+        "type": "integer"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IntegerCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Integer.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "integer"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "LanguageAbility": {
+   "description": "Ability of an individual to understand or converse in a language.",
+   "properties": {
+    "isFavouriteLanguage": {
+     "description": "A \u201ctrue\u201d value specifies whether the language is considered by the individual as his favourite one",
+     "type": "boolean"
+    },
+    "languageCode": {
+     "description": "Language code (RFC 5646)",
+     "type": "string"
+    },
+    "languageName": {
+     "description": "Language name",
+     "type": "string"
+    },
+    "listeningProficiency": {
+     "description": "Listening proficiency evaluated for this language",
+     "type": "string"
+    },
+    "readingProficiency": {
+     "description": "Reading proficiency evaluated for this language",
+     "type": "string"
+    },
+    "speakingProficiency": {
+     "description": "Speaking proficiency evaluated for this language",
+     "type": "string"
+    },
+    "validFor": {
+     "$ref": "#/$defs/TimePeriod"
+    },
+    "writingProficiency": {
+     "description": "Writing proficiency evaluated for this language",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "NumberArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Number(s).",
+     "properties": {
+      "value": {
+       "description": "A characteristic which value is an array of Number(s).",
+       "items": {
+        "description": "Characteristic value",
+        "type": "number"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "NumberCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Number.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "number"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ObjectArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of Object(s).",
+     "properties": {
+      "value": {
+       "description": "Collection of characteristic values",
+       "items": {
+        "description": "Characteristic value",
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ObjectCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a Object.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "object"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Organization": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Party__core"
+    },
+    {
+     "description": "Organization represents a group of people identified by shared interests or purpose. Examples include business, department and enterprise. Because of the complex nature of many businesses, both organizations and organization units are represented by the same data.",
+     "properties": {
+      "existsDuring": {
+       "$ref": "#/$defs/TimePeriod"
+      },
+      "isHeadOffice": {
+       "description": "If value is true, the organization is the head office",
+       "type": "boolean"
+      },
+      "isLegalEntity": {
+       "description": "If value is true, the organization is a legal entity known by a national referential.",
+       "type": "boolean"
+      },
+      "name": {
+       "description": "Organization name (department name for example)",
+       "type": "string"
+      },
+      "nameType": {
+       "description": "Type of the name : Co, Inc, Ltd, etc.",
+       "type": "string"
+      },
+      "organizationChildRelationship": {
+       "description": "List of organizations that are contained within this organization. For example if this organization is the Legal Department, the child organizations might include Claims, Courts, Contracts",
+       "items": {
+        "$ref": "#/$defs/OrganizationChildRelationship"
+       },
+       "type": "array"
+      },
+      "organizationIdentification": {
+       "description": "List of official identifiers given to the organization, for example company number in the registry of companies",
+       "items": {
+        "$ref": "#/$defs/OrganizationIdentification"
+       },
+       "type": "array"
+      },
+      "organizationParentRelationship": {
+       "$ref": "#/$defs/OrganizationParentRelationship"
+      },
+      "organizationType": {
+       "description": "Type of Organization (company, department...)",
+       "type": "string"
+      },
+      "otherName": {
+       "description": "List of additional names by which the organization is known",
+       "items": {
+        "$ref": "#/$defs/OtherNameOrganization"
+       },
+       "type": "array"
+      },
+      "status": {
+       "$ref": "#/$defs/OrganizationStateType"
+      },
+      "tradingName": {
+       "description": "Name that the organization (unit) trades under",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "OrganizationChildRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Child references of an organization in a structure of organizations.",
+     "properties": {
+      "organization": {
+       "$ref": "#/$defs/OrganizationRef"
+      },
+      "relationshipType": {
+       "description": "Type of the relationship. Could be juridical, hierarchical, geographical, functional for example.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "OrganizationIdentification": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Represents our registration of information used as proof of identity by an organization",
+     "properties": {
+      "attachment": {
+       "$ref": "#/$defs/AttachmentRefOrValue"
+      },
+      "identificationId": {
+       "description": "Identifier",
+       "type": "string"
+      },
+      "identificationType": {
+       "description": "Type of identification information used to identify the company in a country or internationally",
+       "type": "string"
+      },
+      "issuingAuthority": {
+       "description": "Authority which has issued the identifier (chamber of commerce...)",
+       "type": "string"
+      },
+      "issuingDate": {
+       "description": "Date at which the identifier was issued",
+       "format": "date-time",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "OrganizationParentRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Parent references of an organization in a structure of organizations.",
+     "properties": {
+      "organization": {
+       "$ref": "#/$defs/OrganizationRef"
+      },
+      "relationshipType": {
+       "description": "Type of the relationship. Could be juridical, hierarchical, geographical, functional for example.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "OrganizationRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "type": "object"
+  },
+  "OrganizationStateType": {
+   "description": "Valid values for the lifecycle state of the organization",
+   "enum": [
+    "initialized",
+    "validated",
+    "closed"
+   ],
+   "type": "string"
+  },
+  "OtherNameIndividual": {
+   "description": "Keeps track of other names, for example the old name of a woman before marriage or an artist name.",
+   "properties": {
+    "aristocraticTitle": {
+     "description": "e.g. Baron, Graf, Earl, etc.",
+     "type": "string"
+    },
+    "familyName": {
+     "description": "Contains the non-chosen or inherited name. Also known as last name in the Western context",
+     "type": "string"
+    },
+    "familyNamePrefix": {
+     "description": "Family name prefix",
+     "type": "string"
+    },
+    "formattedName": {
+     "description": ". A fully formatted name in one string with all of its pieces in their proper place and all of the necessary punctuation. Useful for specific contexts (Chinese, Japanese, Korean, etc.)",
+     "type": "string"
+    },
+    "fullName": {
+     "description": "Full name flatten (first, middle, and last names)",
+     "type": "string"
+    },
+    "generation": {
+     "description": "e.g. Sr, Jr, etc.",
+     "type": "string"
+    },
+    "givenName": {
+     "description": "First name",
+     "type": "string"
+    },
+    "legalName": {
+     "description": "Legal name or birth name (name one has for official purposes)",
+     "type": "string"
+    },
+    "middleName": {
+     "description": "Middle name or initial",
+     "type": "string"
+    },
+    "preferredGivenName": {
+     "description": "Contains the chosen name by which the person prefers to be addressed. Note: This name may be a name other than a given name, such as a nickname",
+     "type": "string"
+    },
+    "title": {
+     "description": "Use for titles (aristrocatic, social, ...): Pr, Dr, Sir,....",
+     "type": "string"
+    },
+    "validFor": {
+     "$ref": "#/$defs/TimePeriod"
+    }
+   },
+   "type": "object"
+  },
+  "OtherNameOrganization": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Keeps track of other names, for example the old name of an organization.",
+     "properties": {
+      "name": {
+       "description": "Organization name (department name for example)",
+       "type": "string"
+      },
+      "nameType": {
+       "description": "Co. , Inc. , Ltd. , Pty Ltd. , Plc; , Gmbh",
+       "type": "string"
+      },
+      "tradingName": {
+       "description": "The name that the organization trades under",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Party": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Party__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Individual"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Individual"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Organization"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Organization"
+     }
+    }
+   ]
+  },
+  "PartyCreditProfile": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "An individual might be evaluated for its worthiness and this evaluation might be based on a credit rating given by a credit agency.",
+     "properties": {
+      "creditAgencyName": {
+       "description": "Name of the credit agency giving the score",
+       "type": "string"
+      },
+      "creditAgencyType": {
+       "description": "Type of the credit agency giving the score",
+       "type": "string"
+      },
+      "ratingReference": {
+       "description": "Reference corresponding to the credit rating",
+       "type": "string"
+      },
+      "ratingScore": {
+       "description": "A measure of a party's creditworthiness calculated on the basis of a combination of factors such as their income and credit history",
+       "format": "int32",
+       "type": "integer"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PartyOrPartyRole": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyOrPartyRole__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BusinessPartner"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BusinessPartner"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Consumer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Consumer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Customer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Customer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Individual"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Individual"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Organization"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Organization"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRef"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRole"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRole"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRoleRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRoleRef"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Producer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Producer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Supplier"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Supplier"
+     }
+    }
+   ]
+  },
+  "PartyOrPartyRole__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/PartyRef"
+    },
+    {
+     "$ref": "#/$defs/PartyRoleRef"
+    },
+    {
+     "$ref": "#/$defs/Individual"
+    },
+    {
+     "$ref": "#/$defs/Organization"
+    },
+    {
+     "$ref": "#/$defs/PartyRole"
+    },
+    {
+     "$ref": "#/$defs/Supplier"
+    },
+    {
+     "$ref": "#/$defs/BusinessPartner"
+    },
+    {
+     "$ref": "#/$defs/Consumer"
+    },
+    {
+     "$ref": "#/$defs/Producer"
+    }
+   ],
+   "description": "",
+   "type": "object"
+  },
+  "PartyRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "A Party reference",
+   "type": "object"
+  },
+  "PartyRole": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "BusinessPartner"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/BusinessPartner"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Consumer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Consumer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Customer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Customer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Producer"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Producer"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "Supplier"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/Supplier"
+     }
+    }
+   ]
+  },
+  "PartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "Party role reference. A party role represents the part played by a party in a given context.",
+     "properties": {
+      "partyId": {
+       "description": "The identifier of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      },
+      "partyName": {
+       "description": "The name of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PartyRoleSpecificationRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "Party role specification reference. A party role specification gives additional details on the part played by a party in a given context.",
+   "type": "object"
+  },
+  "PartyRole__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "The part played by a party in a given context.",
+     "properties": {
+      "account": {
+       "description": "Collection of accounts",
+       "items": {
+        "$ref": "#/$defs/AccountRef"
+       },
+       "type": "array"
+      },
+      "agreement": {
+       "description": "Collection of agreements",
+       "items": {
+        "$ref": "#/$defs/AgreementRef"
+       },
+       "type": "array"
+      },
+      "characteristic": {
+       "description": "Describes the characteristic of a party role.",
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "contactMedium": {
+       "description": "Collection of contact mediums",
+       "items": {
+        "$ref": "#/$defs/ContactMedium"
+       },
+       "type": "array"
+      },
+      "creditProfile": {
+       "description": "Collection of credit profiles",
+       "items": {
+        "$ref": "#/$defs/CreditProfile"
+       },
+       "type": "array"
+      },
+      "description": {
+       "description": "A description of the PartyRole.",
+       "type": "string"
+      },
+      "engagedParty": {
+       "$ref": "#/$defs/PartyRef"
+      },
+      "name": {
+       "description": "A word, term, or phrase by which the PartyRole is known and distinguished from other PartyRoles. It's the name of the PartyRole unique entity.",
+       "type": "string"
+      },
+      "partyRoleSpecification": {
+       "$ref": "#/$defs/PartyRoleSpecificationRef"
+      },
+      "paymentMethod": {
+       "description": "Collection of payment methods",
+       "items": {
+        "$ref": "#/$defs/PaymentMethodRef"
+       },
+       "type": "array"
+      },
+      "relatedParty": {
+       "description": "Collection of related parties",
+       "items": {
+        "$ref": "#/$defs/RelatedPartyOrPartyRole"
+       },
+       "type": "array"
+      },
+      "role": {
+       "description": "Role played by the engagedParty in this context. As role is defined by partyRoleSpecification, this role attribute can be used to precise the role defined by partyRoleSpecification, or it can be used to define the role in case there is no partyRoleSpecification.",
+       "type": "string"
+      },
+      "status": {
+       "description": "Used to track the lifecycle status of the party role.",
+       "type": "string"
+      },
+      "statusReason": {
+       "description": "A string providing an explanation on the value of the status lifecycle. For instance if the status is Rejected, statusReason will provide the reason for rejection.",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Party__core": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Entity"
+    },
+    {
+     "description": "Generic and Abstract Party structure used to define commonalities between sub concepts of Individual and Organization.",
+     "properties": {
+      "contactMedium": {
+       "description": "List of means for contacting the party, e.g. mobile phone, email address",
+       "items": {
+        "$ref": "#/$defs/ContactMedium"
+       },
+       "type": "array"
+      },
+      "creditRating": {
+       "description": "List of credit profiles and scores for the party, typically received from an external credit broker",
+       "items": {
+        "$ref": "#/$defs/PartyCreditProfile"
+       },
+       "type": "array"
+      },
+      "externalReference": {
+       "description": "List of identifiers of the Party in an external system, for example when party information is imported from a commerce system",
+       "items": {
+        "$ref": "#/$defs/ExternalIdentifier"
+       },
+       "type": "array"
+      },
+      "partyCharacteristic": {
+       "description": "List of additional characteristics that a Party can take on.",
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "relatedParty": {
+       "description": "List of parties and/or party roles related to this party",
+       "items": {
+        "$ref": "#/$defs/RelatedPartyOrPartyRole"
+       },
+       "type": "array"
+      },
+      "taxExemptionCertificate": {
+       "description": "List of tax exemptions granted to the party. For example, a war veteran might have partial exemption from state tax and a full exemption from federal tax",
+       "items": {
+        "$ref": "#/$defs/TaxExemptionCertificate"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "PaymentMethodRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "PaymentMethod reference. A payment method defines a specific mean of payment (e.g direct debit).",
+   "type": "object"
+  },
+  "PhoneContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a phone number that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "phoneNumber": {
+       "description": "The phone number of the contact",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Producer": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    }
+   ],
+   "type": "object"
+  },
+  "Quantity": {
+   "description": "An amount in a given unit",
+   "properties": {
+    "amount": {
+     "default": 1,
+     "description": "Numeric value in a given unit",
+     "format": "float",
+     "type": "number"
+    },
+    "units": {
+     "description": "Unit",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "RelatedPartyOrPartyRole": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "RelatedParty reference. A related party defines party or party role or its reference, linked to a specific entity",
+     "properties": {
+      "partyOrPartyRole": {
+       "$ref": "#/$defs/PartyOrPartyRole"
+      },
+      "role": {
+       "description": "Role played by the related party or party role in the context of the specific entity it is linked to. Such as 'initiator', 'customer',  'salesAgent', 'user'",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Skill": {
+   "description": "Skills evaluated for an individual with a level and possibly with a limited validity when an obsolescence is defined (Ex: the first-aid certificate first level is limited to one year and an update training is required each year to keep the level).",
+   "properties": {
+    "comment": {
+     "description": "A free text comment linked to the evaluation done",
+     "type": "string"
+    },
+    "evaluatedLevel": {
+     "description": "Level of expertise in a skill evaluated for an individual",
+     "type": "string"
+    },
+    "skillCode": {
+     "description": "Code of the skill",
+     "type": "string"
+    },
+    "skillName": {
+     "description": "Name of the skill, such as Java language",
+     "type": "string"
+    },
+    "validFor": {
+     "$ref": "#/$defs/TimePeriod"
+    }
+   },
+   "type": "object"
+  },
+  "SocialContactMedium": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/ContactMedium__core"
+    },
+    {
+     "description": "Describes a social media identifier that could be used to contact a party (an individual or an organization)",
+     "properties": {
+      "socialNetworkId": {
+       "description": "Identifier as a member of a social network",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "StringArrayCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is an array of String(s).",
+     "properties": {
+      "value": {
+       "description": "Collection of string characteristics",
+       "items": {
+        "description": "Characteristic value",
+        "type": "string"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "StringCharacteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Characteristic__core"
+    },
+    {
+     "description": "A characteristic which value is a String.",
+     "properties": {
+      "value": {
+       "description": "Value of the characteristic",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "Supplier": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRole__core"
+    }
+   ],
+   "description": "When business partner is the Supplier ",
+   "type": "object"
+  },
+  "TaxDefinition": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Reference of a tax definition. A tax is levied by an authorized tax jurisdiction. For example, there are many different types of tax (Federal Tax levied by the US Government, State Tax levied by the State of California, City Tax levied by the City of Los Angeles, etc.).",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the tax.",
+       "type": "string"
+      },
+      "jurisdictionLevel": {
+       "description": "Level of the jurisdiction that levies the tax",
+       "type": "string"
+      },
+      "jurisdictionName": {
+       "description": "Name of the jurisdiction that levies the tax",
+       "type": "string"
+      },
+      "name": {
+       "description": "Tax name.",
+       "type": "string"
+      },
+      "taxType": {
+       "description": "Type of the tax.",
+       "type": "string"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TaxExemptionCertificate": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "A tax exemption certificate represents a tax exemption granted to a party (individual or organization) by a tax jurisdiction which may be a city, state, country,... An exemption has a certificate identifier (received from the jurisdiction that levied the tax) and a validity period. An exemption is per tax types and determines for each type of tax what portion of the tax is exempted (partial by percentage or complete) via the tax definition.",
+     "properties": {
+      "attachment": {
+       "$ref": "#/$defs/AttachmentRefOrValue"
+      },
+      "certificateNumber": {
+       "description": "Identifier of a document that shows proof of exemption from taxes for the taxing jurisdiction",
+       "type": "string"
+      },
+      "id": {
+       "description": "Identifier of the tax exemption within list of the exemptions",
+       "type": "string"
+      },
+      "issuingJurisdiction": {
+       "description": "Name of the jurisdiction that issued the exemption",
+       "type": "string"
+      },
+      "reason": {
+       "description": "Reason for the tax exemption",
+       "type": "string"
+      },
+      "taxDefinition": {
+       "description": "A list of taxes that are covered by the exemption, e.g. City Tax, State Tax. The definition would include the exemption (e.g. for a rate exemption 0% would be a full exemption, 5% could be a partial exemption if the actual rate was 10%).",
+       "items": {
+        "$ref": "#/$defs/TaxDefinition"
+       },
+       "type": "array"
+      },
+      "validFor": {
+       "$ref": "#/$defs/TimePeriod"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "TimePeriod": {
+   "description": "A period of time, either as a deadline (endDateTime only) a startDateTime only, or both",
+   "properties": {
+    "endDateTime": {
+     "description": "End of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    },
+    "startDateTime": {
+     "description": "Start of the time period, using IETC-RFC-3339 format",
+     "format": "date-time",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "$id": "https://idp.local/tmf/schemas/TMF629-v5.0.1.schema.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "TMF629 v5.0.1 resources used by the IDP landing zone",
+ "x-resources": [
+  "Customer"
+ ],
+ "x-source": {
+  "commit": "1eae32ff68230c0cb7969d69fb9711d1fff77b39",
+  "file": "TMF629-Customer_Management-v5.0.1.oas.yaml",
+  "license": "Apache-2.0",
+  "repo": "tmforum-apis/TMF629_CustomerManagement",
+  "v5Conventions": "native",
+  "version": "5.0.1"
+ }
+}
