@@ -10,11 +10,14 @@
 # Usage:
 #   bash deploy/platform/kafka/purge-topics.sh [namespace] [topic]
 #     namespace  Kafka namespace (default: idp-platform)
-#     topic      a single topic, e.g. t.tenant_a.usage.voice (default: all t.* topics)
+#     topic      a single topic, e.g. t.tenant_a.productUsage (default: all t.* topics)
 #
 # Examples:
 #   bash deploy/platform/kafka/purge-topics.sh                       # purge all t.* topics
-#   bash deploy/platform/kafka/purge-topics.sh idp-platform t.tenant_a.recharge
+#   bash deploy/platform/kafka/purge-topics.sh idp-platform t.tenant_a.topupBalance
+#
+# The compacted t.<tenant>.customer topics are purged too: their cleanup.policy
+# is compact,delete (create-topics.sh), which DeleteRecords requires.
 set -euo pipefail
 
 NS="${1:-idp-platform}"

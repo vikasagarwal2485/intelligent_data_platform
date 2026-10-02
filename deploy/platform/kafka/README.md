@@ -1,15 +1,17 @@
-# Kafka topics & Avro schema registration
+# Kafka topics & schema registration
 
 Step-by-step for standing up the streaming layer (plan section 3): an Apache
-Kafka cluster (Strimzi), per-tenant topics, and an Apicurio Schema Registry with
-the Avro contracts from [`config/avro/`](../../../config/avro).
+Kafka cluster (Strimzi), per-tenant topics carrying TM Forum create events, and an
+Apicurio Schema Registry holding each topic's TMF JSON Schema (the wire contract).
+The canonical Avro contracts in [`config/avro/`](../../../config/avro) describe
+Bronze, not the wire.
 
 ```
 deploy/kafka/
   kafka-cluster.yaml     # Strimzi Kafka (KRaft, 1 node) + KafkaNodePool + entityOperator
   schema-registry.yaml   # Apicurio Registry (Confluent-compatible API)
-  create-topics.sh       # KafkaTopic CRs for each tenant x entity
-  register-schemas.sh    # POSTs *.avsc to the registry as <topic>-value subjects
+  create-topics.sh       # KafkaTopic CRs for each tenant x TMF resource
+  register-schemas.sh    # POSTs each topic's TMF JSON Schema as its <topic>-value subject
   setup-kafka.sh         # one-shot wrapper for all of the above
 ```
 
@@ -90,15 +92,21 @@ kubectl -n idp-platform wait kafka/idp-kafka --for=condition=Ready --timeout=600
 ```bash
 make topics      # or: bash deploy/kafka/create-topics.sh idp-platform
 ```
-Creates one `KafkaTopic` per **tenant × entity** following the plan's naming
-`t.<tenant>.<entity>`:
+Creates one `KafkaTopic` per **tenant × TM Forum resource**, named
+`t.<tenant>.<resource>`. Each carries the resource's TMF create events
+(REQ-STR-01):
 
-| Topic (per tenant `tenant_a`, `tenant_b`) | Partitions | Purpose |
-|---|---|---|
-| `t.<tenant>.parties` / `.accounts` / `.agreements` / `.products` | 3 | entity (batch/CDC) |
-| `t.<tenant>.usage.voice` / `.usage.data` | 6 | streaming usage events |
-| `t.<tenant>.recharge` | 3 | streaming recharge events |
-| `t.<tenant>.dlq` | 3 | dead-letter queue |
+| Topic (per tenant `tenant_a`, `tenant_b`) | Partitions | Policy | Carries |
+|---|---|---|---|
+| `t.<tenant>.customer` | 3 | `compact,delete`, never expires | `CustomerCreateEvent` (read in full by the consumer) |
+| `t.<tenant>.party` | 3 | delete, 7 days | `IndividualCreateEvent`, `OrganizationCreateEvent` |
+| `t.<tenant>.billingAccount` / `.agreement` / `.product` | 3 | delete, 7 days | `<Resource>CreateEvent` |
+| `t.<tenant>.appliedCustomerBillingRate` / `.topupBalance` | 3 | delete, 7 days | fee charges / recharges |
+| `t.<tenant>.productUsage` | 6 | delete, 7 days | voice and data usage |
+| `t.<tenant>.dlq` | 3 | delete, 7 days | dead letters from the consumer |
+
+The CR names are lower-cased (`t-tenant-a-productusage`); the topic names keep the
+TMF resource's case.
 
 Verify:
 ```bash
@@ -112,7 +120,7 @@ kubectl -n idp-platform exec -it idp-kafka-dual-role-0 -- \
 ```bash
 kubectl -n idp-platform exec -it idp-kafka-dual-role-0 -- \
   bin/kafka-topics.sh --bootstrap-server localhost:9092 \
-  --create --topic t.tenant_a.usage.voice --partitions 6 --replication-factor 1
+  --create --topic t.tenant_a.productUsage --partitions 6 --replication-factor 1
 ```
 
 ## Step 3 — Deploy the Schema Registry
@@ -123,27 +131,26 @@ kubectl -n idp-platform rollout status deploy/apicurio-registry
 Apicurio exposes a **Confluent-compatible** API at `/apis/ccompat/v7`, so any
 standard Schema-Registry client works against it.
 
-## Step 4 — Register the Avro schemas
+## Step 4 — Register the topic schemas (wire contract)
 ```bash
-make schemas     # or: bash deploy/kafka/register-schemas.sh idp-platform
+make schemas     # or: bash deploy/platform/kafka/register-schemas.sh idp-platform
 ```
-The script port-forwards the registry and POSTs each `.avsc` as the **value**
-schema of its topic (subject = `<topic>-value`, `TopicNameStrategy`):
+The script writes each topic's TM Forum JSON Schema with `idp registry-schemas`
+(the create event, its `Idp<Resource>` resource and their TMF bases, pruned to what
+they reference) and POSTs it as the **value** schema of the topic, with
+`schemaType: JSON` (subject = `<topic>-value`, `TopicNameStrategy`), e.g.
+`t.tenant_a.productUsage-value`. The `party` subject accepts both party events.
 
-| Subject | Schema file |
-|---|---|
-| `t.<tenant>.usage.voice-value` | `config/avro/usage_event.avsc` |
-| `t.<tenant>.usage.data-value` | `config/avro/usage_event.avsc` |
-| `t.<tenant>.recharge-value` | `config/avro/recharge_event.avsc` |
-
-(Entity topics are batch/CDC; register their schemas the same way by extending
-the `MAP` array in `register-schemas.sh`.)
+The Avro schemas in `config/avro/` aren't registered: they're the canonical
+contract of the Bronze records, which the consumer enforces (REQ-STR-03). Avro
+subjects registered before this change (`t.<tenant>.usage.voice-value` …) are
+unused and can stay.
 
 Verify:
 ```bash
 kubectl -n idp-platform port-forward svc/apicurio-registry 8080:8080 &
 curl -s http://localhost:8080/apis/ccompat/v7/subjects | tr ',' '\n'
-curl -s http://localhost:8080/apis/ccompat/v7/subjects/t.tenant_a.recharge-value/versions/latest
+curl -s http://localhost:8080/apis/ccompat/v7/subjects/t.tenant_a.topupBalance-value/versions/latest
 ```
 
 ---
@@ -164,7 +171,7 @@ Open <http://localhost:8080>. It is preconfigured against:
 - bootstrap `idp-kafka-kafka-bootstrap:9092`
 - schema registry `http://apicurio-registry:8080/apis/ccompat/v7`
 
-From the UI you can add a topic (e.g. `t.tenant_a.usage.voice`), change
+From the UI you can add a topic (e.g. `t.tenant_a.productUsage`), change
 partitions/configs, produce/consume test messages, and view registered schemas.
 
 > Prefer something else? Redpanda Console (`redpandadata/console`) and AKHQ are
@@ -174,15 +181,18 @@ partitions/configs, produce/consume test messages, and view registered schemas.
 - **Bootstrap servers:** `idp-kafka-kafka-bootstrap.idp-platform.svc:9092`
 - **Schema Registry URL:** `http://apicurio-registry.idp-platform.svc:8080/apis/ccompat/v7`
 
-A NiFi/Kafka producer serializes records with the Avro serializer pointed at the
-registry URL; the schema is resolved by the `<topic>-value` subject. The
-`BACKWARD` compatibility mode (plan section 3) lets schemas evolve safely.
+Payloads are plain UTF-8 JSON TMF create events. A NiFi or other producer can
+validate them against the `<topic>-value` subject (schema type JSON) through the
+registry URL. The `BACKWARD` compatibility mode (plan section 3) lets schemas
+evolve safely.
 
 ## Message retention & on-demand purge
 
-**Time-based retention (automatic).** Every topic is created with
-`retention.ms = 7 days` and `cleanup.policy = delete` (see `create-topics.sh`), so
-Kafka deletes messages older than 7 days on its own. Change the window and
+**Time-based retention (automatic).** Every topic except `t.<tenant>.customer` is
+created with `retention.ms = 7 days` and `cleanup.policy = delete` (see
+`create-topics.sh`), so Kafka deletes messages older than 7 days on its own. The
+customer topics are `compact,delete` with `retention.ms = -1`: compacted to the
+latest event per customer, and never expired. Change the window and
 re-apply — the Strimzi Topic Operator reconciles it onto the existing topics:
 
 ```bash
@@ -195,7 +205,7 @@ to the log end via `kafka-delete-records` (offset -1):
 
 ```bash
 make kafka-purge                                  # purge all t.* topics
-make kafka-purge TOPIC=t.tenant_a.recharge        # purge a single topic
+make kafka-purge TOPIC=t.tenant_a.topupBalance    # purge a single topic
 # or directly:
 bash deploy/platform/kafka/purge-topics.sh idp-platform [topic]
 ```

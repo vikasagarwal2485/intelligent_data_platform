@@ -8,8 +8,9 @@ import pytest
 
 from idp.common.records import to_records
 from idp.ingestion.tmf import schemas
-from idp.ingestion.tmf.profile import (ProfileError, ReferenceError_, from_tmf, get_path,
-                                       load_profile, parse_profile, set_path, to_tmf)
+from idp.ingestion.tmf.profile import (ProfileError, ReferenceError_, adapt_resource,
+                                       customer_index, from_tmf, get_path, load_profile,
+                                       parse_profile, set_path, to_tmf)
 from idp.synthetic.generator import ENTITIES, generate_for_tenants
 
 TENANTS = ("tenant_a", "tenant_b")
@@ -269,3 +270,34 @@ def test_customer_extension_profile(dataset, monkeypatch, tmp_path):
     finally:
         for cached in (schemas.extensions, schemas.merged_definitions, schemas.validator):
             cached.cache_clear()
+
+
+@pytest.mark.parametrize("tenant", TENANTS)
+def test_one_resource_at_a_time_equals_whole_files(dataset, profile, tenant):
+    # SCN-BRZ-05.5: adapting each resource on its own (as the consumer does, in any
+    # order) against the tenant's customer index gives the whole-file records
+    import random
+
+    files = _json(to_tmf(profile, _canonical(dataset, tenant)))
+    customers = customer_index(profile, files[profile.customer.file])
+    resources = [r for name, rs in files.items() if name != profile.customer.file for r in rs]
+    random.Random(5).shuffle(resources)
+    one_by_one: dict[str, list[dict]] = {}
+    for res in resources:
+        entity, rec = adapt_resource(profile, res, customers)
+        one_by_one.setdefault(entity, []).append(rec)
+    whole = from_tmf(profile, files)
+    key = lambda r: r["id"]
+    assert set(one_by_one) == set(whole)
+    for entity, rows in whole.items():
+        assert sorted(one_by_one[entity], key=key) == sorted(rows, key=key), entity
+
+
+def test_one_resource_with_an_unknown_customer(dataset, profile):
+    files = _json(to_tmf(profile, _canonical(dataset, "tenant_a")))
+    empty = customer_index(profile, [])
+    with pytest.raises(ReferenceError_, match="isn't in the tenant's files"):
+        adapt_resource(profile, files["billingAccount.json"][0], empty)
+    entity, rec = adapt_resource(profile, files["productUsage.json"][0], empty)   # needs no customer
+    assert entity in ("voice_events", "data_events") and rec["id"]
+

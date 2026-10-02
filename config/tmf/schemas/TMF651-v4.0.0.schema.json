@@ -140,6 +140,72 @@
    },
    "type": "object"
   },
+  "AgreementCreateEvent": {
+   "description": "The notification data structure",
+   "properties": {
+    "correlationId": {
+     "description": "The correlation id for this event.",
+     "type": "string"
+    },
+    "description": {
+     "description": "An explanatory of the event.",
+     "type": "string"
+    },
+    "domain": {
+     "description": "The domain of the event.",
+     "type": "string"
+    },
+    "event": {
+     "$ref": "#/$defs/AgreementCreateEventPayload",
+     "description": "The event payload linked to the involved resource object"
+    },
+    "eventId": {
+     "description": "The identifier of the notification.",
+     "type": "string"
+    },
+    "eventTime": {
+     "description": "Time of the event occurrence.",
+     "format": "date-time",
+     "type": "string"
+    },
+    "eventType": {
+     "description": "The type of the notification.",
+     "type": "string"
+    },
+    "href": {
+     "description": "Reference of the resource involved in the event",
+     "type": "string"
+    },
+    "id": {
+     "description": "Identifier of the resource involved in the event",
+     "type": "string"
+    },
+    "priority": {
+     "description": "A priority.",
+     "type": "string"
+    },
+    "timeOcurred": {
+     "description": "The time the event occured.",
+     "format": "date-time",
+     "type": "string"
+    },
+    "title": {
+     "description": "The title of the event.",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "AgreementCreateEventPayload": {
+   "description": "The event data structure",
+   "properties": {
+    "agreement": {
+     "$ref": "#/$defs/Agreement",
+     "description": "The involved resource data for the event"
+    }
+   },
+   "type": "object"
+  },
   "AgreementItem": {
    "description": "A part of the agreement expressed in terms of a product offering and possibly including specific terms and conditions.",
    "properties": {
@@ -466,7 +532,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF651 v4.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "Agreement"
+  "Agreement",
+  "AgreementCreateEvent"
  ],
  "x-source": {
   "commit": "756dee9649778130a31a7551ac21a20c7a6106af",

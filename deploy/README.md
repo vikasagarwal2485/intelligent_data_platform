@@ -152,12 +152,14 @@ Kubernetes Jobs.
 
 ## Streaming ingestion: in-memory or through the landing zone
 
-Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same data.
+Two ways to fill Bronze from Kafka. Both publish the same TM Forum create events
+(one topic per resource, `t.<tenant>.<resource>`; see the README's "Kafka carries
+TM Forum events") and end in the same canonical Bronze for the same data.
 
 | Target | Steps (Jobs in `idp-app`) |
 |---|---|
-| `make stream` | `idp-produce` (generates in memory → Kafka) → `idp-consume` (→ Bronze) |
-| `make stream-from-landing` | `idp-generate` (→ `s3://idp-landing`) → `idp-produce-from-landing` (landing files → Kafka) → `idp-consume` |
+| `make stream` | `idp-produce` (generates in memory → TMF events → Kafka) → `idp-consume` (adapts → Bronze) |
+| `make stream-from-landing` | `idp-generate` (→ `s3://idp-landing`) → `idp-produce-from-landing` (landing files → TMF events → Kafka) → `idp-consume` |
 | `make stream-replay` | `idp-produce-from-landing` → `idp-consume`: re-publish the landing files already there |
 | `make generate-job` | `idp-generate` only |
 
@@ -175,10 +177,19 @@ Two ways to fill Bronze from Kafka. Both end in the same Bronze for the same dat
 - **A rejected landing file fails the chain:** its folder names a tenant that isn't
   configured, it isn't a known resource file, it isn't a JSON array, a resource fails
   its TMF/extension schema or has another tenant's `tenantId`, or a reference
-  doesn't resolve. The entities that depend on a rejected file are rejected too. The
-  produce Job publishes the rest, lists the rejections in its log, and exits 1, so
-  consume doesn't run. Fix or remove the file,
-  then `make stream-replay`.
+  doesn't resolve. The files that depend on a rejected file (e.g. on
+  `customer.json`) are rejected too. The produce Job publishes the rest, lists the
+  rejections in its log, and exits 1, so consume doesn't run. Fix or remove the
+  file, then `make stream-replay`.
+- **A dead-lettered message fails the chain too:** the consume Job lands the valid
+  records, sends each message it can't check, resolve or adapt to
+  `t.<tenant>.dlq` (with an `idp.reason` header), commits, lists them in its log
+  and exits 1, so the chain stops before Silver. Re-produce the fixed source; the
+  DLQ isn't replayed.
+- **The `customer` topics are compacted and never expire** (`cleanup.policy:
+  compact,delete`, `retention.ms: -1`). The consumer reads them in full each run,
+  so a customer published earlier still resolves. `make kafka-purge` empties them
+  too.
 - **Keep `IDP_SUBSCRIBERS`/`IDP_DAYS` equal** in `generate-job.yaml`,
   `produce-job.yaml` and `labels-job.yaml`, because labels are regenerated from
   them.

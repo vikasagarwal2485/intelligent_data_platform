@@ -7,9 +7,11 @@ Capture raw records immutably and tenant-partitioned as the Bronze layer.
 ## Requirements
 
 ### Requirement: REQ-BRZ-01 — Immutable, tenant-partitioned Bronze
-The system SHALL land raw per-entity records into Bronze as Iceberg tables
-(`bronze.<entity>`), without transformation, partitioned by `tenant_id` and
-`ingest_date`. Each landed record SHALL carry the time it was landed
+The system SHALL land per-entity canonical records into Bronze as Iceberg tables
+(`bronze.<entity>`), partitioned by `tenant_id` and `ingest_date`. The records SHALL
+be the canonical records adapted from the source format by the TMF adapter
+(REQ-BRZ-05), with no curation: no cleaning, deduplication or enrichment, which are
+Silver's work. Each landed record SHALL carry the time it was landed
 (`_ingested_at`, UTC) and the derived `ingest_date`. Bronze SHALL be append-only:
 landing never rewrites or deletes earlier records, so Bronze stays a complete raw
 history that can be reprocessed.
@@ -98,10 +100,10 @@ zone SHALL NOT write Bronze.
   files
 
 ### Requirement: REQ-BRZ-05 — TM Forum Open API adapter
-The ingestion layer SHALL provide an adapter that turns a tenant's TMF landing
-resources into the canonical records (`parties`, `accounts`, `agreements`,
-`products`, `voice_events`, `data_events`, `recharge_events`, `fee_charges`)
-consumed by Bronze, as defined by the active mapping profile (REQ-BRZ-06). It SHALL:
+The ingestion layer SHALL provide an adapter that turns a tenant's TMF resources
+into the canonical records (`parties`, `accounts`, `agreements`, `products`,
+`voice_events`, `data_events`, `recharge_events`, `fee_charges`) consumed by Bronze,
+as defined by the active mapping profile (REQ-BRZ-06). It SHALL:
 
 - read standard fields, characteristics and extension attributes as the profile
   maps them, and translate TMF values back to canonical values (e.g. status values)
@@ -111,6 +113,10 @@ consumed by Bronze, as defined by the active mapping profile (REQ-BRZ-06). It SH
 - split `ProductUsage` into voice and data events by `usageType`
 - yield organizations' person-only canonical fields (`first_name`, `last_name`,
   `date_of_birth`) as null
+
+The adapter SHALL work on a tenant's whole set of landing files, and on one resource
+at a time against an index of the tenant's customers (as the consumer uses it,
+REQ-STR-02). Both ways SHALL give the same canonical records.
 
 For the `standard` profile, adapting the resources the landing writer produced
 from a canonical dataset SHALL return that dataset exactly. Money is compared to
@@ -136,6 +142,11 @@ the generator's precision.
 - **WHEN** an agreement references a customer that isn't in the tenant's files
 - **THEN** the adapter reports the agreement file as invalid, naming the missing
   reference, and yields none of its records
+
+#### Scenario: SCN-BRZ-05.5 — One resource at a time
+- **WHEN** a generated dataset's TMF resources are adapted one at a time against the
+  tenant's customer index
+- **THEN** the canonical records equal those from adapting the whole landing files
 
 ### Requirement: REQ-BRZ-06 — TMF mapping profiles and extensions
 The mapping between canonical records and TMF resources SHALL be configuration: a

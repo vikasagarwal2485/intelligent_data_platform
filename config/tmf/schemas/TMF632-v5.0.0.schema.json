@@ -612,6 +612,87 @@
     }
    ]
   },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explnatory of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "Extensible": {
    "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
    "properties": {
@@ -870,6 +951,31 @@
      "type": "object"
     }
    ]
+  },
+  "IndividualCreateEvent": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Event"
+    },
+    {
+     "description": "IndividualCreateEvent generic structure",
+     "properties": {
+      "event": {
+       "$ref": "#/$defs/IndividualCreateEventPayload"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "IndividualCreateEventPayload": {
+   "description": "IndividualCreateEventPayload generic structure",
+   "properties": {
+    "individual": {
+     "$ref": "#/$defs/Individual"
+    }
+   },
+   "type": "object"
   },
   "IndividualIdentification": {
    "allOf": [
@@ -1147,6 +1253,31 @@
      "type": "object"
     }
    ]
+  },
+  "OrganizationCreateEvent": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Event"
+    },
+    {
+     "description": "OrganizationCreateEvent generic structure",
+     "properties": {
+      "event": {
+       "$ref": "#/$defs/OrganizationCreateEventPayload"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "OrganizationCreateEventPayload": {
+   "description": "OrganizationCreateEventPayload generic structure",
+   "properties": {
+    "organization": {
+     "$ref": "#/$defs/Organization"
+    }
+   },
+   "type": "object"
   },
   "OrganizationIdentification": {
    "allOf": [
@@ -2121,7 +2252,9 @@
   "Individual",
   "Organization",
   "RelatedPartyRefOrPartyRoleRef",
-  "Characteristic"
+  "Characteristic",
+  "IndividualCreateEvent",
+  "OrganizationCreateEvent"
  ],
  "x-source": {
   "commit": "11c6a0ecf2b9a7007f43e86601b37e45d9f39b1e",

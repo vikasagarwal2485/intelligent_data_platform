@@ -1,0 +1,32 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/events/AppliedCustomerBillingRateCreateEvent.schema.json",
+ "title": "AppliedCustomerBillingRateCreateEvent",
+ "description": "Platform definition of the TMF create event for AppliedCustomerBillingRate. TMF678 5.0.0 defines no AppliedCustomerBillingRateCreateEvent, so this follows the v5 <Resource>CreateEvent pattern (allOf Event + payload) on the spec's own Event.",
+ "x-baseType": "Event",
+ "x-baseSchema": "TMF678-v5.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF678-v5.0.0.schema.json#/$defs/Event"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "event": {
+     "$ref": "#/$defs/AppliedCustomerBillingRateCreateEventPayload"
+    }
+   }
+  }
+ ],
+ "$defs": {
+  "AppliedCustomerBillingRateCreateEventPayload": {
+   "type": "object",
+   "description": "AppliedCustomerBillingRateCreateEventPayload generic structure",
+   "properties": {
+    "appliedCustomerBillingRate": {
+     "$ref": "../schemas/TMF678-v5.0.0.schema.json#/$defs/AppliedCustomerBillingRate"
+    }
+   }
+  }
+ }
+}

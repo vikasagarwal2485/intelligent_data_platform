@@ -1,0 +1,65 @@
+{
+  "type": "record",
+  "name": "Agreement",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical agreement (Bronze `agreements`), one per subscriber (MSISDN). Adapted from TMF651 Agreement.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "agreement_type",
+      "type": {
+        "type": "enum",
+        "name": "AgreementType",
+        "symbols": [
+          "device",
+          "subscription"
+        ]
+      }
+    },
+    {
+      "name": "business_line",
+      "type": {
+        "type": "enum",
+        "name": "BusinessLine",
+        "symbols": [
+          "mobile",
+          "broadband",
+          "iptv",
+          "fixed_line_telephony",
+          "iot",
+          "energy",
+          "insurance"
+        ]
+      }
+    },
+    {
+      "name": "lifecycle_status",
+      "type": "string"
+    },
+    {
+      "name": "valid_from",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    },
+    {
+      "name": "msisdn",
+      "type": "string",
+      "doc": "The subscriber's MSISDN."
+    },
+    {
+      "name": "imsi",
+      "type": "string"
+    },
+    {
+      "name": "account_id",
+      "type": "string"
+    }
+  ]
+}

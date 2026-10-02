@@ -526,6 +526,31 @@
     }
    ]
   },
+  "BillingAccountCreateEvent": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Event"
+    },
+    {
+     "description": "BillingAccountCreateEvent generic structure",
+     "properties": {
+      "event": {
+       "$ref": "#/$defs/BillingAccountCreateEventPayload"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "BillingAccountCreateEventPayload": {
+   "description": "BillingAccountCreateEventPayload generic structure",
+   "properties": {
+    "billingAccount": {
+     "$ref": "#/$defs/BillingAccount"
+    }
+   },
+   "type": "object"
+  },
   "BillingCycleSpecification": {
    "allOf": [
     {
@@ -635,6 +660,58 @@
    ],
    "description": "The polymorphic attributes @type, @schemaLocation & @referredType are related to the BillingCycleSpecification entity and not the BillingCycleSpecificationRefOrValue class itself",
    "type": "object"
+  },
+  "Characteristic": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Describes a given characteristic of an object or entity through a name/value pair.",
+     "properties": {
+      "characteristicRelationship": {
+       "items": {
+        "$ref": "#/$defs/CharacteristicRelationship"
+       },
+       "type": "array"
+      },
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "name": {
+       "description": "Name of the characteristic",
+       "type": "string"
+      },
+      "valueType": {
+       "description": "Data type of the value of the characteristic",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "CharacteristicRelationship": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "Another Characteristic that is related to the current Characteristic;",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the characteristic",
+       "type": "string"
+      },
+      "relationshipType": {
+       "description": "The type of relationship",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
   },
   "Contact": {
    "allOf": [
@@ -848,6 +925,87 @@
      "required": [
       "id"
      ],
+     "type": "object"
+    }
+   ]
+  },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explnatory of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
      "type": "object"
     }
    ]
@@ -1317,7 +1475,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF666 v5.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "BillingAccount"
+  "BillingAccount",
+  "BillingAccountCreateEvent"
  ],
  "x-source": {
   "commit": "8c85948d31c73ad7408595dd485cf7f00573f59f",

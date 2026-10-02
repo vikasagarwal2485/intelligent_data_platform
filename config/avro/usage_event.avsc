@@ -1,25 +1,111 @@
 {
   "type": "record",
   "name": "UsageEvent",
-  "namespace": "com.idp",
-  "doc": "Canonical voice/data usage event (flattened from JSON:API). See plan 3.3.",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical voice or data usage event (Bronze `voice_events` / `data_events`). Adapted from TMF635 ProductUsage, split by usageType. Gross amount is derived in Silver (net + tax).",
   "fields": [
-    {"name": "tenant_id", "type": "string"},
-    {"name": "id", "type": "string"},
-    {"name": "service_id", "type": "string", "doc": "MSISDN"},
-    {"name": "agreement_id", "type": ["null", "string"], "default": null},
-    {"name": "event_type", "type": {"type": "enum", "name": "EventType", "symbols": ["voice", "data", "sms"]}},
-    {"name": "started_at", "type": "long", "logicalType": "timestamp-millis"},
-    {"name": "created_at", "type": "long", "logicalType": "timestamp-millis"},
-    {"name": "gross_amount", "type": "double"},
-    {"name": "tax_amount", "type": "double"},
-    {"name": "currency", "type": "string", "default": "EUR"},
-    {"name": "qty", "type": "long", "doc": "seconds for voice, bytes for data"},
-    {"name": "unit", "type": "string"},
-    {"name": "is_roaming", "type": "boolean", "default": false},
-    {"name": "network_tech", "type": ["null", "string"], "default": null},
-    {"name": "traffic_case", "type": ["null", "string"], "default": null, "doc": "originating|terminating"},
-    {"name": "other_party_number", "type": ["null", "string"], "default": null},
-    {"name": "imei", "type": ["null", "string"], "default": null}
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "service_id",
+      "type": "string",
+      "doc": "MSISDN"
+    },
+    {
+      "name": "agreement_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "event_type",
+      "type": {
+        "type": "enum",
+        "name": "EventType",
+        "symbols": [
+          "voice",
+          "data",
+          "sms"
+        ]
+      }
+    },
+    {
+      "name": "started_at",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    },
+    {
+      "name": "created_at",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    },
+    {
+      "name": "net_amount",
+      "type": "double"
+    },
+    {
+      "name": "tax_amount",
+      "type": "double"
+    },
+    {
+      "name": "currency",
+      "type": "string"
+    },
+    {
+      "name": "qty",
+      "type": "long",
+      "doc": "Seconds (voice) or bytes (data)."
+    },
+    {
+      "name": "unit",
+      "type": "string"
+    },
+    {
+      "name": "is_roaming",
+      "type": "boolean"
+    },
+    {
+      "name": "network_tech",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Data only (open domain, e.g. 4G+).",
+      "default": null
+    },
+    {
+      "name": "traffic_case",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Voice only.",
+      "default": null
+    },
+    {
+      "name": "other_party_number",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Voice only.",
+      "default": null
+    },
+    {
+      "name": "imei",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
   ]
 }

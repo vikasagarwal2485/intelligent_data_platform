@@ -1,0 +1,41 @@
+{
+  "type": "record",
+  "name": "Product",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical product (Bronze `products`). Adapted from TMF637 Product.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "product_type",
+      "type": "string"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "category",
+      "type": "string"
+    },
+    {
+      "name": "monthly_fee",
+      "type": "double",
+      "doc": "Recurring price, EUR."
+    },
+    {
+      "name": "lifecycle_status",
+      "type": "string"
+    },
+    {
+      "name": "agreement_id",
+      "type": "string"
+    }
+  ]
+}

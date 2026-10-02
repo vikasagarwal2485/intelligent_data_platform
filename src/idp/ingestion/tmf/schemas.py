@@ -29,7 +29,9 @@ from idp.common.config import DEFAULT_CONFIG_PATH
 TMF_DIR = DEFAULT_CONFIG_PATH.parent / "tmf"
 SCHEMA_DIR = TMF_DIR / "schemas"
 EXTENSION_DIR = TMF_DIR / "extensions"
+EVENT_DIR = TMF_DIR / "events"
 EXTENSION_BASE_URI = "https://idp.local/tmf/extensions/"
+DRAFT_07 = "http://json-schema.org/draft-07/schema#"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -47,6 +49,14 @@ def extensions() -> dict[str, dict[str, Any]]:
     """The extension schemas, by the ``@type`` they define (their file stem)."""
     return {p.name.removesuffix(".schema.json"): _load(p)
             for p in sorted(EXTENSION_DIR.glob("*.schema.json"))}
+
+
+@functools.lru_cache(maxsize=None)
+def events() -> dict[str, dict[str, Any]]:
+    """The platform's create-event schemas, by event name: for the resources whose
+    pinned TMF spec defines no ``<Resource>CreateEvent`` (``config/tmf/events/``)."""
+    return {p.name.removesuffix(".schema.json"): _load(p)
+            for p in sorted(EVENT_DIR.glob("*.schema.json"))}
 
 
 @functools.lru_cache(maxsize=None)
@@ -69,7 +79,7 @@ _META = {"$id", "$schema", "title", "description", "x-source", "x-resources",
 
 
 def _documents() -> list[dict[str, Any]]:
-    return list(bundles().values()) + list(extensions().values())
+    return list(bundles().values()) + list(extensions().values()) + list(events().values())
 
 
 def _key(doc_id: str, name: str) -> str:
@@ -141,9 +151,104 @@ def validator(type_name: str, base_type: str | None = None) -> Callable[[Any], A
         if bundle is None:
             raise KeyError(f"no vendored TMF schema for {base!r}")
         root = _key(bundles()[bundle]["$id"], base)
-    schema = {"$schema": "http://json-schema.org/draft-07/schema#",
+    schema = {"$schema": DRAFT_07,
               "definitions": merged_definitions(), "$ref": f"#/definitions/{root}"}
     return fastjsonschema.compile(schema)
+
+
+# --------------------------------------------------------------------------- #
+# create events (the Kafka envelope, REQ-STR-01)                               #
+# --------------------------------------------------------------------------- #
+def event_type(resource: str) -> str:
+    """The TMF create event a resource is published in, e.g. ``ProductUsageCreateEvent``."""
+    return f"{resource}CreateEvent"
+
+
+def payload_name(resource: str) -> str:
+    """The property of ``event`` that holds the resource, e.g. ``productUsage``."""
+    return resource[0].lower() + resource[1:]
+
+
+def _event_keys(resource: str) -> tuple[str, str]:
+    """The merged-definition keys of a resource's create event and of its payload."""
+    name = event_type(resource)
+    if name in events():
+        doc_id = events()[name]["$id"]
+        return _key(doc_id, "__root__"), _key(doc_id, f"{name}Payload")
+    bundle = resource_bundle().get(name)
+    if bundle is None:
+        raise KeyError(f"no create event schema for {resource!r}")
+    doc_id = bundles()[bundle]["$id"]
+    return _key(doc_id, name), _key(doc_id, f"{name}Payload")
+
+
+def event_schema(resource: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A self-contained draft-07 schema of the resource's TMF create event, whose
+    ``event.<resource>`` is validated by ``payload`` (instead of the TMF base
+    resource the event schema names).
+
+    The platform requires what it publishes: ``@type`` and ``eventType`` equal to the
+    event name, ``eventId``, ``eventTime`` and the payload.
+    """
+    event_key, payload_key = _event_keys(resource)
+    name, prop = event_type(resource), payload_name(resource)
+    defs = dict(merged_definitions())
+    defs[payload_key] = {"type": "object", "properties": {prop: payload}, "required": [prop]}
+    return {"$schema": DRAFT_07, "definitions": defs, "allOf": [
+        {"$ref": f"#/definitions/{event_key}"},
+        {"type": "object",
+         "required": ["@type", "eventId", "eventTime", "eventType", "event"],
+         "properties": {"@type": {"const": name}, "eventType": {"const": name},
+                        "eventId": {"type": "string", "minLength": 1}}},
+    ]}
+
+
+@functools.lru_cache(maxsize=None)
+def event_validator(resource: str) -> Callable[[Any], Any]:
+    """The compiled envelope validator of a resource's create event. The payload is
+    only required to be an object: the resource itself is validated by
+    :func:`errors`, which knows its extension ``@type``."""
+    return fastjsonschema.compile(event_schema(resource, {"type": "object"}))
+
+
+def _prune(schema: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the ``definitions`` the schema reaches."""
+    defs, keep, todo = schema["definitions"], set(), [r for r in _refs({k: v for k, v in schema.items()
+                                                                          if k != "definitions"})]
+    while todo:
+        name = todo.pop().split("/")[-1]
+        if name not in keep:
+            keep.add(name)
+            todo.extend(_refs(defs[name]))
+    return {**schema, "definitions": {k: defs[k] for k in sorted(keep)}}
+
+
+def registry_schema(resources: list[str], title: str) -> dict[str, Any]:
+    """The wire contract of one topic (REQ-STR-03): a self-contained draft-07 JSON
+    Schema accepting the create event of any of ``resources``, each carrying its
+    ``Idp<Resource>`` extension resource. Pruned to what it reaches."""
+    defs = dict(merged_definitions())
+    variants = []
+    for res in resources:
+        ext_root = _key(extensions()[f"Idp{res}"]["$id"], "__root__")
+        one = event_schema(res, {"$ref": f"#/definitions/{ext_root}"})
+        _, payload_key = _event_keys(res)
+        defs[payload_key] = one["definitions"][payload_key]
+        variants.append({"allOf": one["allOf"]})
+    body = variants[0] if len(variants) == 1 else {"anyOf": variants}
+    return _prune({"$schema": DRAFT_07, "title": title, "definitions": defs, **body})
+
+
+def event_errors(value: Any, resource: str) -> Iterator[str]:
+    """The envelope error of one create event, if any, as ``path: message``."""
+    if not isinstance(value, dict):
+        yield f"$: not an object ({type(value).__name__})"
+        return
+    try:
+        event_validator(resource)(value)
+    except fastjsonschema.JsonSchemaException as e:
+        path = (e.name or "data").replace("data", "$", 1)
+        yield f"{path}: {e.message.replace(e.name or 'data', '', 1).strip() or e.message}"
 
 
 def errors(resource: dict[str, Any], base_type: str | None = None) -> Iterator[str]:

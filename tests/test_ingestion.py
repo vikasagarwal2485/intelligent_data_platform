@@ -61,13 +61,13 @@ def test_entities_defined_once_and_cover_dataset_and_topics():
     from dataclasses import fields
 
     from idp import pipeline
-    from idp.streaming import TABLE_TO_SUFFIX
+    from idp.streaming import BRONZE_ENTITIES
     from idp.synthetic import generator
     from idp.synthetic.generator import ENTITIES, SyntheticDataset
 
     assert pipeline.ENTITIES is generator.ENTITIES                 # a re-export, not a copy
     assert ENTITIES == tuple(f.name for f in fields(SyntheticDataset) if f.name != "labels")
-    assert tuple(TABLE_TO_SUFFIX) == ENTITIES          # same set AND order (landing = in-memory publish order)
+    assert BRONZE_ENTITIES == ENTITIES                 # the consumer lands exactly the dataset's entities
 
 
 # --- landing location (REQ-BRZ-03) --------------------------------------------

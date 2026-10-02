@@ -427,14 +427,46 @@ def to_tmf(profile: Profile, entities: dict[str, Iterable[dict]]) -> dict[str, l
     return dict(out)
 
 
+def customer_index(profile: Profile, customers: Iterable[dict]) -> _Customers:
+    """The index a tenant's references resolve through: its Customer resources."""
+    return _Customers.index(profile, list(customers))
+
+
+def resource_map(profile: Profile, resource: dict) -> ResourceMap:
+    """The profile mapping a TMF resource is adapted with: by its ``@baseType`` (or
+    ``@type`` for a plain TMF resource) and, for variants, their ``when``."""
+    base = resource.get("@baseType") or resource.get("@type")
+    maps = [r for r in profile.resources if r.resource == base and r.selects(resource)]
+    if len(maps) != 1:
+        raise ValueError(f"{resource.get('id')}: {len(maps)} mappings of {base!r} in profile "
+                         f"{profile.name!r} match it, expected one")
+    return maps[0]
+
+
+def adapt_resource(profile: Profile, resource: dict, customers: _Customers,
+                   rmap: ResourceMap | None = None) -> tuple[str, dict]:
+    """One TMF resource -> ``(entity, canonical record)``, its references resolved
+    through ``customers`` (:func:`customer_index`).
+
+    Raises :class:`ReferenceError_` when a reference doesn't resolve.
+    """
+    rmap = rmap or resource_map(profile, resource)
+    needs_customer = any(f.via == "customer" for f in rmap.fields)
+    customer = customers.resolve(rmap.entity, resource, rmap.file) if needs_customer else None
+    rec: dict[str, Any] = {}
+    for f in rmap.fields:
+        rec[f.name] = f.read(customer if f.via == "customer" else resource, rec)
+    return rmap.entity, rec
+
+
 def from_tmf(profile: Profile, files: dict[str, list[dict]],
              entities: Iterable[str] | None = None) -> dict[str, list[dict]]:
     """TMF resources per landing file (one tenant) -> canonical records per entity
-    (all entities, or only ``entities``).
+    (all entities, or only ``entities``): :func:`adapt_resource` over the files.
 
     Raises :class:`ReferenceError_` (naming the file) when a reference doesn't resolve.
     """
-    customers = _Customers.index(profile, files.get(profile.customer.file, []))
+    customers = customer_index(profile, files.get(profile.customer.file, []))
     out: dict[str, list[dict]] = {}
     wanted = list(entities) if entities is not None else profile.entities
     for ent in wanted:
@@ -444,12 +476,7 @@ def from_tmf(profile: Profile, files: dict[str, list[dict]],
             for res in files.get(rmap.file, []):
                 if not rmap.selects(res):
                     continue
-                needs_customer = any(f.via == "customer" for f in rmap.fields)
-                customer = customers.resolve(ent, res, rmap.file) if needs_customer else None
-                rec: dict[str, Any] = {}
-                for f in rmap.fields:
-                    rec[f.name] = f.read(customer if f.via == "customer" else res, rec)
-                rows.append(rec)
+                rows.append(adapt_resource(profile, res, customers, rmap)[1])
         if len({r.file for r in variants}) > 1:
             rows.sort(key=lambda r: str(r.get("id")))        # variants from separate files
         out[ent] = rows

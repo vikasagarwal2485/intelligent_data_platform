@@ -1,15 +1,46 @@
 {
   "type": "record",
   "name": "FeeCharge",
-  "namespace": "com.idp",
-  "doc": "Canonical product fee-charge event (recurring/one_time/overage/discount). Associated with a PRODUCT only (product_id FK); name/category live on the product, the service on its agreement. See ADR-0022.",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical product fee charge (Bronze `fee_charges`), associated with a product only; name and category live on the product. Adapted from TMF678 AppliedCustomerBillingRate.",
   "fields": [
-    {"name": "tenant_id", "type": "string"},
-    {"name": "id", "type": "string"},
-    {"name": "product_id", "type": "string", "doc": "FK to products; the product carries name/category and links to the agreement (1 agreement : N products)"},
-    {"name": "charge_type", "type": {"type": "enum", "name": "ChargeType", "symbols": ["recurring", "one_time", "overage", "discount"]}},
-    {"name": "amount", "type": "double"},
-    {"name": "currency", "type": "string", "default": "EUR"},
-    {"name": "charged_at", "type": "long", "logicalType": "timestamp-millis"}
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "product_id",
+      "type": "string"
+    },
+    {
+      "name": "charge_type",
+      "type": {
+        "type": "enum",
+        "name": "ChargeType",
+        "symbols": [
+          "recurring",
+          "one_time",
+          "overage",
+          "discount"
+        ]
+      }
+    },
+    {
+      "name": "amount",
+      "type": "double"
+    },
+    {
+      "name": "currency",
+      "type": "string"
+    },
+    {
+      "name": "charged_at",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    }
   ]
 }

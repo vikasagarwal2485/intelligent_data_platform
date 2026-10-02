@@ -1,0 +1,49 @@
+{
+  "type": "record",
+  "name": "Account",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical billing account (Bronze `accounts`). Adapted from TMF666 BillingAccount and its TMF629 Customer role.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "account_type",
+      "type": "string"
+    },
+    {
+      "name": "account_segment",
+      "type": {
+        "type": "enum",
+        "name": "AccountSegment",
+        "symbols": [
+          "B2C",
+          "B2B",
+          "B2B2C"
+        ]
+      }
+    },
+    {
+      "name": "lifecycle_status",
+      "type": "string"
+    },
+    {
+      "name": "valid_from",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    },
+    {
+      "name": "party_id",
+      "type": "string"
+    },
+    {
+      "name": "is_company",
+      "type": "boolean"
+    }
+  ]
+}

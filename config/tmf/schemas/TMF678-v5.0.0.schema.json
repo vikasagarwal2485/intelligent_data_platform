@@ -405,6 +405,87 @@
     }
    ]
   },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explnatory of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "Extensible": {
    "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
    "properties": {
@@ -567,6 +648,85 @@
     }
    ]
   },
+  "PartyRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    }
+   ],
+   "description": "A Party reference",
+   "type": "object"
+  },
+  "PartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRefOrPartyRoleRef__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRef"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRoleRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRoleRef"
+     }
+    }
+   ]
+  },
+  "PartyRefOrPartyRoleRef__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/PartyRef"
+    },
+    {
+     "$ref": "#/$defs/PartyRoleRef"
+    }
+   ],
+   "description": "",
+   "type": "object"
+  },
+  "PartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/EntityRef"
+    },
+    {
+     "description": "Party role reference. A party role represents the part played by a party in a given context.",
+     "properties": {
+      "partyId": {
+       "description": "The identifier of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      },
+      "partyName": {
+       "description": "The name of the engaged party that is linked to the PartyRole object.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "ProductRef": {
    "allOf": [
     {
@@ -578,6 +738,26 @@
    ],
    "description": "A Product reference",
    "type": "object"
+  },
+  "RelatedPartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "RelatedParty reference. A related party defines party or party role or its reference, linked to a specific entity",
+     "properties": {
+      "partyOrPartyRole": {
+       "$ref": "#/$defs/PartyRefOrPartyRoleRef"
+      },
+      "role": {
+       "description": "Role played by the related party or party role in the context of the specific entity it is linked to. Such as 'initiator', 'customer',  'salesAgent', 'user'",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
   },
   "StringArrayCharacteristic": {
    "allOf": [
@@ -636,7 +816,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF678 v5.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "AppliedCustomerBillingRate"
+  "AppliedCustomerBillingRate",
+  "Event"
  ],
  "x-source": {
   "commit": "eb90402dc362a602225476245398887ce484f9cb",

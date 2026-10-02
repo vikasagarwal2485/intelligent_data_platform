@@ -36,25 +36,29 @@ OUT = Path(__file__).resolve().parent / "schemas"
 RAW = "https://raw.githubusercontent.com/tmforum-apis/{repo}/{sha}/{file}"
 BASE_ID = "https://idp.local/tmf/schemas/"
 
-# api -> (repo, file, commit, version, root resources)
+# api -> (repo, file, commit, version, roots): the resources the landing files hold,
+# and the TMF create event each is published in on Kafka (REQ-STR-01). TMF635 and
+# TMF678 define no ProductUsage / AppliedCustomerBillingRate create event, so they
+# vendor the generic Event, which the platform events in config/tmf/events/ build on.
 SOURCES = {
     "TMF629": ("TMF629_CustomerManagement", "TMF629-Customer_Management-v5.0.1.oas.yaml",
-               "1eae32ff68230c0cb7969d69fb9711d1fff77b39", "5.0.1", ["Customer"]),
+               "1eae32ff68230c0cb7969d69fb9711d1fff77b39", "5.0.1", ["Customer", "CustomerCreateEvent"]),
     "TMF632": ("TMF632_PartyManagement", "TMF632-Party_Management-v5.0.0.oas.yaml",
                "11c6a0ecf2b9a7007f43e86601b37e45d9f39b1e", "5.0.0",
-               ["Individual", "Organization", "RelatedPartyRefOrPartyRoleRef", "Characteristic"]),
+               ["Individual", "Organization", "RelatedPartyRefOrPartyRoleRef", "Characteristic",
+                "IndividualCreateEvent", "OrganizationCreateEvent"]),
     "TMF635": ("TMF635_UsageManagement", "TMF635-Product_Usage_Management-v5.0.0.oas.yaml",
-               "3be6eb8098ff4026044a984d49ed624d1ce82825", "5.0.0", ["ProductUsage"]),
+               "3be6eb8098ff4026044a984d49ed624d1ce82825", "5.0.0", ["ProductUsage", "Event"]),
     "TMF637": ("TMF637_ProductInventory", "TMF637-ProductInventory-v5.0.0.oas.yaml",
-               "29d0ef17db906c26a6b34e06c78263ef3e0dfb1f", "5.0.0", ["Product"]),
+               "29d0ef17db906c26a6b34e06c78263ef3e0dfb1f", "5.0.0", ["Product", "ProductCreateEvent"]),
     "TMF666": ("TMF666_AccountManagement", "TMF666-Account_Management-v5.0.0.oas.yaml",
-               "8c85948d31c73ad7408595dd485cf7f00573f59f", "5.0.0", ["BillingAccount"]),
+               "8c85948d31c73ad7408595dd485cf7f00573f59f", "5.0.0", ["BillingAccount", "BillingAccountCreateEvent"]),
     "TMF678": ("TMF678_CustomerBill", "TMF678-CustomerBill-v5.0.0.oas.yaml",
-               "eb90402dc362a602225476245398887ce484f9cb", "5.0.0", ["AppliedCustomerBillingRate"]),
+               "eb90402dc362a602225476245398887ce484f9cb", "5.0.0", ["AppliedCustomerBillingRate", "Event"]),
     "TMF651": ("TMF651_AgreementManagement", "TMF651_Agreement_Management_API_v4.0.0_swagger.json",
-               "756dee9649778130a31a7551ac21a20c7a6106af", "4.0.0", ["Agreement"]),
+               "756dee9649778130a31a7551ac21a20c7a6106af", "4.0.0", ["Agreement", "AgreementCreateEvent"]),
     "TMF654": ("TMF654_PrepayBalanceManagement", "TMF654_Prepay_Balance_Management_API_v4.0.0_swagger.json",
-               "a19a388d1ac02afe687c4ba721157a81c3f3e463", "4.0.0", ["TopupBalance"]),
+               "a19a388d1ac02afe687c4ba721157a81c3f3e463", "4.0.0", ["TopupBalance", "TopupBalanceCreateEvent"]),
 }
 # v4 resources rewritten onto v5 types: (resource, property) -> v5 TMF632 definition
 V5_PATCHES = {

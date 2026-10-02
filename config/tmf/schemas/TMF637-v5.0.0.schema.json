@@ -672,6 +672,87 @@
    },
    "type": "object"
   },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explnatory of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "Expression": {
    "allOf": [
     {
@@ -2781,6 +2862,31 @@
     }
    ]
   },
+  "ProductCreateEvent": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Event"
+    },
+    {
+     "description": "ProductCreateEvent generic structure",
+     "properties": {
+      "event": {
+       "$ref": "#/$defs/ProductCreateEventPayload"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "ProductCreateEventPayload": {
+   "description": "ProductCreateEventPayload",
+   "properties": {
+    "product": {
+     "$ref": "#/$defs/Product"
+    }
+   },
+   "type": "object"
+  },
   "ProductOfferingPriceRef": {
    "allOf": [
     {
@@ -3343,7 +3449,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF637 v5.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "Product"
+  "Product",
+  "ProductCreateEvent"
  ],
  "x-source": {
   "commit": "29d0ef17db906c26a6b34e06c78263ef3e0dfb1f",

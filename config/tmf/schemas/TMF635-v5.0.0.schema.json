@@ -339,6 +339,89 @@
     }
    ]
   },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "description": "Collection of analytic characteristics",
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explanation of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "description": "Collection of related parties",
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "Extensible": {
    "description": "Base Extensible schema for use in TMForum Open-APIs - When used for in a schema it means that the Entity described by the schema  MUST be extended with the @type",
    "properties": {
@@ -983,7 +1066,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF635 v5.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "ProductUsage"
+  "ProductUsage",
+  "Event"
  ],
  "x-source": {
   "commit": "3be6eb8098ff4026044a984d49ed624d1ce82825",

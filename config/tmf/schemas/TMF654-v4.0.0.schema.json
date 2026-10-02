@@ -519,6 +519,64 @@
    ],
    "type": "object"
   },
+  "TopupBalanceCreateEvent": {
+   "description": "The notification data structure",
+   "properties": {
+    "correlationId": {
+     "description": "The correlation id for this event.",
+     "type": "string"
+    },
+    "description": {
+     "description": "An explnatory of the event.",
+     "type": "string"
+    },
+    "domain": {
+     "description": "The domain of the event.",
+     "type": "string"
+    },
+    "event": {
+     "$ref": "#/$defs/TopupBalanceCreateEventPayload",
+     "description": "The event payload linked to the involved resource object"
+    },
+    "eventId": {
+     "description": "The identifier of the notification.",
+     "type": "string"
+    },
+    "eventTime": {
+     "description": "Time of the event occurrence.",
+     "format": "date-time",
+     "type": "string"
+    },
+    "eventType": {
+     "description": "The type of the notification.",
+     "type": "string"
+    },
+    "priority": {
+     "description": "A priority.",
+     "type": "string"
+    },
+    "timeOcurred": {
+     "description": "The time the event occured.",
+     "format": "date-time",
+     "type": "string"
+    },
+    "title": {
+     "description": "The title of the event.",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "TopupBalanceCreateEventPayload": {
+   "description": "The event data structure",
+   "properties": {
+    "topupBalance": {
+     "$ref": "#/$defs/TopupBalance",
+     "description": "The involved resource data for the event"
+    }
+   },
+   "type": "object"
+  },
   "UsageType": {
    "description": "Valid values for the usage type are",
    "enum": [
@@ -535,7 +593,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF654 v4.0.0 resources used by the IDP landing zone",
  "x-resources": [
-  "TopupBalance"
+  "TopupBalance",
+  "TopupBalanceCreateEvent"
  ],
  "x-source": {
   "commit": "a19a388d1ac02afe687c4ba721157a81c3f3e463",

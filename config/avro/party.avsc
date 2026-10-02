@@ -1,0 +1,101 @@
+{
+  "type": "record",
+  "name": "Party",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical party (Bronze `parties`). Adapted from TMF632 Individual / Organization and its TMF629 Customer role (REQ-BRZ-05). Person fields are null for organizations.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "doc": "The party's customer role (e.g. owner)."
+    },
+    {
+      "name": "first_name",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Null for organizations.",
+      "default": null
+    },
+    {
+      "name": "last_name",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Null for organizations.",
+      "default": null
+    },
+    {
+      "name": "date_of_birth",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "ISO-8601 date; null for organizations.",
+      "default": null
+    },
+    {
+      "name": "language",
+      "type": "string"
+    },
+    {
+      "name": "phone",
+      "type": "string"
+    },
+    {
+      "name": "email",
+      "type": "string"
+    },
+    {
+      "name": "consent_marketing",
+      "type": "boolean"
+    },
+    {
+      "name": "consent_analytics",
+      "type": "boolean"
+    },
+    {
+      "name": "account_id",
+      "type": "string"
+    },
+    {
+      "name": "party_type",
+      "type": {
+        "type": "enum",
+        "name": "PartyType",
+        "symbols": [
+          "individual",
+          "organization"
+        ]
+      }
+    },
+    {
+      "name": "organization_name",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Null for individuals.",
+      "default": null
+    },
+    {
+      "name": "organization_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Null for individuals.",
+      "default": null
+    }
+  ]
+}

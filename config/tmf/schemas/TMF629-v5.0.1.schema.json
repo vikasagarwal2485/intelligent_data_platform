@@ -573,6 +573,31 @@
    ],
    "type": "object"
   },
+  "CustomerCreateEvent": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Event"
+    },
+    {
+     "description": "CustomerCreateEvent generic structure",
+     "properties": {
+      "event": {
+       "$ref": "#/$defs/CustomerCreateEventPayload"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
+  "CustomerCreateEventPayload": {
+   "description": "The event data structure",
+   "properties": {
+    "customer": {
+     "$ref": "#/$defs/Customer"
+    }
+   },
+   "type": "object"
+  },
   "Disability": {
    "description": "Lack or inadequate strength or ability.",
    "properties": {
@@ -650,6 +675,89 @@
      "required": [
       "id"
      ],
+     "type": "object"
+    }
+   ]
+  },
+  "Event": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "event with common attributes.",
+     "properties": {
+      "analyticCharacteristic": {
+       "description": "Collection of analytic characteristics",
+       "items": {
+        "$ref": "#/$defs/Characteristic"
+       },
+       "type": "array"
+      },
+      "correlationId": {
+       "description": "The correlation id for this event.",
+       "type": "string"
+      },
+      "description": {
+       "description": "An explanation of the event.",
+       "type": "string"
+      },
+      "domain": {
+       "description": "The domain of the event.",
+       "type": "string"
+      },
+      "event": {
+       "description": "The event linked to the involved resource object",
+       "type": "object"
+      },
+      "eventId": {
+       "description": "The identifier of the notification.",
+       "type": "string"
+      },
+      "eventTime": {
+       "description": "Time of the event occurrence.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "eventType": {
+       "description": "The type of the notification.",
+       "type": "string"
+      },
+      "href": {
+       "description": "Hyperlink reference",
+       "type": "string"
+      },
+      "id": {
+       "description": "unique identifier",
+       "type": "string"
+      },
+      "priority": {
+       "description": "A priority.",
+       "type": "string"
+      },
+      "relatedParty": {
+       "description": "Collection of related parties",
+       "items": {
+        "$ref": "#/$defs/RelatedPartyRefOrPartyRoleRef"
+       },
+       "type": "array"
+      },
+      "reportingSystem": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "source": {
+       "$ref": "#/$defs/EntityRef"
+      },
+      "timeOccurred": {
+       "description": "The time the event occurred.",
+       "format": "date-time",
+       "type": "string"
+      },
+      "title": {
+       "description": "The title of the event.",
+       "type": "string"
+      }
+     },
      "type": "object"
     }
    ]
@@ -1619,6 +1727,55 @@
    "description": "A Party reference",
    "type": "object"
   },
+  "PartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/PartyRefOrPartyRoleRef__core"
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRef"
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "@type": {
+        "const": "PartyRoleRef"
+       }
+      },
+      "required": [
+       "@type"
+      ]
+     },
+     "then": {
+      "$ref": "#/$defs/PartyRoleRef"
+     }
+    }
+   ]
+  },
+  "PartyRefOrPartyRoleRef__core": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/PartyRef"
+    },
+    {
+     "$ref": "#/$defs/PartyRoleRef"
+    }
+   ],
+   "description": "",
+   "type": "object"
+  },
   "PartyRole": {
    "allOf": [
     {
@@ -1947,6 +2104,26 @@
     }
    ]
   },
+  "RelatedPartyRefOrPartyRoleRef": {
+   "allOf": [
+    {
+     "$ref": "#/$defs/Extensible"
+    },
+    {
+     "description": "RelatedParty reference. A related party defines party or party role or its reference, linked to a specific entity",
+     "properties": {
+      "partyOrPartyRole": {
+       "$ref": "#/$defs/PartyRefOrPartyRoleRef"
+      },
+      "role": {
+       "description": "Role played by the related party or party role in the context of the specific entity it is linked to. Such as 'initiator', 'customer',  'salesAgent', 'user'",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    }
+   ]
+  },
   "Skill": {
    "description": "Skills evaluated for an individual with a level and possibly with a limited validity when an obsolescence is defined (Ex: the first-aid certificate first level is limited to one year and an update training is required each year to keep the level).",
    "properties": {
@@ -2135,7 +2312,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "TMF629 v5.0.1 resources used by the IDP landing zone",
  "x-resources": [
-  "Customer"
+  "Customer",
+  "CustomerCreateEvent"
  ],
  "x-source": {
   "commit": "1eae32ff68230c0cb7969d69fb9711d1fff77b39",

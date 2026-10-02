@@ -1,0 +1,151 @@
+{
+  "type": "record",
+  "name": "DimSubscriber",
+  "namespace": "com.idp.silver",
+  "doc": "Silver dim_subscriber: one row per subscriber (MSISDN), joining agreement, account, party and product counts (REQ-STR-03, documented contract; checked by tests, not enforced at run time). service_id and imsi are tokenized. Account and party fields are null when the join finds none; person fields are null for organizations.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "service_id",
+      "type": "string",
+      "doc": "Tokenized MSISDN."
+    },
+    {
+      "name": "imsi",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Tokenized.",
+      "default": null
+    },
+    {
+      "name": "party_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "account_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "agreement_id",
+      "type": "string"
+    },
+    {
+      "name": "account_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "account_segment",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "AccountSegment",
+          "symbols": [
+            "B2C",
+            "B2B",
+            "B2B2C"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "agreement_type",
+      "type": {
+        "type": "enum",
+        "name": "AgreementType",
+        "symbols": [
+          "device",
+          "subscription"
+        ]
+      }
+    },
+    {
+      "name": "business_line",
+      "type": {
+        "type": "enum",
+        "name": "BusinessLine",
+        "symbols": [
+          "mobile",
+          "broadband",
+          "iptv",
+          "fixed_line_telephony",
+          "iot",
+          "energy",
+          "insurance"
+        ]
+      }
+    },
+    {
+      "name": "account_tenure_days",
+      "type": "long",
+      "doc": "Whole days since the account's valid_from, vs the latest in the batch; 0 when unknown."
+    },
+    {
+      "name": "date_of_birth",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "ISO-8601 date; null for organizations.",
+      "default": null
+    },
+    {
+      "name": "language",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "is_company",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    },
+    {
+      "name": "consent_marketing",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    },
+    {
+      "name": "consent_analytics",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    },
+    {
+      "name": "num_products",
+      "type": "long"
+    },
+    {
+      "name": "has_device_agreement",
+      "type": "boolean"
+    }
+  ]
+}

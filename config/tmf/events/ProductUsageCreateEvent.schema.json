@@ -1,0 +1,32 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://idp.local/tmf/events/ProductUsageCreateEvent.schema.json",
+ "title": "ProductUsageCreateEvent",
+ "description": "Platform definition of the TMF create event for ProductUsage. TMF635 5.0.0 defines no ProductUsageCreateEvent, so this follows the v5 <Resource>CreateEvent pattern (allOf Event + payload) on the spec's own Event.",
+ "x-baseType": "Event",
+ "x-baseSchema": "TMF635-v5.0.0.schema.json",
+ "allOf": [
+  {
+   "$ref": "../schemas/TMF635-v5.0.0.schema.json#/$defs/Event"
+  },
+  {
+   "type": "object",
+   "properties": {
+    "event": {
+     "$ref": "#/$defs/ProductUsageCreateEventPayload"
+    }
+   }
+  }
+ ],
+ "$defs": {
+  "ProductUsageCreateEventPayload": {
+   "type": "object",
+   "description": "ProductUsageCreateEventPayload generic structure",
+   "properties": {
+    "productUsage": {
+     "$ref": "../schemas/TMF635-v5.0.0.schema.json#/$defs/ProductUsage"
+    }
+   }
+  }
+ }
+}

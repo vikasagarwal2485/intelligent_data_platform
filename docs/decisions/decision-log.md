@@ -109,7 +109,8 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** `idp_medallion_dag.py` orchestrates Silver→Gold + daily training.
 
 ### ADR-0013 — Avro contracts; drop the `tmf` segment from topics/subjects
-- **Status:** Accepted
+- **Status:** Accepted; the wire-contract part (Avro subjects for the topics) is
+  superseded by ADR-0031 (2026-10-02). Topic naming without `tmf` stays.
 - **Context:** Topic/subject naming and schema management.
 - **Decision:** Avro schemas in `config/avro/`; register via Apicurio
   (`<topic>-value` subjects). Topics are `t.<tenant>.<entity>` (no `tmf`); Avro
@@ -463,3 +464,47 @@ Consequences. Status: `Accepted` unless noted.
     authentication, and per-end-user row-level security stays out of scope.
   - The official MinIO images are no longer publicly pullable; the test stack uses
     Bitnami's frozen legacy build of the cluster's MinIO commit.
+
+### ADR-0031 — TM Forum events on Kafka; the adapter runs in the consumer; two contracts
+- **Status:** Accepted (2026-10-02). Supersedes ADR-0013's wire-contract part.
+- **Context:** The landing zone holds TM Forum Open API v5 resources (REQ-BRZ-03),
+  but the producer adapted them to canonical records before publishing. So Kafka
+  carried the platform's internal model, not what a real TMF source would send.
+  The Avro schemas registered for the topics had drifted from the records (e.g.
+  `gross_amount` vs the records' `net_amount`, `long` timestamps vs ISO strings),
+  and no code checked them.
+- **Decision:**
+  - **TMF on the wire.** Each resource is published as its TMF
+    `<Resource>CreateEvent` (`eventId`, `eventTime`, `eventType`,
+    `event.<resource>`) on a topic per resource, `t.<tenant>.<resource>`.
+    Individuals and organizations share `party`, and voice and data usage share
+    `productUsage`. The event schemas are vendored from the pinned TMF specs;
+    ProductUsage and AppliedCustomerBillingRate have none upstream, so the platform
+    defines them (`config/tmf/events/`) on the spec's own `Event`. `eventId` is a
+    uuid5 of tenant, resource type and id, so in-memory and from-landing
+    production send equal messages (apart from `eventTime`).
+  - **The adapter in the consumer.** The consumer reads each tenant's
+    `customer` topic in full (`compact,delete`, never expired), then checks each
+    event, adapts it to a canonical record one resource at a time
+    (`adapt_resource`), and lands canonical Bronze as before. Bronze, Silver and
+    Gold don't change.
+  - **Two contracts.** Wire: each topic's TMF JSON Schema (the event with its
+    `Idp<Resource>` extension, pruned), registered in Apicurio as `<topic>-value`
+    with schema type JSON. Canonical: `config/avro/*.avsc`, one per Bronze entity,
+    rewritten to match the records field for field and enforced by the consumer
+    (`fastavro`). Enums only for closed domains. `config/avro/silver/` documents
+    `dim_subscriber`, checked by tests.
+  - **Dead letters.** A message that fails a check goes to `t.<tenant>.dlq` with
+    its reason and source position. The valid ones are landed, the offsets
+    committed, and `idp consume` exits 1. There's no DLQ replay: the source is fixed
+    and re-produced.
+- **Consequences:**
+  - Messages are about 5 times larger than the flat canonical JSON. The consumer
+    keeps only canonical records in memory, so its footprint stays about the same.
+  - A consume running before its customers are published dead-letters the
+    dependent records. The make chains run consume after produce.
+  - A new value in a closed domain (e.g. a new recharge status) is dead-lettered
+    until the contract changes, which is intended.
+  - The old topics (`parties`, `usage.voice`, …) and their Avro subjects are
+    retired: the CRs are deleted at migration, and the subjects are left unused.
+

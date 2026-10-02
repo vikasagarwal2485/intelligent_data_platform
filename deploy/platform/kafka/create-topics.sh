@@ -18,10 +18,14 @@ TENANTS=("tenant_a" "tenant_b")
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 RETENTION_MS=$(( RETENTION_DAYS * 24 * 60 * 60 * 1000 ))
 
-# Topic suffixes per the plan: entity (batch/CDC) + event (streaming) + DLQ.
+# Topic suffixes: one per TM Forum resource, each carrying its create events
+# (REQ-STR-01; keep in sync with idp.streaming.TOPIC_RESOURCES), plus the DLQ.
+# Individuals and organizations share `party`; voice and data share `productUsage`.
+# `customer` is log-compacted (latest event per customer, never expired): the
+# consumer reads it in full each run to resolve references (REQ-STR-02).
 SUFFIXES=(
-  parties accounts agreements products
-  usage.voice usage.data recharge fees dlq
+  customer party billingAccount agreement product
+  appliedCustomerBillingRate topupBalance productUsage dlq
 )
 
 if ! kubectl cluster-info >/dev/null 2>&1; then
@@ -37,10 +41,18 @@ echo ">> Creating KafkaTopics with apiVersion kafka.strimzi.io/${TVER}"
 for t in "${TENANTS[@]}"; do
   for s in "${SUFFIXES[@]}"; do
     topic="t.${t}.${s}"
-    # DNS-safe metadata name (no dots/underscores): t-tenant-a-usage-voice
-    name="t-${t//_/-}-${s//./-}"
+    # DNS-safe metadata name (lower case, no dots/underscores): t-tenant-a-productusage
+    # (`tr`, not ${s,,}: macOS ships bash 3.2)
+    name="$(printf 't-%s-%s' "${t//_/-}" "${s//./-}" | tr '[:upper:]' '[:lower:]')"
     partitions=3
-    [[ "$s" == *usage* ]] && partitions=6   # higher throughput for usage events
+    [[ "$s" == productUsage ]] && partitions=6   # higher throughput for usage events
+    if [[ "$s" == customer ]]; then
+      # compact,delete with unlimited retention: compacted, nothing expires, and
+      # purge-topics.sh can still truncate it (DeleteRecords needs `delete`)
+      policy="compact,delete"; retention="-1"; retention_note="never (compacted)"
+    else
+      policy="delete"; retention="${RETENTION_MS}"; retention_note="${RETENTION_DAYS} days"
+    fi
     cat <<EOF | kubectl apply -n "${NS}" -f -
 apiVersion: kafka.strimzi.io/${TVER}
 kind: KafkaTopic
@@ -53,8 +65,8 @@ spec:
   partitions: ${partitions}
   replicas: 1
   config:
-    retention.ms: "${RETENTION_MS}"   # ${RETENTION_DAYS} days (plan section 2)
-    cleanup.policy: delete
+    retention.ms: "${retention}"   # ${retention_note}
+    cleanup.policy: "${policy}"
 EOF
   done
 done

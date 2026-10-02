@@ -487,11 +487,11 @@ topics: ## Create/update Kafka topics (KafkaTopic CRs; 7-day retention, RETENTIO
 	bash deploy/platform/kafka/create-topics.sh idp-platform
 
 .PHONY: kafka-purge
-kafka-purge: ## Purge ALL messages from the t.* Kafka topics now (TOPIC=t.tenant_a.recharge for one)
+kafka-purge: ## Purge ALL messages from the t.* Kafka topics now (TOPIC=t.tenant_a.topupBalance for one)
 	bash deploy/platform/kafka/purge-topics.sh idp-platform "$(TOPIC)"
 
 .PHONY: schemas
-schemas: ## Register Avro schemas only (config/avro/*.avsc)
+schemas: ## Register the Kafka topics' TMF JSON Schemas (wire contract, schemaType JSON)
 	bash deploy/platform/kafka/register-schemas.sh idp-platform
 
 .PHONY: platform-base

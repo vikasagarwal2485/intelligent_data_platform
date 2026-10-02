@@ -1,20 +1,94 @@
 {
   "type": "record",
   "name": "RechargeEvent",
-  "namespace": "com.idp",
-  "doc": "Canonical recharge event (flattened from JSON:API). See plan 3.3.",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical recharge event (Bronze `recharge_events`). Adapted from TMF654 TopupBalance.",
   "fields": [
-    {"name": "tenant_id", "type": "string"},
-    {"name": "id", "type": "string"},
-    {"name": "service_id", "type": "string", "doc": "MSISDN"},
-    {"name": "agreement_id", "type": ["null", "string"], "default": null},
-    {"name": "created_at", "type": "long", "logicalType": "timestamp-millis"},
-    {"name": "amount", "type": "double"},
-    {"name": "currency", "type": "string", "default": "EUR"},
-    {"name": "payment_method", "type": {"type": "enum", "name": "PaymentMethod", "symbols": ["credit_card", "cash", "voucher"]}},
-    {"name": "status", "type": {"type": "enum", "name": "RechargeStatus", "symbols": ["successful", "failed"]}},
-    {"name": "failure_reason_code", "type": ["null", "string"], "default": null},
-    {"name": "source", "type": ["null", "string"], "default": null},
-    {"name": "recharge_type", "type": {"type": "enum", "name": "RechargeType", "symbols": ["voucher", "topup"]}}
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "service_id",
+      "type": "string",
+      "doc": "MSISDN"
+    },
+    {
+      "name": "agreement_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "created_at",
+      "type": "string",
+      "doc": "ISO-8601 timestamp, UTC (as Bronze stores it)"
+    },
+    {
+      "name": "amount",
+      "type": "double"
+    },
+    {
+      "name": "currency",
+      "type": "string"
+    },
+    {
+      "name": "payment_method",
+      "type": {
+        "type": "enum",
+        "name": "PaymentMethod",
+        "symbols": [
+          "credit_card",
+          "cash",
+          "voucher"
+        ]
+      }
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "RechargeStatus",
+        "symbols": [
+          "successful",
+          "failed"
+        ]
+      }
+    },
+    {
+      "name": "failure_reason_code",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Set for failed recharges.",
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Channel.",
+      "default": null
+    },
+    {
+      "name": "recharge_type",
+      "type": {
+        "type": "enum",
+        "name": "RechargeType",
+        "symbols": [
+          "voucher",
+          "topup"
+        ]
+      }
+    }
   ]
 }

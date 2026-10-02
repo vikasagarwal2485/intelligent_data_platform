@@ -2,7 +2,7 @@
 
 Usage (separated medallion stages):
     idp produce    # synthetic data -> Kafka topics (--from-landing: the TMF landing files)
-    idp consume    # Kafka -> Bronze (S3)          [Bronze stage]
+    idp consume    # Kafka (TMF events) -> canonical Bronze (S3)  [Bronze stage]
     idp silver     # new Bronze -> Silver (incremental; --full-refresh replays all)  [Silver stage]
     idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
     idp score      # Gold features + models -> scores (S3)   [inference]
@@ -14,6 +14,7 @@ Usage (separated medallion stages):
     idp serve      # start the FastAPI scoring service
     idp migrate-lake  # one-off: legacy Parquet Bronze -> Iceberg Bronze
     idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
+    idp registry-schemas  # write each Kafka topic's TMF JSON Schema (wire contract)
     idp maintain   # compact, expire snapshots, remove orphans on every lake table
     idp mcp        # start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)
 """
@@ -65,6 +66,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 
 def _cmd_produce(args: argparse.Namespace) -> int | None:
+    from idp.ingestion.tmf.profile import load_profile
     from idp.streaming.producer import produce_to_kafka
     from idp.synthetic.generator import generate
 
@@ -85,7 +87,8 @@ def _cmd_produce(args: argparse.Namespace) -> int | None:
             default_rate=float(syn.get("default_rate", 0.12)),
             seed=int(syn.get("seed", 42)),
         )
-        counts = produce_to_kafka(dataset, bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+        counts = produce_to_kafka(dataset, bootstrap, profile=load_profile(cfg.tmf["profile"]),
+                                  topic_prefix=cfg.kafka["topic_prefix"])
         for k, v in counts.items():
             totals[k] = totals.get(k, 0) + v
         del dataset
@@ -96,46 +99,47 @@ def _cmd_produce(args: argparse.Namespace) -> int | None:
 
 
 def _produce_from_landing(cfg, bootstrap: str) -> int:
-    """Publish the landing zone's files (REQ-STR-01), one tenant at a time.
+    """Publish the landing zone's TM Forum files as create events (REQ-STR-01), one
+    tenant at a time.
 
-    The landing files are TM Forum resources, adapted to canonical records with the
-    configured mapping profile. A rejected file (unknown tenant or file, invalid
-    JSON or resource, tenant mismatch) and the entities that depend on it, or an
-    entity with an unresolved reference, are not published at all; the rest is. Returns 1 when anything was
-    rejected or the landing zone holds no tenant folder, else 0.
+    A rejected file (unknown tenant or file, invalid JSON or resource, tenant
+    mismatch, a rejected file it depends on, an unresolved reference) is not
+    published at all; the rest is. Returns 1 when anything was rejected or the
+    landing zone holds no tenant folder, else 0.
     """
     from itertools import groupby
 
     from idp.common import storage
-    from idp.ingestion.landing import read_landing
+    from idp.ingestion.landing import read_landing_resources
     from idp.ingestion.tmf.profile import load_profile
-    from idp.streaming.producer import publish_records
+    from idp.streaming.producer import publish_tenants
 
     landing = storage.landing_uri(cfg)
-    files = read_landing(landing, cfg.tenant_ids, storage_options=storage.storage_options(cfg),
-                         profile=load_profile(cfg.tmf["profile"]))
+    profile = load_profile(cfg.tmf["profile"])
+    files = read_landing_resources(landing, cfg.tenant_ids, profile=profile,
+                                   storage_options=storage.storage_options(cfg))
     rejected: list[tuple[str, str]] = []
     totals: dict[str, int] = {}
     tenants_seen = 0
     for tenant, group in groupby(files, key=lambda f: f.tenant):
-        def accepted(group=group):
-            for f in group:
-                if f.reason:
-                    rejected.append((f.path, f.reason))
-                else:
-                    yield f.entity, f.records
+        accepted: dict[str, list[dict]] = {}
+        for f in group:
+            if f.reason:
+                rejected.append((f.path, f.reason))
+            else:
+                accepted[f.file] = f.resources
         if not tenant:                                  # entries outside any tenant folder
-            list(accepted())
             continue
         tenants_seen += 1
-        counts = publish_records(accepted(), bootstrap, topic_prefix=cfg.kafka["topic_prefix"])
+        counts = publish_tenants([(tenant, accepted)], bootstrap, profile=profile,
+                                 topic_prefix=cfg.kafka["topic_prefix"])
         for k, v in counts.items():
             totals[k] = totals.get(k, 0) + v
         print(f"[{tenant}] published {sum(counts.values())} messages from the landing zone")
     print(f"Published from {landing} to Kafka at {bootstrap}:")
     print(json.dumps(totals, indent=2))
     if rejected:
-        print(f"REJECTED {len(rejected)} landing file(s) or entities (not published):")
+        print(f"REJECTED {len(rejected)} landing file(s) (not published):")
         for path, reason in rejected:
             print(f"  {path}: {reason}")
     if not tenants_seen:
@@ -143,28 +147,43 @@ def _produce_from_landing(cfg, bootstrap: str) -> int:
     return 1 if rejected or not tenants_seen else 0
 
 
-def _cmd_consume(args: argparse.Namespace) -> None:
-    """Bronze stage only: Kafka -> Bronze. Silver/Gold are separate stages."""
-    from idp.streaming.consumer import consume_to_bronze
+def _cmd_consume(args: argparse.Namespace) -> int | None:
+    """Bronze stage only: Kafka (TMF events) -> canonical Bronze. Silver/Gold are
+    separate stages. Returns 1 when any message was dead-lettered."""
+    from idp.ingestion.tmf.profile import load_profile
     from idp.pipeline import to_bronze
+    from idp.streaming.consumer import consume_to_bronze
 
     cfg = load_config(args.config)
     bootstrap = args.bootstrap or cfg.kafka["bootstrap"]
     print(f"Draining topics from {bootstrap} (idle timeout {args.idle_timeout}s)...")
     landed: dict = {}
-    bronze = consume_to_bronze(
+    result = consume_to_bronze(
         bootstrap, cfg.tenant_ids,
         topic_prefix=cfg.kafka["topic_prefix"], idle_timeout=args.idle_timeout,
+        profile=load_profile(cfg.tmf["profile"]),
         land=lambda frames: landed.update(to_bronze(cfg, frames)),   # commit offsets after
     )
-    total = sum(len(df) for df in bronze.values())
-    print(f"Consumed {total} records: { {k: len(v) for k, v in bronze.items()} }")
+    for problem in result.customer_problems:
+        print(f"WARNING invalid customer event (left out of the index): {problem}")
+    total = sum(len(df) for df in result.frames.values())
+    print(f"Consumed {total} records: { {k: len(v) for k, v in result.frames.items()} }")
+    if total:
+        print(f"Appended to Iceberg Bronze: {landed.get('bronze_tables')}")
+    if result.dead_letters:
+        print(f"DEAD-LETTERED {len(result.dead_letters)} message(s) to "
+              f"{cfg.kafka['topic_prefix']}.<tenant>.dlq (not landed):")
+        for d in result.dead_letters[:20]:
+            print(f"  {d.topic}[{d.partition}]@{d.offset}: {d.reason}")
+        if len(result.dead_letters) > 20:
+            print(f"  ... and {len(result.dead_letters) - 20} more")
+        return 1
     if total == 0:
         print("No messages consumed (topics empty or producer not finished). "
               "Run 'idp produce' first.")
-        return
-    print(f"Appended to Iceberg Bronze: {landed.get('bronze_tables')}")
+        return None
     print("Next: 'idp silver' to build Silver from Bronze.")
+    return None
 
 
 def _cmd_silver(args: argparse.Namespace) -> None:
@@ -190,6 +209,23 @@ def _cmd_archive_policy(args: argparse.Namespace) -> None:
 
     policy = archive_policy(load_config(args.config), storage_class=args.storage_class, fmt=args.format)
     print(json.dumps(policy, indent=2))
+
+
+def _cmd_registry_schemas(args: argparse.Namespace) -> None:
+    """Write each topic's wire contract (REQ-STR-03): <suffix>.schema.json, the TMF
+    create-event JSON Schema registered as every tenant's t.<tenant>.<suffix>-value."""
+    from pathlib import Path
+
+    from idp.ingestion.tmf.schemas import registry_schema
+    from idp.streaming import TOPIC_RESOURCES
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    for suffix, resources in TOPIC_RESOURCES.items():
+        schema = registry_schema(list(resources), f"t.<tenant>.{suffix} value: TMF create event "
+                                                  f"of {' or '.join(resources)}")
+        (out / f"{suffix}.schema.json").write_text(json.dumps(schema, indent=1) + "\n")
+    print(f"Wrote {len(TOPIC_RESOURCES)} topic schemas to {out}")
 
 
 def _cmd_spark_manifest(args: argparse.Namespace) -> None:
@@ -283,15 +319,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="Run against a temporary local lake that is removed afterwards")
     p_run.set_defaults(func=_cmd_run)
 
-    p_prod = sub.add_parser("produce", help="Publish synthetic data to Kafka topics")
+    p_prod = sub.add_parser("produce", help="Publish synthetic data to Kafka as TM Forum create events")
     p_prod.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_prod.add_argument("--from-landing", action="store_true",
                         help="Publish the landing zone's TM Forum files (written by 'idp generate'), "
-                             "validated and adapted to canonical records with the "
-                             "active TMF profile, instead of generating in memory")
+                             "checked, as TMF create events, instead of generating in memory")
     p_prod.set_defaults(func=_cmd_produce)
 
-    p_cons = sub.add_parser("consume", help="Bronze stage: drain Kafka topics -> Bronze (S3)")
+    p_cons = sub.add_parser("consume", help="Bronze stage: drain the TMF event topics, adapt them -> "
+                                            "canonical Bronze (S3); bad messages -> t.<tenant>.dlq")
     p_cons.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_cons.add_argument("--idle-timeout", type=float, default=15.0,
                         help="Stop after N seconds with no new messages")
@@ -308,6 +344,11 @@ def main(argv: list[str] | None = None) -> int:
     p_sm.add_argument("stage", choices=SPARK_STAGES)
     p_sm.add_argument("stage_args", nargs="*", help="arguments for the stage, e.g. -- --full-refresh")
     p_sm.set_defaults(func=_cmd_spark_manifest)
+    p_reg = sub.add_parser("registry-schemas",
+                           help="Write each Kafka topic's TMF JSON Schema (the registered wire contract)")
+    p_reg.add_argument("--out", required=True, help="Directory to write <suffix>.schema.json into")
+    p_reg.set_defaults(func=_cmd_registry_schemas)
+
     p_arch = sub.add_parser("archive-policy", help="Render the Bronze archive rule (S3 lifecycle / MinIO ILM)")
     p_arch.add_argument("--format", choices=("s3", "minio"), default="s3")
     p_arch.add_argument("--storage-class", default="GLACIER_IR",
