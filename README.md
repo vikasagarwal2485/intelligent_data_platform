@@ -1147,4 +1147,3 @@ Silver curation, feature engineering, both ML models, the streaming
 ## Further reading
 - [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md) — full architecture, ML design, phased plan
 - [`deploy/README.md`](deploy/README.md) — deployment, overlays, troubleshooting
-- [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md) — Kafka cluster, topics, schema registration
