@@ -1260,5 +1260,5 @@ Silver curation, feature engineering, both ML models, the streaming
 `process_bronze`, the end-to-end batch pipeline, and the scoring API.
 
 ## Further reading
-- [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md) — full architecture, ML design, phased plan
+- [`docs/decisions/decision-log.md`](docs/decisions/decision-log.md) — Architecture decision log
 - [`deploy/README.md`](deploy/README.md) — deployment, overlays, troubleshooting
