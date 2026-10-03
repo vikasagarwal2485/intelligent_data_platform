@@ -1,27 +1,5 @@
 # Intelligent Data Platform
 
-A telecom **data lakehouse** that ingests TM Forum entity/event data, curates it
-through a **medallion architecture (Bronze → Silver → Gold)**, and serves two ML
-use cases: **alternative credit-limit scoring** and **fraud detection**. It is
-multi-tenant, GDPR-aware, batch-first, and Kubernetes-native (local **minikube**,
-production **AWS EKS**).
-
-- Full design: [`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
-- Deployment details: [`deploy/README.md`](deploy/README.md) · Kafka setup: [`deploy/platform/kafka/README.md`](deploy/platform/kafka/README.md)
-
-> **Engines.** Silver and Gold run on **Apache Spark**, with one implementation
-> (`src/idp/transforms`) used by the CLI, the cluster, Airflow and the tests.
-> Locally and in CI it runs as `local[*]`. In the cluster, Silver, Gold, Score,
-> publish and maintenance run as **Spark Operator SparkApplications**: a driver plus
-> executors, sized per stage in `spark.profiles` (ADR-0027, ADR-0029).
-> scikit-learn fits the models on a bounded, stratified sample, and pandas scores
-> one Spark partition at a time; no process holds a whole table.
-> scikit-learn `HistGradientBoosting*` stands in for LightGBM/XGBoost. The lake is **Apache Iceberg** in a JDBC catalog: the
-> platform Postgres in the cluster, a local SQLite file in dev/CI (ADR-0028). Flink is
-> represented by the deployed services and the design docs.
-
----
-
 ## Table of Contents
 1. [Introduction](#1-introduction)
    - [1.1 What this project is](#11-what-this-project-is)
