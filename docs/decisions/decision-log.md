@@ -4,6 +4,12 @@ Binding architectural decisions for the Intelligent Data Platform. An agent MUST
 respect these when implementing any phase. Format: Context → Decision →
 Consequences. Status: `Accepted` unless noted.
 
+Reviewed against the implementation on 2026-10-03. An ADR whose decision was later
+changed keeps its original text and says in its **Status** which ADR changed it and
+how; the **As built** notes record where the implementation differs from the
+original decision. ADR-0033 to ADR-0037 record decisions that the code already
+followed but that had no ADR.
+
 ---
 
 ### ADR-0001 — Medallion architecture (Bronze → Silver → Gold)
@@ -14,9 +20,13 @@ Consequences. Status: `Accepted` unless noted.
   tenant-isolated, PII-tokenized) → Gold (per-subscriber features + scores).
 - **Consequences:** Each layer is independently materialized and queryable; each
   transform is a separate stage (see ADR-0009).
+- **As built:** Bronze holds the TMF events as received; Silver conforms them to the
+  canonical model (ADR-0032).
 
 ### ADR-0002 — Iceberg for Silver, TimescaleDB for Gold serving
-- **Status:** Accepted — the Parquet stand-in is superseded by ADR-0028 (all layers are Iceberg)
+- **Status:** Accepted — the Parquet stand-in and the Nessie catalog are superseded by
+  ADR-0028: Bronze, Silver and Gold are all Iceberg, in a JDBC catalog. TimescaleDB
+  stays the Gold serving store (`idp publish`, ADR-0029).
 - **Context:** Silver is analytical & huge; Gold serving needs low-latency lookups.
 - **Decision:** Silver = Apache Iceberg on object storage (ACID, schema/partition
   evolution, time-travel). Gold serving = TimescaleDB. Prototype uses plain
@@ -31,13 +41,23 @@ Consequences. Status: `Accepted` unless noted.
   Confluent-compatible **Apicurio** Schema Registry. No Confluent/Redpanda.
 - **Consequences:** KafkaNodePool/Kafka CRs (KRaft); topic names
   `t.<tenant>.<entity>` (no `tmf` segment, see ADR-0013).
+- **Status note:** The registry stays Apicurio, but the wire contracts it holds are
+  each topic's TMF JSON Schema (ADR-0031); the Avro contracts are canonical
+  contracts enforced in Silver (ADR-0032).
+- **As built:** The Strimzi entity operator runs without the user operator, since no
+  `KafkaUser` CRs (and so no per-tenant ACLs) are deployed. Topics are `KafkaTopic`
+  CRs with the delete policy and 7-day retention (`make topics`).
 
 ### ADR-0004 — Batch-first; defer real-time (Flink)
 - **Status:** Accepted
 - **Context:** Reviewer chose to start with batch.
 - **Decision:** Implement batch/micro-batch stages first; Flink real-time scoring
   is out of scope for the initial phases. Rule definitions are kept portable.
-- **Consequences:** No Flink jobs in phases 0–8; streaming is micro-batch drain.
+- **Consequences:** No Flink jobs; ingestion is a drain of the Kafka topics into
+  Bronze (`idp consume`, a Job).
+- **As built:** Silver's facts read Bronze with Spark Structured Streaming as a
+  one-shot micro-batch (`Trigger.Once`, ADR-0028). Real-time needs are served by the
+  on-demand scoring API, not by stream scoring.
 
 ### ADR-0005 — Multi-tenancy: pooled platform, isolated data + RBAC
 - **Status:** Accepted
@@ -48,6 +68,18 @@ Consequences. Status: `Accepted` unless noted.
   Keycloak(OIDC)+OPA RBAC.
 - **Consequences:** All lake access goes through a tenant-scoping gateway; a
   cross-tenant read is a defect.
+- **As built:**
+  - `tenant_id` is stamped at ingestion (from the topic) and is the leading
+    partition column of every Bronze, Silver and Gold table; topics are per tenant.
+  - Reads are scoped in code: `common/tenancy.py:scope_to_tenant` (MCP tools), and
+    the scoring API takes the tenant from the caller's Keycloak token (ADR-0034).
+  - The MCP identity is limited by Trino file-based access control (ADR-0030).
+  - The tenants share one bucket per layer, separated by partitions, not prefixes
+    or buckets (ADR-0008).
+  - `idp-tenant-*` namespaces carry the quota, NetworkPolicy and RBAC, but the
+    stages serve all tenants from `idp-app`, so the namespaces don't isolate the
+    pipeline's compute yet.
+  - Not implemented: Kafka ACLs (no `KafkaUser`s, ADR-0003) and OPA.
 
 ### ADR-0006 — GDPR PII tokenization (per-tenant salted hash)
 - **Status:** Accepted
@@ -56,6 +88,12 @@ Consequences. Status: `Accepted` unless noted.
   Deterministic per tenant so tokens still join; consent (`privacy-consent`)
   gates ML use; support right-to-erasure and retention.
 - **Consequences:** Silver never stores raw identifiers; joins use tokens.
+- **As built:** The token is `tok_` + the first 24 hex characters of
+  `sha256("<salt>:<value>")`, computed in Spark (`transforms/tokens.py`); the salts are
+  per tenant (`tenants.<id>.pii_salt`). Bronze keeps the raw events (ADR-0032), so it
+  holds PII and the Trino MCP identity can't read it. Gold keeps only subscribers
+  whose `consent_analytics` is true (fail closed). Right-to-erasure and retention
+  jobs are not implemented.
 
 ### ADR-0007 — Namespace split: idp-platform vs idp-app
 - **Status:** Accepted
@@ -65,6 +103,11 @@ Consequences. Status: `Accepted` unless noted.
   (scoring API, medallion Jobs) in `idp-app`; per-tenant isolation namespaces
   `idp-tenant-*`. Apps reach services via cross-namespace DNS.
 - **Consequences:** Jobs use `<svc>.idp-platform.svc` addresses.
+- **As built:** `idp-platform` also runs the Strimzi operator, Apicurio, Kafka UI and
+  the Spark Operator (which watches `idp-app`). `idp-app` runs the scoring-api
+  Deployment, the non-Spark Jobs (generate, produce, produce-from-landing, consume,
+  labels) and the Spark stages as SparkApplications (silver, gold, train, score,
+  publish, maintain; ADR-0029, ADR-0035).
 
 ### ADR-0008 — One MinIO/S3 bucket per medallion layer
 - **Status:** Accepted (supersedes an earlier single-bucket+prefix approach)
@@ -72,6 +115,10 @@ Consequences. Status: `Accepted` unless noted.
 - **Decision:** `s3://idp-bronze`, `s3://idp-silver`, `s3://idp-gold` (prefix
   `idp` configurable). `lake_uri(layer)` → `<prefix>-<layer>`.
 - **Consequences:** `install-infra.sh` provisions all three buckets.
+- **As built:** Two more buckets: `idp-landing` (the TM Forum source files) and
+  `idp-ml` (labels store, MLflow artifacts, object-store models). Each layer's
+  Iceberg tables live under `tables/` in its bucket (ADR-0028). `make minio-reset`
+  recreates all five buckets and clears the Iceberg catalog together.
 
 ### ADR-0009 — Separation of concerns: independent medallion stages
 - **Status:** Accepted (supersedes consumer→silver→gold chaining)
@@ -82,6 +129,12 @@ Consequences. Status: `Accepted` unless noted.
   `run()` only composes them locally.
 - **Consequences:** CLI `idp consume|silver|gold|train`; separate K8s Jobs;
   Airflow orchestrates Silver→Gold; Spark implements production Gold.
+- **As built:** The stages are `to_bronze`, `to_silver`, `to_gold`, `to_labels`,
+  `train`, `to_scores` and `publish_serving` (`pipeline.py`), run by `idp consume`,
+  `silver`, `gold`, `labels`, `train`, `score` and `publish`, plus `idp maintain`.
+  The Spark stages run as SparkApplications and the others as Jobs (ADR-0029,
+  ADR-0035); Airflow runs them as four DAGs (ADR-0026). `idp run` composes them
+  locally.
 
 ### ADR-0010 — Prototype in pandas/scikit-learn; document the production engines
 - **Status:** Superseded by ADR-0027 (2026-09-26)
@@ -93,7 +146,8 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** Tests run in CI without infra; production ports reuse the same logic.
 
 ### ADR-0011 — Nessie as the Iceberg catalog
-- **Status:** Accepted
+- **Status:** Superseded for the lake by ADR-0028 (2026-09-27): the lake uses an
+  Iceberg JDBC catalog. Nessie stays deployed but catalogues nothing.
 - **Context:** Iceberg needs a catalog; options include Hive, Glue, Polaris, Nessie.
 - **Decision:** Nessie (git-like, branchable) — reviewer decision.
 - **Consequences:** Deploy Nessie (in-memory store for prototype); production uses
@@ -107,10 +161,17 @@ Consequences. Status: `Accepted` unless noted.
 - **Decision:** Apache Airflow (data-first DAGs, backfill, SLAs). Argo reserved
   for CI/CD if needed.
 - **Consequences:** `idp_medallion_dag.py` orchestrates Silver→Gold + daily training.
+- **As built:** `idp_medallion_dag.py` defines four DAGs: `idp_features`,
+  `idp_training`, `idp_inference` (ADR-0026) and the daily `idp_maintenance`. Every
+  task submits a SparkApplication (ADR-0035). Argo CD is used only for the platform
+  base and the app manifests (ADR-0016).
 
 ### ADR-0013 — Avro contracts; drop the `tmf` segment from topics/subjects
 - **Status:** Accepted; the wire-contract part (Avro subjects for the topics) is
-  superseded by ADR-0031 (2026-10-02). Topic naming without `tmf` stays.
+  superseded by ADR-0031 (2026-10-02). Topic naming without `tmf` stays. The Avro
+  schemas are now the canonical contracts in `config/avro/canonical/` (namespace
+  `com.idp.canonical`, enforced by Silver) and the Silver table documents in
+  `config/avro/silver/` (ADR-0032); none are registered in Apicurio.
 - **Context:** Topic/subject naming and schema management.
 - **Decision:** Avro schemas in `config/avro/`; register via Apicurio
   (`<topic>-value` subjects). Topics are `t.<tenant>.<entity>` (no `tmf`); Avro
@@ -118,7 +179,8 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** Producers/consumers use these names; registry auto-detected.
 
 ### ADR-0014 — Synthetic data generator; labels stay out of the lake
-- **Status:** Accepted
+- **Status:** Accepted; the in-process labels are refined by ADR-0025: labels are
+  persisted to a governed labels store, outside the lake's layers.
 - **Context:** `data_samples/` are single illustrative docs; ML needs volume + labels.
 - **Decision:** A deterministic, multi-tenant, labelled synthetic generator is a
   Phase-0 deliverable. Ground-truth labels (fraud/default) exist only in-process
@@ -134,6 +196,16 @@ Consequences. Status: `Accepted` unless noted.
   + IsolationForest, fused into one score. Evaluate out-of-sample (AUC/KS; PR-AUC/
   precision@k).
 - **Consequences:** Explainability (SHAP) and calibration are part of the credit spec.
+- **As built:**
+  - Credit: PD from `HistGradientBoostingClassifier`, with a logistic scorecard as
+    the baseline and the reason-code fallback; `recommended_limit` =
+    `affordability_base` × (1 − PD), clipped to the policy band (5–500).
+  - Fraud: `fraud_score` = 0.6 × classifier probability + 0.2 × anomaly score +
+    0.2 × rule score, clipped to 0–1.
+  - Reason codes use SHAP when the optional `shap` extra is installed (ADR-0024).
+    No probability calibration step is implemented.
+  - Training fits on a bounded sample (ADR-0029); a new version serves only if it
+    passes the quality gate (ADR-0033).
 
 ### ADR-0016 — minikube (local) / EKS (prod); Kustomize + Argo CD
 - **Status:** Accepted
@@ -141,6 +213,10 @@ Consequences. Status: `Accepted` unless noted.
 - **Decision:** Same Kustomize base with `overlays/local` (minikube, `imagePullPolicy:
   Never`) and `overlays/aws` (EKS, ECR, IRSA). GitOps via Argo CD.
 - **Consequences:** No docker-compose; image built into minikube for local.
+- **As built:** Local bring-up is driven by `make` (Helm installs plus Kustomize
+  applies); the two Argo CD Applications in `deploy/platform/argocd` sync only the
+  AWS overlays of the platform base and the scoring-api. The one compose file, `deploy/dev/trino-compose.yaml`,
+  is a test stack for the MCP integration tests (ADR-0030), not a deployment.
 
 ### ADR-0017 — Avoid Bitnami charts for the prototype
 - **Status:** Accepted
@@ -149,6 +225,9 @@ Consequences. Status: `Accepted` unless noted.
   MinIO chart, `timescale/timescaledb`, `quay.io/keycloak`, Strimzi, Trino,
   Nessie, Airflow, MLflow, kube-prometheus-stack).
 - **Consequences:** `install-infra.sh` pins these; tuned values for Trino/Nessie.
+- **As built:** Also Apicurio, Kafka UI (Kafbat) and the Kubeflow Spark Operator.
+  One exception: the MCP test stack uses Bitnami's frozen legacy MinIO image, because
+  the official MinIO images are no longer publicly pullable (ADR-0030).
 
 ### ADR-0018 — Deploy layout split by owning team: `platform/` vs `app/`
 - **Status:** Accepted
@@ -162,6 +241,10 @@ Consequences. Status: `Accepted` unless noted.
   the overlays compose `../../base` + `../../../app/deployment`.
 - **Consequences:** Pure move-and-rewire (`git mv` + path updates); no chart,
   image, or runtime behavior change, so no cluster re-install is required.
+- **As built:** `deploy/platform/` also holds `mlflow/`, `monitoring/`,
+  `spark-operator/` and `mk-check.sh`. `deploy/app/` holds `jobs/` (the non-Spark
+  Jobs only) and `spark/` (the SparkApplications rendered from `spark.profiles` by
+  `make spark-manifests`; the Airflow DAG image bakes this folder in).
 
 ### ADR-0019 — Observability via kube-prometheus-stack + Strimzi metrics
 - **Status:** Accepted (2026-07-14)
@@ -220,6 +303,8 @@ Consequences. Status: `Accepted` unless noted.
 - **Consequences:** Existing tables/columns and tests are unaffected (additive
   only). Fee charges are available to Silver/MCP but intentionally **not** fed to
   the credit/fraud models yet (a possible later feature-engineering change).
+- **Status note:** ADR-0023 feeds fee charges to the credit model. Since ADR-0031 the
+  fee charges travel as TMF `AppliedCustomerBillingRate` resources.
 
 ### ADR-0023 — Fee-charge features feed the credit model
 - **Status:** Accepted (2026-07-20) — refines ADR-0022 for the credit model
@@ -235,7 +320,11 @@ Consequences. Status: `Accepted` unless noted.
   per-subscriber attribution are Silver/feature-time joins.
 
 ### ADR-0024 — Shared MinIO model store + adverse-action reason codes
-- **Status:** Accepted (2026-07-20)
+- **Status:** Accepted (2026-07-20). The model store is refined by ADR-0033: with an
+  MLflow tracking URI the models are registry versions with a gated `champion`
+  alias; the object store below remains the fallback without one. Gold no longer
+  reads models (ADR-0025), and `train-job.yaml` was replaced by the `train`
+  SparkApplication (ADR-0035). The reason codes stand.
 - **Context:** `train`, `gold` and `scoring-api` are separate pods; models were
   saved to an ephemeral per-pod `ml/artifacts` dir, so Gold/serving never saw the
   trained models and Gold silently emitted feature tables with no scores. Also no
@@ -254,7 +343,8 @@ Consequences. Status: `Accepted` unless noted.
   adverse-action method and always available.
 
 ### ADR-0025 — Train on historical Gold + a labels store; split Gold/Score
-- **Status:** Accepted (2026-07-20) — refines ADR-0014
+- **Status:** Accepted (2026-07-20) — refines ADR-0014. The two DAGs are replaced by
+  ADR-0026's three, and `labels` left Airflow (ADR-0035).
 - **Context:** ADR-0014 kept labels out of the lake, so `train` regenerated
   synthetic data in memory instead of learning from historical lake data. Scoring
   was also folded into `to_gold`, coupling feature-build with inference and forcing
@@ -273,7 +363,9 @@ Consequences. Status: `Accepted` unless noted.
   observed-outcomes feed.
 
 ### ADR-0026 — Three dataset-driven DAGs (features / inference / training)
-- **Status:** Accepted (2026-07-20) — refines ADR-0025
+- **Status:** Accepted (2026-07-20) — refines ADR-0025. `idp_training` is now `train`
+  only: labels are seeded by `make labels` (ADR-0035). A fourth DAG,
+  `idp_maintenance` (daily, ADR-0028), triggers nothing.
 - **Context:** Phase 13 folded `score` into the refresh DAG (`silver >> gold >>
   score >> publish`). Scoring depends on a model produced by the training DAG on a
   different cadence, so cold start wasted a score run and a newly trained model
@@ -293,7 +385,11 @@ Consequences. Status: `Accepted` unless noted.
   in the inference DAG (re-pushes features + scores each run — a harmless replace).
 
 ### ADR-0027 — Spark for data transforms; pandas and scikit-learn for ML only
-- **Status:** Accepted (2026-09-26) — supersedes ADR-0010; the cluster runtime is refined by ADR-0029 (Spark Operator)
+- **Status:** Accepted (2026-09-26) — supersedes ADR-0010; the cluster runtime is
+  refined by ADR-0029 (Spark Operator). The pandas exceptions have since narrowed:
+  Bronze is appended through `pyiceberg` (ADR-0028), publish loads over Spark JDBC
+  (ADR-0029), the MCP tools query Trino (ADR-0030), and scoring runs pandas per Spark
+  partition (ADR-0029).
 - **Context:** ADR-0010 put the Silver/Gold logic in pandas so the prototype was
   testable without a cluster, with PySpark jobs as the "production" port. That
   left every business rule implemented twice (`curation/silver.py` +
@@ -339,6 +435,10 @@ Consequences. Status: `Accepted` unless noted.
     snapshots appended since the last run (`Trigger.Once` plus a checkpoint per
     fact/source), and merges them insert-if-absent on `(tenant_id, id)`.
     `dim_subscriber` is rebuilt in full. `--full-refresh` replays all of Bronze.
+    *(Since ADR-0032: every dimension (`dim_subscriber`, `dim_customer`,
+    `dim_billing_account`, `dim_product`) is rebuilt in full from the latest version
+    of each reference entity, and facts and quarantine rows are conformed per
+    micro-batch before the merge.)*
   - **Gold is a full recompute** per tenant (`overwritePartitions`). Scores are
     appended.
   - `idp maintain` (the daily DAG) compacts files, expires snapshots and removes
@@ -368,7 +468,11 @@ Consequences. Status: `Accepted` unless noted.
   - Nessie remains provisioned for a future branch/tag workflow.
 
 ### ADR-0029 — Spark Operator runtime; distributed score and publish; bounded training
-- **Status:** Accepted (2026-09-28) — refines ADR-0027's runtime
+- **Status:** Accepted (2026-09-28) — refines ADR-0027's runtime. `train` also became
+  a SparkApplication and the single-pod stage Jobs were deleted (ADR-0035); the model
+  loading seam is now the MLflow registry (ADR-0033); on-demand fraud scoring scales
+  the anomaly on the training range (ADR-0037); shuffle parallelism follows the
+  profile (ADR-0036).
 - **Context:** After ADR-0027, Silver and Gold ran on Spark, but only as `local[*]`
   inside one pod. So a stage could process no more than one container's memory, and
   nothing scaled out. Three stages still pulled whole tables into one Python
@@ -468,8 +572,10 @@ Consequences. Status: `Accepted` unless noted.
 ### ADR-0031 — TM Forum events on Kafka; the adapter runs in the consumer; two contracts
 - **Status:** Accepted (2026-10-02). Supersedes ADR-0013's wire-contract part. Its
   "adapter in the consumer" part is revised by ADR-0032 (raw Bronze). The customer
-  topic's compaction was withdrawn after ADR-0032 (2026-10-03): all topics use the
-  delete policy, since Silver resolves customers from Bronze.
+  topic's compaction was withdrawn after ADR-0032 (ADR-0036): all topics use the
+  delete policy, since Silver resolves customers from Bronze. Dead letters are now
+  only messages that can't be stored as events; the rest is quarantined by Silver
+  (ADR-0032).
 - **Context:** The landing zone holds TM Forum Open API v5 resources (REQ-BRZ-03),
   but the producer adapted them to canonical records before publishing. So Kafka
   carried the platform's internal model, not what a real TMF source would send.
@@ -529,8 +635,8 @@ Consequences. Status: `Accepted` unless noted.
   - **Silver conforms** (`transforms/conform.py`): schema, tenant, the mapping profile's
     adapter and the canonical Avro contract. Failures go to `silver.quarantine` (no
     payload, no values in reasons) and the run continues. Reference entities use the
-    latest version per id by `event_time`; facts are conformed per micro-batch with
-    `mapInPandas`.
+    latest version per id by `event_time` (ties broken by `_ingested_at`, then the
+    Kafka offset); facts are conformed per micro-batch with `mapInPandas`.
   - **Canonical model.** `accounts` becomes `billing_accounts`, referencing the paying
     party (`payer_party_id`, TMF `relatedParty` role `payer`). `customers` is an entity
     (TMF629 Customer, the party role `customer`) with the segment and since-date;
@@ -551,3 +657,107 @@ Consequences. Status: `Accepted` unless noted.
   - `idp migrate-lake` (legacy Parquet to canonical Iceberg Bronze) is removed: Silver
     reads only raw tables. A legacy lake is reset and re-streamed instead.
 
+### ADR-0033 — MLflow model registry with a gated `champion` alias
+- **Status:** Accepted (2026-09-29) — refines ADR-0024's model store
+- **Context:** Models were joblib files in `s3://idp-ml`, overwritten by every
+  training run: no versions, no record of the metrics a model was trained with, and a
+  worse model went straight to scoring and serving.
+- **Decision:**
+  - A `ModelStore` interface (`ml/registry.py`) with two implementations:
+    `MlflowModelStore` when `mlflow.tracking_uri` (`IDP_MLFLOW_TRACKING_URI`) is set,
+    else `ObjectModelStore` over the existing joblib store. `pipeline` and the API
+    depend only on the interface.
+  - Each training run logs an MLflow run and registers `idp-credit` and `idp-fraud`
+    versions, packaged as an `mlflow.pyfunc` wrapper around the joblib artifact, so
+    callers unwrap the original model with its `recommend_limit`, `score` and
+    `reason_codes`.
+  - **Quality gate:** a version becomes `champion` only if credit hold-out
+    AUC ≥ `credit.min_auc` (0.55), or fraud hold-out PR-AUC ≥ `fraud.min_pr_auc_lift`
+    (1.5) × the hold-out fraud rate. A missing metric fails the gate. The outcome is
+    logged as run tags.
+  - Score and the scoring API load `champion`. The API re-checks the alias every
+    `mlflow.refresh_seconds` (60) and keeps serving its cached model when the check
+    fails.
+  - MLflow runs in `idp-platform` with its backend store in the TimescaleDB `mlflow`
+    database and artifacts in `s3://idp-ml/mlflow`.
+- **Consequences:** Every version and its metrics are kept and a failing model never
+  serves. A new champion re-runs inference through the `MODEL` dataset (ADR-0026).
+  The clients carry `mlflow-skinny`; without a tracking URI (local dev, tests) the
+  latest trained model is used, ungated.
+
+### ADR-0034 — OIDC tenant authentication on the scoring API (Keycloak)
+- **Status:** Accepted (2026-09-29) — implements ADR-0005's RBAC for the API
+- **Context:** The scoring API trusted the `tenant_id` in each request, so any caller
+  could read another tenant's scores.
+- **Decision:**
+  - The API validates a Keycloak access token on every call (PyJWT with the realm's
+    JWKS, cached): RS256 signature, issuer, audience, `exp`/`nbf` with leeway.
+  - The tenant comes from the token's `tenant_id` claim (`auth.tenant_claim`); a
+    request whose `tenant_id` differs gets 403, a missing or invalid token 401.
+  - Keycloak imports the `idp` realm from a ConfigMap at start: the
+    `idp-scoring-api` client with an audience mapper, a `tenant_id` mapper, dev users
+    and per-tenant client-credentials clients. `make keycloak-token` issues a token.
+  - `auth.enabled` is false in `config/platform.yaml` (local `make serve`) and true
+    in both app overlays.
+- **Consequences:** Per-tenant scoping of the API no longer depends on the caller.
+  Validation is local (no introspection call per request). Keycloak's store is in
+  memory, so the realm re-imports on every restart; tokens must be fetched through
+  the in-cluster hostname so the issuer matches.
+
+### ADR-0035 — Airflow submits only SparkApplications; the Spark-stage Jobs are retired
+- **Status:** Accepted (2026-09-30) — refines ADR-0026 and ADR-0029
+- **Context:** After ADR-0029, `train` and `labels` still ran in Airflow as pods
+  (`KubernetesPodOperator`), so Airflow needed pod-launch rights in `idp-app`, and the
+  old single-pod Jobs of the Spark stages were hand-written copies of their env and
+  resources that drifted from the rendered manifests.
+- **Decision:**
+  - `train` is a Spark stage: a SparkApplication with one executor and a large
+    driver, which holds the bounded sample and fits.
+  - Every Airflow task is a `SparkKubernetesOperator` (silver, gold, train, score,
+    publish, maintain). `idp_training` is `train` only; labels are seeded by
+    `make labels` (a Job), and `train` fails with "seed labels" without them.
+  - Airflow's RBAC in `idp-app` creates SparkApplications and reads pods, logs and
+    events; it can't create pods.
+  - The Spark stages' Jobs (`silver-`, `gold-`, `score-`, `publish-`, `maintain-`,
+    `train-job.yaml`) are deleted; rollback is through version control. The
+    non-Spark Jobs (generate, produce, produce-from-landing, consume, labels) stay.
+- **Consequences:** Manual `make` runs and Airflow run the same rendered manifests
+  (`deploy/app/spark/`), the only copy of each stage's env and resources.
+
+### ADR-0036 — Spark parallelism from the stage profile; shared Gold aggregates; no compacted topics
+- **Status:** Accepted (2026-10-03) — change `silver-performance-and-customer-topic`
+  (implemented; not yet archived)
+- **Context:** `make silver` took about 4 minutes and `make gold` about 3 for 150
+  agreements and ~35K events per tenant. Spark's default 200 shuffle partitions made
+  every streaming micro-batch run hundreds of near-empty tasks (Structured Streaming
+  doesn't get adaptive coalescing), the fact conform ran on one core, and Gold
+  recomputed the same per-subscriber aggregates for each feature table. Separately,
+  Kafka UI showed no message count for the compacted `customer` topic, which no longer
+  needed compaction once Silver resolved customers from Bronze (ADR-0032).
+- **Decision:**
+  - `spark.sql.shuffle.partitions` comes from `spark.profiles.<stage>.shuffle_partitions`,
+    else 2 × the cores the stage computes on (executor instances × cores, or the
+    local session's cores). Adaptive execution is enabled explicitly.
+  - Each fact batch is repartitioned to the default parallelism before the conform
+    step. A new Iceberg table is created by DDL in one commit, with nullable columns.
+  - Gold computes the shared per-subscriber aggregates once, caches them, and builds
+    both feature tables from them.
+  - The `customer` topic uses the delete policy with 7-day retention, like every topic.
+- **Consequences:** On minikube `make silver` went from 3 min 54 s to 111 s and
+  `make gold` from 2 min 49 s to 63 s, with identical output. A streaming checkpoint
+  keeps the partition count it started with, so existing checkpoints need
+  `make silver-full-refresh` once to pick up the new value.
+
+### ADR-0037 — On-demand fraud scores scale the anomaly on the training range
+- **Status:** Accepted (2026-10-03) — refines ADR-0029's anomaly normalization
+- **Context:** `FraudModel` scales the IsolationForest anomaly to 0–1 over the scored
+  population's min/max. That is right for `idp score` (the whole population), but
+  `POST /fraud-score` scores one subscriber, whose min equals its max, so the anomaly
+  was always 0 and the on-demand `fraud_score` ignored it.
+- **Decision:** `fit()` stores the training population's raw anomaly range
+  (`anomaly_range`) with the model. The API scales with that range, clipped to 0–1;
+  batch scoring keeps the population range. A model trained before the change has no
+  range and scores 0 for the anomaly until retrained.
+- **Consequences:** On-demand scores include the anomaly and equal the precomputed
+  `gold.fraud_scores` when the scored population is the training one; when today's
+  population differs, the two can differ slightly.

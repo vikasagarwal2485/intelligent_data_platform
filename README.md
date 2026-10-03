@@ -28,7 +28,8 @@ production **AWS EKS**).
    - [1.2 Platform services](#12-platform-services)
    - [1.3 Applications](#13-applications)
    - [1.4 System integration architecture](#14-system-integration-architecture)
-   - [1.5 Deployment architecture](#15-deployment-architecture)
+   - [1.5 Logical architecture](#15-logical-architecture)
+   - [1.6 Deployment architecture](#16-deployment-architecture)
 2. [Project structure](#2-project-structure)
 3. [Installation & deployment](#3-installation--deployment)
    - [3.1 Batch mode](#31-batch-mode-local-vs-production)
@@ -84,16 +85,32 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 
 ### 1.3 Applications
 
-Workloads that use the platform, deployed into the **`idp-app`** namespace.
+Workloads that use the platform. In the cluster they all run in the **`idp-app`**
+namespace from the one `idp` image. The non-Spark stages are Kubernetes Jobs; the
+Spark stages are Spark Operator `SparkApplication`s (a driver pod plus executor pods,
+sized by `spark.profiles.<stage>`).
 
-| Application | Purpose |
-|---|---|
-| **scoring-api** (FastAPI) | On-demand `/credit-limit` and `/fraud-score` endpoints; loads trained models |
-| **idp-produce** (K8s Job) | Publishes synthetic data as TM Forum create events to `t.<tenant>.<resource>` Kafka topics |
-| **idp-consume** (K8s Job) | **Bronze stage**: drains topics, lands each TMF event as received → raw Bronze (S3); messages that aren't events → `t.<tenant>.dlq`. Does not chain into Silver/Gold |
-| **idp-silver** (K8s Job) | **Silver stage**: Bronze (S3) → canonical Silver (S3) |
-| **idp-gold** (K8s Job) | **Gold stage**: Silver (S3) → feature tables (+scores) (S3) |
-| **`idp` CLI** | `produce` · `consume` · `silver` · `gold` · `train` · `run` (local compose) · `serve` |
+| Application | Kind | Stage | Purpose |
+|---|---|---|---|
+| **scoring-api** (FastAPI) | Deployment + Service | Serving | `POST /credit-limit` and `/fraud-score` (on-demand, the MLflow `champion` models) and `GET /serving/{table}/{tenant}/{service_id}` (precomputed rows from TimescaleDB). Requires a Keycloak token whose `tenant_id` claim scopes every call |
+| **idp-generate** | Job | Source | Writes the synthetic source data as TM Forum resource files to `s3://idp-landing` |
+| **idp-produce** | Job | Ingestion | Publishes in-memory synthetic data as TM Forum create events to the `t.<tenant>.<resource>` topics |
+| **idp-produce-from-landing** | Job | Ingestion | Validates the landing files and publishes them as TM Forum create events |
+| **idp-consume** | Job | Bronze | Drains the topics and lands each event as received in raw Bronze; messages that aren't events go to `t.<tenant>.dlq`. Doesn't chain into Silver |
+| **idp-labels** | Job | ML | Seeds the labels/outcomes store `s3://idp-ml/labels` (training input) |
+| **idp-silver** | SparkApplication | Silver | Conforms new Bronze events to the canonical model (failures to `silver.quarantine`) and builds the dimensions and facts |
+| **idp-gold** | SparkApplication | Gold | Silver → `gold.credit_features` / `gold.fraud_features` |
+| **idp-train** | SparkApplication | ML | Gold features + labels → new model versions in MLflow; `champion` only if the quality gate passes |
+| **idp-score** | SparkApplication | Inference | Gold features + champions → `gold.credit_scores` / `gold.fraud_scores` |
+| **idp-publish** | SparkApplication | Serving | Gold → TimescaleDB `gold.*` serving tables (staging load + atomic swap) |
+| **idp-maintain** | SparkApplication | Operations | Compacts files, expires snapshots and removes orphan files on every lake table |
+
+Outside the cluster:
+- **`idp` CLI**: `generate`, `produce`, `consume`, `silver`, `gold`, `labels`, `train`,
+  `score`, `publish`, `maintain`, `run` (the whole flow locally), `serve`, `mcp`, plus
+  helpers (`spark-manifest`, `registry-schemas`, `archive-policy`).
+- **MCP analytics server** (`make mcp`): a stdio server on the operator's host; its
+  tools query Silver and Gold through Trino as a read-only identity (section 4.6).
 
 ### 1.4 System integration architecture
 
@@ -103,66 +120,189 @@ flowchart LR
 
     subgraph BATCH["Batch path (local Spark)"]
       direction TB
-      B_ALL["idp run: synthetic → Bronze → Silver → Gold + ML"]
+      B_ALL["idp run: synthetic → Bronze → Silver → Gold → train → score"]
       B_OUT["data/lake/ (local Iceberg, SQLite catalog)"]
       B_ALL --> B_OUT
     end
 
     subgraph STREAM["Streaming path (in-cluster)"]
       direction TB
+      LAND["Landing zone<br/>s3://idp-landing (TMF files)"]
       KAFKA["Apache Kafka<br/>t.&lt;tenant&gt;.&lt;resource&gt; (TMF events)"]
-      SR["Schema Registry<br/>(Apicurio)"]
-      BRONZE["Bronze<br/>s3://idp-bronze"]
-      SILVER["Silver<br/>s3://idp-silver"]
-      GOLD["Gold<br/>s3://idp-gold"]
+      SR["Schema Registry<br/>(Apicurio, TMF JSON Schemas)"]
+      BRONZE["Bronze (raw)<br/>s3://idp-bronze"]
+      SILVER["Silver (canonical)<br/>s3://idp-silver"]
+      GOLD["Gold (features + scores)<br/>s3://idp-gold"]
+      LABELS["Labels store<br/>s3://idp-ml/labels"]
+      LAND -->|idp produce from landing| KAFKA
       KAFKA <--> SR
       KAFKA -->|idp consume| BRONZE
       BRONZE -->|idp silver| SILVER
       SILVER -->|idp gold| GOLD
     end
 
+    SYN -->|idp generate| LAND
     SYN --> B_ALL
     SYN -->|idp produce| KAFKA
+    SYN -->|idp labels| LABELS
 
-    GOLD --> API["scoring-api<br/>/credit-limit /fraud-score"]
-    B_OUT --> MODELS["ml/artifacts<br/>trained models"]
-    MODELS --> API
-    SILVER --> TRINO["Trino (ad-hoc SQL)"]
+    MODELS["ml/artifacts (local) ·<br/>MLflow registry, champion alias (cluster)"]
+    B_ALL -->|train| MODELS
+    GOLD -->|idp train| MODELS
+    LABELS -->|idp train| MODELS
+    MODELS -->|idp score| GOLD
+    GOLD -->|idp publish| TS["TimescaleDB<br/>gold.* serving tables"]
+    MODELS --> API["scoring-api<br/>/credit-limit /fraud-score /serving"]
+    TS --> API
+    SILVER --> TRINO["Trino (SQL) → MCP server"]
     GOLD --> TRINO
 ```
 
-**Key idea:** both paths run the *same* curation and feature logic
-(`curate()`, `build_*_features()`); they differ only in transport (in-process vs
-Kafka) and storage (local dirs vs MinIO). ML **training** happens on the batch
-path (it needs labels); the streaming path builds Gold feature tables and
-**applies** already-trained models.
+**Key idea:** both paths run the *same* stage functions (`to_silver()`, `to_gold()`,
+`train()`, `to_scores()` in `pipeline.py`) over the same Spark transforms; they
+differ only in transport (in-process vs Kafka), storage (local Iceberg vs MinIO) and
+model store (`ml/artifacts` vs the MLflow registry). In the cluster, **training** is
+its own stage: `idp train` learns from historical Gold features and the labels store
+and registers the models, `idp score` applies the `champion` models to Gold, and the
+scoring API loads the same champions for on-demand calls.
 
-### 1.5 Deployment architecture
+### 1.5 Logical architecture
+
+The layers and the components that implement them. This is the design of
+[`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
+§1.2 as built; the table after the diagram lists where the build differs from the plan.
+
+```mermaid
+flowchart TB
+
+    subgraph SRC["Sources"]
+        SYN["Synthetic generator<br/>(stands in for operator systems)"]
+        LAND["Landing zone s3://idp-landing<br/>TM Forum Open API v5 resource files"]
+    end
+
+    subgraph ING["Ingestion"]
+        PROD["idp produce<br/>(validate landing files, publish TMF create events)"]
+        KAFKA["Kafka (Strimzi) t.&lt;tenant&gt;.&lt;resource&gt;<br/>customer / party / billingAccount / agreement / product /<br/>appliedCustomerBillingRate / topupBalance / productUsage / dlq"]
+        SR["Apicurio Schema Registry<br/>(TMF JSON Schemas: the wire contract)"]
+        CONS["idp consume<br/>(land as received, DLQ non-events)"]
+    end
+
+    subgraph BRONZE["Bronze (raw, immutable, Iceberg)"]
+        B["bronze.tmf_&lt;resource&gt;<br/>payload verbatim + envelope + Kafka metadata,<br/>partitioned by tenant_id, ingest_date"]
+    end
+
+    subgraph SILVER["Silver (canonical, tokenized, Iceberg)"]
+        CONF["Conform: event check, TMF profile adapter,<br/>canonical Avro contract (config/avro/canonical)"]
+        S["dim_subscriber, dim_customer, dim_billing_account, dim_product<br/>fact_usage, fact_recharge, fact_fee_charge"]
+        Q["silver.quarantine"]
+    end
+
+    subgraph GOLD["Gold (Iceberg)"]
+        G1["credit_features, fraud_features<br/>(consenting subscribers only)"]
+        G2["credit_scores, fraud_scores"]
+    end
+
+    subgraph ML["ML & serving"]
+        LBL["Labels store s3://idp-ml/labels"]
+        TRAIN["idp train (bounded stratified sample)"]
+        REG["MLflow registry<br/>idp-credit / idp-fraud, gated champion alias"]
+        SCORE["idp score (distributed, models broadcast)"]
+        TS["TimescaleDB gold.* serving tables"]
+        API["scoring-api (FastAPI)<br/>on-demand + precomputed"]
+    end
+
+    subgraph OPS["Orchestration, query, governance & observability"]
+        AF["Airflow: idp_features, idp_training,<br/>idp_inference, idp_maintenance"]
+        SPK["Spark Operator (SparkApplications)"]
+        CAT["Iceberg JDBC catalog<br/>(iceberg DB on TimescaleDB)"]
+        TR["Trino lake catalog → MCP analytics server"]
+        GOV["Tenancy & GDPR: tenant_id partitions,<br/>salted tokens, consent, Keycloak OIDC,<br/>Trino read-only identity"]
+        MON["Prometheus + Grafana"]
+    end
+
+    SYN --> LAND --> PROD
+    SYN -->|in-memory| PROD
+    PROD --> KAFKA
+    KAFKA <--> SR
+    KAFKA --> CONS --> B
+    B --> CONF --> S
+    CONF --> Q
+    S --> G1
+    G1 & LBL --> TRAIN --> REG
+    G1 & REG --> SCORE --> G2
+    G1 & G2 -->|idp publish| TS
+    TS & REG --> API
+    S & G1 & G2 --> TR
+    AF -->|submits| SPK
+    SPK -.runs.-> CONF & G1 & TRAIN & SCORE
+    CAT -.tables.-> B & S & G1
+    GOV -.enforces.-> S & G1 & TR & API
+    KAFKA & API -.metrics.-> MON
+```
+
+| Plan (§1.2) | As built |
+|---|---|
+| Apache NiFi lands, routes and validates files | `idp produce --from-landing` validates the TM Forum landing files and publishes them; a rejected file stops the run |
+| Avro contracts in the Schema Registry | The wire contract is each topic's TMF JSON Schema in Apicurio; the canonical Avro contracts are enforced by Silver's conform step (ADR-0031, ADR-0032) |
+| Kafka S3 sink into raw JSON/Avro Bronze files | `idp consume` appends each event to a raw Iceberg Bronze table (ADR-0028, ADR-0032) |
+| Nessie as the Iceberg catalog | An Iceberg JDBC catalog on the platform Postgres; Nessie stays provisioned, unused (ADR-0028) |
+| Great Expectations quality gates | Schema, tenant, reference and Avro-contract checks in the conform step, with failures in `silver.quarantine` |
+| Feast feature store (offline Iceberg, online Timescale) | Gold Iceberg feature tables (offline) mirrored to TimescaleDB by `idp publish` (online); the feature contract lives in `common/feature_contract.py` |
+| `subscriber_features_daily`, aggregates/KPIs | One row per subscriber in `credit_features` and `fraud_features`; KPIs come from the MCP tools over Trino |
+| Keycloak + OPA row/column policies | Keycloak OIDC tokens scope the scoring API; Trino file-based access control limits the MCP identity to Silver and Gold reads. OPA isn't deployed |
+| Flink real-time scoring | Deferred (ADR-0004): scoring is the batch `idp score` stage plus the on-demand API |
+
+### 1.6 Deployment architecture
 
 ```mermaid
 flowchart TB
     subgraph K8S["Kubernetes (minikube local / EKS prod)"]
       direction TB
       subgraph PLAT["namespace: idp-platform (shared services)"]
-        MINIO["MinIO"]; KAFKA["Kafka (Strimzi)"]; REG["Schema Registry"]
-        NESSIE["Nessie"]; TRINO["Trino"]; TS["TimescaleDB"]
-        KC["Keycloak"]; AF["Airflow"]; MLF["MLflow"]; MON["Prometheus/Grafana"]
+        direction TB
+        MINIO["MinIO<br/>idp-landing / -bronze / -silver / -gold / -ml"]
+        KAFKA["Kafka (Strimzi operator + KRaft cluster)"]
+        REG["Apicurio Schema Registry"]; KUI["Kafka UI"]
+        TS["TimescaleDB<br/>serving · iceberg catalog · mlflow · airflow DBs"]
+        TRINO["Trino"]; NESSIE["Nessie (provisioned)"]
+        KC["Keycloak (realm idp)"]; MLF["MLflow"]
+        AF["Airflow (scheduler + webserver)"]
+        SOP["Spark Operator (controller + webhook)"]
+        MON["Prometheus / Grafana"]
       end
       subgraph APP["namespace: idp-app (applications)"]
-        SAPI["scoring-api"]; JOBS["idp-produce / idp-consume Jobs"]
+        direction TB
+        SAPI["scoring-api<br/>Deployment + Service"]
+        JOBS["Jobs: idp-generate · idp-produce ·<br/>idp-produce-from-landing · idp-consume · idp-labels"]
+        SPARK["SparkApplications (driver + executors):<br/>idp-silver · idp-gold · idp-train ·<br/>idp-score · idp-publish · idp-maintain"]
       end
       subgraph TEN["namespaces: idp-tenant-a / -b (isolation)"]
         Q["ResourceQuota + NetworkPolicy + RBAC"]
       end
     end
+    MAKE["make targets (operator)"] -->|apply Jobs / SparkApplications| APP
+    AF -->|SparkKubernetesOperator| SPARK
+    SOP -->|launches driver + executor pods| SPARK
     APP -->|cross-ns DNS<br/>svc.idp-platform.svc| PLAT
 ```
 
-- **Namespace split** (per your recommendation): platform services in
-  `idp-platform`, application workloads in `idp-app`; apps reach services via
-  cross-namespace DNS (`idp-kafka-kafka-bootstrap.idp-platform.svc`).
+- **Namespace split:** platform services in `idp-platform`, application workloads in
+  `idp-app`; apps reach services via cross-namespace DNS
+  (`idp-kafka-kafka-bootstrap.idp-platform.svc`, `minio.idp-platform.svc`, …).
+- **Who starts what in `idp-app`:**
+  - `make app-deploy` applies the scoring-api (`deploy/app/overlays/<env>`);
+  - the `make` stage targets apply the Jobs (`deploy/app/jobs/`) and the
+    SparkApplications (`deploy/app/spark/`, rendered from `spark.profiles` by
+    `make spark-manifests`) and wait for them;
+  - Airflow submits the same SparkApplications. Its RBAC in `idp-app` only creates
+    SparkApplications and reads their pods and logs; the non-Spark Jobs stay outside
+    Airflow;
+  - the Spark Operator, installed in `idp-platform`, watches `idp-app` and creates
+    each application's `idp-<stage>-driver` pod, its executors and a UI service.
 - **Tenant isolation** (`deploy/platform/base/`): per-tenant namespaces with
-  `ResourceQuota`, `NetworkPolicy` (default-deny cross-tenant), and RBAC roles.
+  `ResourceQuota`, `NetworkPolicy` (default-deny cross-tenant), and RBAC roles. Data
+  isolation is by `tenant_id` partitions and scoped reads, since the stages serve
+  every tenant from `idp-app`.
 - **Overlays, split by team**: platform base in `deploy/platform/overlays/{local,aws}`
   (namespaces/RBAC/isolation); the scoring-api app in `deploy/app/overlays/{local,aws}`
   (`imagePullPolicy: Never` dev image locally; ECR image + IRSA on EKS). Two Argo CD
@@ -214,151 +354,6 @@ Dockerfile                   # scoring-api / jobs image (idp package)
 ```
 
 Run `make help` to list every target with a description.
-### Path B — streaming through your deployed Kafka
-0. **Prereqs**: platform deployed (`make platform-services`), Kafka up with topics (`make kafka`).
-
-1. **Rebuild the app image with the streaming deps** (kafka-python, s3fs) and
-   load it into minikube:
-   ```bash
-   make image
-   ```
-2. **Produce + consume** (two Kubernetes Jobs in the **`idp-app`** namespace, so
-   they use in-cluster DNS — external Kafka access from a Mac/minikube is
-   unreliable). `make stream` runs produce, **waits for it to finish**, then
-   runs consume (ordering matters):
-   ```bash
-   make stream
-   ```
-   - `idp-produce` publishes the synthetic data as TM Forum create events to
-     `t.<tenant>.<resource>` topics (small default volume: 150 subscribers × 14
-     days, via env, to fit memory). See "Kafka carries TM Forum events" below.
-   - `idp-consume` drains the topics and appends each event, as received, to the raw
-     Iceberg Bronze tables on MinIO (Bronze only; Silver conforms them, and Gold is
-     a separate stage).
-
-   **Or stream through the landing zone** (source files → landing → Kafka → Bronze,
-   the path the architecture plan describes for NiFi):
-   ```bash
-   make stream-from-landing   # generate -> s3://idp-landing -> produce --from-landing -> consume
-   ```
-   - `idp-generate` writes the synthetic source files as **TM Forum Open API v5
-     resources** to `s3://idp-landing/tenant=<id>/<resource>.json`, one tenant at a
-     time (see "Landing files are TM Forum resources" below).
-   - `idp-produce-from-landing` checks every file and publishes its resources, as
-     they are, as TMF create events. A file is **not published** when its folder
-     names an unknown tenant, it isn't a known resource file, a resource fails its
-     schema or belongs to another tenant (`tenantId`), it depends on a rejected file
-     (e.g. `customer.json`), or it holds a reference that doesn't resolve. The Job
-     then fails and consume doesn't run.
-   - `idp-consume` lands the records in Bronze, exactly as with `make stream`: both
-     sources send the same messages (apart from `eventTime`).
-   - `make stream-replay` re-publishes the landing files already there, without
-     regenerating them (replay). `make generate-job` writes them only.
-   - Inspect the source files: `make minio-ls` (the `idp-landing` bucket). Locally,
-     `idp generate` writes them to `data/landing/`, and
-     `idp produce --from-landing` publishes them.
-   - Run one streaming target at a time. They share the topics and the consumer.
-
-   **Landing files are TM Forum resources** (REQ-BRZ-03/05/06). Each tenant folder
-   holds one JSON array per resource type:
-
-   | File | TMF API | Canonical entity |
-   |---|---|---|
-   | `individual.json`, `organization.json` | TMF632 Party (v5) | parties |
-   | `customer.json` | TMF629 Customer (v5), the party role `customer` | customers (party, segment, since-date, billing account) |
-   | `billingAccount.json` | TMF666 Account (v5), referencing its paying party | billing_accounts |
-   | `agreement.json` | TMF651 Agreement (v4.0 shape, v5 conventions) | agreements |
-   | `product.json` | TMF637 Product Inventory (v5) | products |
-   | `appliedCustomerBillingRate.json` | TMF678 Customer Bill (v5) | fee_charges |
-   | `topupBalance.json` | TMF654 Prepay Balance (v4.0 shape, v5 conventions) | recharge_events |
-   | `productUsage.json` | TMF635 Usage (v5), `usageType` voice/data | voice_events, data_events |
-
-   - **One mapping, both ways.** `config/tmf/profiles/standard.yaml` says where each
-     canonical field lives (a standard field, a typed characteristic, or an extension
-     attribute). `idp generate` and `idp produce` write with it, and Silver's conform
-     step adapts back with it, so the round trip is exact and Silver keeps the
-     canonical model.
-   - **Payer and customer.** A billing account references the party that pays it
-     (`relatedParty` with role `payer`, an Individual or Organization). A Customer
-     (the party role `customer`) engages that party, holds the billing account, and
-     carries the segment and the since-date. An agreement references its Customer
-     (`engagedParty` with role `customer`) and gets its billing account through it.
-     `IDP_TMF_PROFILE` (or `tmf.profile`) selects another profile.
-   - **Extensions.** Every resource is the platform subtype `Idp<Resource>`
-     (`@type`, `@baseType`, `@schemaLocation`) adding `tenantId`; BillingAccount also
-     carries `validFor` (TMF666 has none), and TopupBalance `rechargeType` and its
-     agreement (TMF654 has no characteristics). A
-     customer profile adds its own `@type` subtypes with their JSON Schemas in
-     `config/tmf/extensions/`, without changing standard fields.
-   - **Validation.** Resources are checked against the TMF schemas vendored (pinned to
-     upstream commits) in `config/tmf/schemas/` plus their extension schemas;
-     `config/tmf/vendor_schemas.py` regenerates them. Examples: `data_samples/`.
-   - **Customer role.** Accounts and agreements reference a `Customer` (TMF629
-     `PartyRole`), whose `engagedParty` is the Individual or Organization. The
-     adapter resolves these references per tenant.
-   - **Organizations.** Company accounts' parties are `Organization`s, so their
-     canonical `first_name`/`last_name`/`date_of_birth` are null (no model feature
-     uses them).
-   - Look at a file: `make landing-show ENTITY=productUsage LINES=40`.
-
-   **Kafka carries TM Forum events** (REQ-STR-01/02/03). Each resource is published
-   as its TMF create event, on a topic per resource:
-
-   | Topic `t.<tenant>.…` | Event(s) | Notes |
-   |---|---|---|
-   | `customer` | `CustomerCreateEvent` | published first |
-   | `party` | `IndividualCreateEvent`, `OrganizationCreateEvent` | |
-   | `billingAccount`, `agreement`, `product` | `<Resource>CreateEvent` | |
-   | `appliedCustomerBillingRate` | `AppliedCustomerBillingRateCreateEvent` | fee charges |
-   | `topupBalance` | `TopupBalanceCreateEvent` | recharges |
-   | `productUsage` | `ProductUsageCreateEvent` | voice and data (`usageType`), 6 partitions |
-   | `dlq` | the original message | headers `idp.reason`, `idp.source.topic/partition/offset` |
-
-   ```json
-   {"@type": "ProductUsageCreateEvent", "eventType": "ProductUsageCreateEvent",
-    "eventId": "3f0c…", "eventTime": "2026-10-02T06:12:33.123Z",
-    "event": {"productUsage": {"@type": "IdpProductUsage", "id": "tenant_a-agr-000000-v-0-0",
-                               "tenantId": "tenant_a", "usageType": "voice", …}}}
-   ```
-
-   - **Keys and ids.** A message is keyed by the subscriber's MSISDN where the
-     resource has one, else by its id (customers by id). `eventId` is derived from
-     the tenant, resource type and id, so re-publishing a resource gives the same id.
-   - **Raw Bronze.** The consumer lands every event as received, one Bronze table per
-     topic (`bronze.tmf_<resource>`). It doesn't validate or resolve anything: Silver
-     does (see 4.2), so a customer published in an earlier run always resolves.
-   - **Dead letters.** Only a message that can't be stored as an event (not a JSON
-     object with `eventType`, `eventId` and one resource in `event`) goes to
-     `t.<tenant>.dlq` with the reason. The rest is landed, and the consume Job fails,
-     which stops the make chain before Silver. Invalid, foreign or dangling events
-     are landed and then quarantined by Silver.
-   - **Two contracts.** The wire contract is each topic's TMF JSON Schema, registered
-     in Apicurio as `<topic>-value` (schema type JSON) by `make schemas`
-     (`idp registry-schemas` writes them). The canonical contract is
-     `config/avro/canonical/*.avsc`, one Avro schema per canonical entity, field for
-     field as Silver's conform step produces it; the conform step enforces it.
-     `config/avro/silver/` documents every Silver table (dimensions, facts,
-     quarantine) as Silver stores it: tokenized identifiers, UTC timestamps.
-3. **Watch / verify** (jobs are in `idp-app`):
-   ```bash
-   kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
-   kubectl -n idp-app logs -f job/idp-consume      # bronze/silver/gold counts
-   ```
-   - In **Kafka UI** (`make kafka-ui`) you'll see messages in the topics.
-   - Inspect the lake in MinIO (one bucket per layer):
-     ```bash
-     make minio-ls          # lists idp-landing / idp-bronze / idp-silver / idp-gold
-     make minio-console     # web UI at http://localhost:9001 (minioadmin/minioadmin123)
-     ```
-
-> **Namespaces:** platform services (Kafka, MinIO, Trino, Nessie…) run in
-> `idp-platform`; application workloads (scoring API, streaming jobs) run in
-> `idp-app` and reach the platform via cross-namespace DNS
-> (`<svc>.idp-platform.svc`).
-
-> Tip: the default synthetic volume (~1M usage events) is a lot to stream on a
-> small node. For a quicker demo, lower `synthetic.subscribers_per_tenant` and
-> `synthetic.days` in `config/platform.yaml` before `make stream`.
 
 ---
 
@@ -457,6 +452,129 @@ make serve-cluster # 8) Port-forward the cluster's scoring API (127.0.0.1:18000)
 - Models and scores: `make labels` (once), then `make train` registers the models
   and `make score` writes `credit_scores` / `fraud_scores` from the champions.
   Without `train` and `score`, Gold holds feature tables only.
+
+#### Ingestion in detail
+
+`make stream` and `make stream-from-landing` are the two ways into Bronze. Both run
+as Kubernetes Jobs in `idp-app`, so they use in-cluster DNS (reaching Kafka from a
+Mac through minikube is unreliable), and both stop at Bronze.
+
+**`make stream`** runs `idp-produce`, **waits for it to finish**, then runs
+`idp-consume` (ordering matters):
+- `idp-produce` publishes the synthetic data as TM Forum create events to
+  `t.<tenant>.<resource>` topics (small default volume: 150 subscribers × 14
+  days, via env, to fit memory). See "Kafka carries TM Forum events" below.
+- `idp-consume` drains the topics and appends each event, as received, to the raw
+  Iceberg Bronze tables on MinIO (Bronze only; Silver conforms them, and Gold is
+  a separate stage).
+
+**Or stream through the landing zone** (source files → landing → Kafka → Bronze,
+the path the architecture plan describes for NiFi):
+```bash
+make stream-from-landing   # generate -> s3://idp-landing -> produce --from-landing -> consume
+```
+- `idp-generate` writes the synthetic source files as **TM Forum Open API v5
+  resources** to `s3://idp-landing/tenant=<id>/<resource>.json`, one tenant at a
+  time (see "Landing files are TM Forum resources" below).
+- `idp-produce-from-landing` checks every file and publishes its resources, as
+  they are, as TMF create events. A file is **not published** when its folder
+  names an unknown tenant, it isn't a known resource file, a resource fails its
+  schema or belongs to another tenant (`tenantId`), it depends on a rejected file
+  (e.g. `customer.json`), or it holds a reference that doesn't resolve. The Job
+  then fails and consume doesn't run.
+- `idp-consume` lands the records in Bronze, exactly as with `make stream`: both
+  sources send the same messages (apart from `eventTime`).
+- `make stream-replay` re-publishes the landing files already there, without
+  regenerating them (replay). `make generate-job` writes them only.
+- Inspect the source files: `make minio-ls` (the `idp-landing` bucket). Locally,
+  `idp generate` writes them to `data/landing/`, and
+  `idp produce --from-landing` publishes them.
+- Run one streaming target at a time. They share the topics and the consumer.
+
+**Landing files are TM Forum resources** (REQ-BRZ-03/05/06). Each tenant folder
+holds one JSON array per resource type:
+
+| File | TMF API | Canonical entity |
+|---|---|---|
+| `individual.json`, `organization.json` | TMF632 Party (v5) | parties |
+| `customer.json` | TMF629 Customer (v5), the party role `customer` | customers (party, segment, since-date, billing account) |
+| `billingAccount.json` | TMF666 Account (v5), referencing its paying party | billing_accounts |
+| `agreement.json` | TMF651 Agreement (v4.0 shape, v5 conventions) | agreements |
+| `product.json` | TMF637 Product Inventory (v5) | products |
+| `appliedCustomerBillingRate.json` | TMF678 Customer Bill (v5) | fee_charges |
+| `topupBalance.json` | TMF654 Prepay Balance (v4.0 shape, v5 conventions) | recharge_events |
+| `productUsage.json` | TMF635 Usage (v5), `usageType` voice/data | voice_events, data_events |
+
+- **One mapping, both ways.** `config/tmf/profiles/standard.yaml` says where each
+  canonical field lives (a standard field, a typed characteristic, or an extension
+  attribute). `idp generate` and `idp produce` write with it, and Silver's conform
+  step adapts back with it, so the round trip is exact and Silver keeps the
+  canonical model.
+- **Payer and customer.** A billing account references the party that pays it
+  (`relatedParty` with role `payer`, an Individual or Organization). A Customer
+  (the party role `customer`) engages that party, holds the billing account, and
+  carries the segment and the since-date. An agreement references its Customer
+  (`engagedParty` with role `customer`) and gets its billing account through it.
+  `IDP_TMF_PROFILE` (or `tmf.profile`) selects another profile.
+- **Extensions.** Every resource is the platform subtype `Idp<Resource>`
+  (`@type`, `@baseType`, `@schemaLocation`) adding `tenantId`; BillingAccount also
+  carries `validFor` (TMF666 has none), and TopupBalance `rechargeType` and its
+  agreement (TMF654 has no characteristics). A
+  customer profile adds its own `@type` subtypes with their JSON Schemas in
+  `config/tmf/extensions/`, without changing standard fields.
+- **Validation.** Resources are checked against the TMF schemas vendored (pinned to
+  upstream commits) in `config/tmf/schemas/` plus their extension schemas;
+  `config/tmf/vendor_schemas.py` regenerates them. Examples: `data_samples/`.
+- **Customer role.** Accounts and agreements reference a `Customer` (TMF629
+  `PartyRole`), whose `engagedParty` is the Individual or Organization. The
+  adapter resolves these references per tenant.
+- **Organizations.** Company accounts' parties are `Organization`s, so their
+  canonical `first_name`/`last_name`/`date_of_birth` are null (no model feature
+  uses them).
+- Look at a file: `make landing-show ENTITY=productUsage LINES=40`.
+
+**Kafka carries TM Forum events** (REQ-STR-01/02/03). Each resource is published
+as its TMF create event, on a topic per resource:
+
+| Topic `t.<tenant>.…` | Event(s) | Notes |
+|---|---|---|
+| `customer` | `CustomerCreateEvent` | published first |
+| `party` | `IndividualCreateEvent`, `OrganizationCreateEvent` | |
+| `billingAccount`, `agreement`, `product` | `<Resource>CreateEvent` | |
+| `appliedCustomerBillingRate` | `AppliedCustomerBillingRateCreateEvent` | fee charges |
+| `topupBalance` | `TopupBalanceCreateEvent` | recharges |
+| `productUsage` | `ProductUsageCreateEvent` | voice and data (`usageType`), 6 partitions |
+| `dlq` | the original message | headers `idp.reason`, `idp.source.topic/partition/offset` |
+
+```json
+{"@type": "ProductUsageCreateEvent", "eventType": "ProductUsageCreateEvent",
+ "eventId": "3f0c…", "eventTime": "2026-10-02T06:12:33.123Z",
+ "event": {"productUsage": {"@type": "IdpProductUsage", "id": "tenant_a-agr-000000-v-0-0",
+                            "tenantId": "tenant_a", "usageType": "voice", …}}}
+```
+
+- **Keys and ids.** A message is keyed by the subscriber's MSISDN where the
+  resource has one, else by its id (customers by id). `eventId` is derived from
+  the tenant, resource type and id, so re-publishing a resource gives the same id.
+- **Raw Bronze.** The consumer lands every event as received, one Bronze table per
+  topic (`bronze.tmf_<resource>`). It doesn't validate or resolve anything: Silver
+  does (see 4.2), so a customer published in an earlier run always resolves.
+- **Dead letters.** Only a message that can't be stored as an event (not a JSON
+  object with `eventType`, `eventId` and one resource in `event`) goes to
+  `t.<tenant>.dlq` with the reason. The rest is landed, and the consume Job fails,
+  which stops the make chain before Silver. Invalid, foreign or dangling events
+  are landed and then quarantined by Silver.
+- **Two contracts.** The wire contract is each topic's TMF JSON Schema, registered
+  in Apicurio as `<topic>-value` (schema type JSON) by `make schemas`
+  (`idp registry-schemas` writes them). The canonical contract is
+  `config/avro/canonical/*.avsc`, one Avro schema per canonical entity, field for
+  field as Silver's conform step produces it; the conform step enforces it.
+  `config/avro/silver/` documents every Silver table (dimensions, facts,
+  quarantine) as Silver stores it: tokenized identifiers, UTC timestamps.
+
+> Tip: the default synthetic volume (~1M usage events) is a lot to stream on a
+> small node. For a quicker demo, lower `synthetic.subscribers_per_tenant` and
+> `synthetic.days` in `config/platform.yaml` before `make stream`.
 
 **Verify:**
 ```bash
