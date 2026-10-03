@@ -167,3 +167,36 @@ def test_strip_uuid(spark):
     df = spark.createDataFrame([(v,) for v in vals], "v string")
     got = [r[0] for r in df.select(strip_uuid(F.col("v"))).collect()]
     assert got == ["116100030984920447", "plain-id", ""]
+
+
+def test_shuffle_partitions_follow_the_profile(monkeypatch):
+    # SCN-ORC-07.5 / 07.6: twice the executor cores by default, or the profile's value
+    monkeypatch.setenv("IDP_SPARK_MASTER", "k8s://https://kubernetes.default.svc")
+    cfg = load_config()
+    cfg.raw["spark"]["profiles"]["silver"] = {
+        "driver": {"cores": 1, "memory": "1g"}, "executor": {"instances": 2, "cores": 1, "memory": "1g"}}
+    assert spark_conf(cfg, stage="silver")["spark.sql.shuffle.partitions"] == "4"
+    cfg.raw["spark"]["profiles"]["silver"]["executor"].update(instances=3, cores=2)
+    assert spark_conf(cfg, stage="silver")["spark.sql.shuffle.partitions"] == "12"
+    cfg.raw["spark"]["profiles"]["silver"]["shuffle_partitions"] = 16
+    assert spark_conf(cfg, stage="silver")["spark.sql.shuffle.partitions"] == "16"
+    assert spark_conf(cfg)["spark.sql.adaptive.enabled"] == "true"
+
+
+def test_shuffle_partitions_locally(monkeypatch):
+    import os
+    from idp.transforms.session import local_cores
+    monkeypatch.setenv("IDP_SPARK_MASTER", "local[2]")
+    assert spark_conf(load_config(), stage="silver")["spark.sql.shuffle.partitions"] == "4"
+    assert local_cores("local") == 1 and local_cores("local[3,2]") == 3
+    assert local_cores("local[*]") == (os.cpu_count() or 1)
+
+
+def test_spark_submit_keeps_the_shuffle_setting(monkeypatch):
+    # the setting isn't one spark-submit owns, so the driver pod applies it too
+    from idp.transforms.session import builder_conf
+    monkeypatch.setenv("IDP_SPARK_MASTER", "k8s://https://kubernetes.default.svc:443")
+    monkeypatch.setenv("PYSPARK_GATEWAY_PORT", "12345")
+    cfg = load_config()
+    expected = 2 * cfg.spark_profile("silver")["executor"]["instances"] * cfg.spark_profile("silver")["executor"]["cores"]
+    assert builder_conf(cfg, "silver")["spark.sql.shuffle.partitions"] == str(expected)

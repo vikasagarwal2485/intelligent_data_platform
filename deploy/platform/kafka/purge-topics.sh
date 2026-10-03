@@ -15,9 +15,6 @@
 # Examples:
 #   bash deploy/platform/kafka/purge-topics.sh                       # purge all t.* topics
 #   bash deploy/platform/kafka/purge-topics.sh idp-platform t.tenant_a.topupBalance
-#
-# The compacted t.<tenant>.customer topics are purged too: their cleanup.policy
-# is compact,delete (create-topics.sh), which DeleteRecords requires.
 set -euo pipefail
 
 NS="${1:-idp-platform}"

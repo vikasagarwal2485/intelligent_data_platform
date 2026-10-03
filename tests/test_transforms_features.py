@@ -126,3 +126,19 @@ def test_non_consenting_subscriber_excluded_from_both_tables(silver):
     fraud = _rows(features.build_fraud_features(silver, (30, 90)))
     assert set(credit) == set(fraud) == {"s1", "s2", "s3"}   # every consenting subscriber once
     assert fraud["s1"]["recharge_amount_zscore"] == pytest.approx(1.0)
+
+
+def test_gold_builds_each_shared_aggregate_once(lake, monkeypatch):
+    # the credit and fraud tables share the recharge and usage aggregates: one Gold
+    # run builds each once (and fees once), instead of once per table
+    from idp.pipeline import to_gold
+    from idp.transforms import features
+    calls = {"recharge": 0, "usage": 0, "fees": 0}
+    for name, fn in (("recharge", features.recharge_aggregates), ("usage", features.usage_aggregates),
+                     ("fees", features.fee_aggregates)):
+        def spy(*a, _fn=fn, _name=name, **k):
+            calls[_name] += 1
+            return _fn(*a, **k)
+        monkeypatch.setattr(features, f"{name if name != 'fees' else 'fee'}_aggregates", spy)
+    to_gold(lake)
+    assert calls == {"recharge": 1, "usage": 1, "fees": 1}

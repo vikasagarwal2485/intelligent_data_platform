@@ -309,7 +309,7 @@ Run `make help` to list every target with a description.
 
    | Topic `t.<tenant>.…` | Event(s) | Notes |
    |---|---|---|
-   | `customer` | `CustomerCreateEvent` | log-compacted, never expires; published first |
+   | `customer` | `CustomerCreateEvent` | published first |
    | `party` | `IndividualCreateEvent`, `OrganizationCreateEvent` | |
    | `billingAccount`, `agreement`, `product` | `<Resource>CreateEvent` | |
    | `appliedCustomerBillingRate` | `AppliedCustomerBillingRateCreateEvent` | fee charges |
@@ -664,6 +664,16 @@ executors (`mapInPandas`) and `MERGE`d insert-if-absent on `(tenant_id, id)`. A
 failed run resumes without loss or duplicates. `idp silver --full-refresh` resets
 the checkpoints, the facts and the quarantine, and replays all of Bronze.
 
+**Performance.** Each Spark stage's shuffle parallelism comes from its profile
+(`spark.profiles.<stage>` in `config/platform.yaml`, REQ-ORC-07): the optional
+`shuffle_partitions`, else twice the executor cores (4 for Silver on minikube), or
+twice the local cores. That matters most for the streaming facts, which get no
+adaptive coalescing: Spark's default of 200 partitions ran hundreds of tiny tasks
+per batch. Each fact batch is also repartitioned to the executor cores before
+conforming, so the Python work runs on every core. A streaming checkpoint keeps the
+partition count it started with, so after changing a profile run
+`make silver-full-refresh` once.
+
 **Transformations:**
 - **Id canonicalization:** strip `UUID(...)` wrappers (as some operator feeds send
   ids) from entity and relationship ids so relationships join their targets.
@@ -766,6 +776,12 @@ tables on Spark (`transforms/features.py`), and **writes Gold** (`s3://idp-gold`
 `data/lake/gold`). Gold is **features only**; scores are written by the separate
 Score stage (`idp score`, REQ-ML-07). The same code runs for `idp gold`, the
 Airflow `gold` task and `idp run`.
+
+**Shared aggregates.** The credit and fraud tables use the same recharge and usage
+aggregates. A Gold run builds them, and the fee aggregates, once
+(`features.shared_aggregates`), caches them for the two writes, and reads each
+table's reference time in one scan. The usage aggregation, with its exact distinct
+counts, used to run once per table.
 
 **Features** (`transforms/features.py`, aggregated per `(tenant_id, service_id)`
 over the configured 7/30/90-day windows; the ordered model feature lists are

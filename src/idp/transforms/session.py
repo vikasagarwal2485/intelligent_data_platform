@@ -28,6 +28,11 @@ RUNTIME_CONF = {
     "spark.sql.session.timeZone": "UTC",
     "spark.sql.sources.partitionOverwriteMode": "dynamic",
     "spark.sql.parquet.outputTimestampType": "TIMESTAMP_MICROS",
+    # adaptive execution coalesces small shuffles in batch jobs (Spark 3.5's
+    # default, stated so an image or config can't drift from it); streaming
+    # micro-batches don't get it, hence the explicit shuffle partitions below
+    "spark.sql.adaptive.enabled": "true",
+    "spark.sql.adaptive.coalescePartitions.enabled": "true",
 }
 
 
@@ -51,6 +56,38 @@ def _packages(cfg: PlatformConfig) -> list[str]:
 
 def _is_local(master: str) -> bool:
     return master.startswith("local")
+
+
+def local_cores(master: str) -> int:
+    """The cores of a local master: ``local[N]`` -> N, ``local[*]`` -> the CPU count,
+    ``local`` -> 1."""
+    import os
+    import re
+
+    m = re.fullmatch(r"local(?:\[(\*|\d+)(?:,\d+)?\])?", master.strip())
+    if not m or m.group(1) is None:
+        return 1
+    return (os.cpu_count() or 1) if m.group(1) == "*" else int(m.group(1))
+
+
+def executor_cores(cfg: PlatformConfig, stage: str | None) -> int:
+    """The cores a stage computes on: its executors' (instances x cores) in the
+    cluster, the local cores otherwise."""
+    master = cfg.spark["master"]
+    if _is_local(master):
+        return local_cores(master)
+    exe = cfg.spark_profile(stage)["executor"] if stage else {}
+    return max(1, int(exe.get("instances", 1)) * int(exe.get("cores", 1)))
+
+
+def shuffle_partitions(cfg: PlatformConfig, stage: str | None) -> int:
+    """The stage's shuffle parallelism (REQ-ORC-07): the profile's
+    ``shuffle_partitions``, else twice the cores it computes on."""
+    if stage:
+        explicit = cfg.spark_profile(stage).get("shuffle_partitions")
+        if explicit:
+            return int(explicit)
+    return 2 * executor_cores(cfg, stage)
 
 
 def memory_mib(value: str | int) -> int:
@@ -95,6 +132,9 @@ def spark_conf(cfg: PlatformConfig, stage: str | None = None) -> dict[str, str]:
         "spark.ui.showConsoleProgress": "false",
         "spark.sql.extensions": ICEBERG_EXTENSIONS,
         **RUNTIME_CONF,
+        # every shuffle of the stage, streaming micro-batches included (a streaming
+        # checkpoint keeps the value it started with, until a full refresh)
+        "spark.sql.shuffle.partitions": str(shuffle_partitions(cfg, stage)),
     }
     if not _is_local(master):
         if "cores" in drv:
@@ -143,6 +183,17 @@ def builder_conf(cfg: PlatformConfig, stage: str | None = None) -> dict[str, str
     return conf
 
 
+def _session_shuffle_partitions(spark: Any, cfg: PlatformConfig, stage: str | None) -> int:
+    """The shuffle parallelism for this session: the profile's explicit value, else
+    twice the cores. A local session counts the cores it actually runs on (a reused
+    session may differ from the config's master), the cluster its profile's executors."""
+    if stage and cfg.spark_profile(stage).get("shuffle_partitions"):
+        return shuffle_partitions(cfg, stage)
+    if _is_local(spark.sparkContext.master):
+        return 2 * max(1, spark.sparkContext.defaultParallelism)
+    return shuffle_partitions(cfg, stage)
+
+
 def get_spark(cfg: PlatformConfig, app_name: str = "idp", stage: str | None = None) -> Any:
     """Build (or reuse) the process's SparkSession for ``cfg``.
 
@@ -163,6 +214,7 @@ def get_spark(cfg: PlatformConfig, app_name: str = "idp", stage: str | None = No
 
     for key, value in RUNTIME_CONF.items():
         spark.conf.set(key, value)
+    spark.conf.set("spark.sql.shuffle.partitions", str(_session_shuffle_partitions(spark, cfg, stage)))
     from idp.transforms.lake import attach
     attach(spark, cfg)                       # the lake's Iceberg catalog (REQ-FND-04)
     hadoop = spark.sparkContext._jsc.hadoopConfiguration()

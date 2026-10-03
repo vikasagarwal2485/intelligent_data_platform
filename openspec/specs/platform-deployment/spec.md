@@ -183,7 +183,7 @@ through a port-forward target.
 
 #### Scenario: SCN-PLT-11.2 — Analytics identity is read-only
 - **WHEN** the `idp-mcp` user runs a `SELECT` on `lake.gold.credit_scores`, and then an
-  `INSERT` or a `SELECT` on `lake.bronze.parties`
+  `INSERT` or a `SELECT` on `lake.bronze.tmf_party`
 - **THEN** the first succeeds, and the others are denied by access control
 
 ## Change history

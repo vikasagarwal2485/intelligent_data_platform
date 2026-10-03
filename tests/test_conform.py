@@ -167,3 +167,18 @@ def test_quarantine_through_silver_runs(spark, tmp_path, dataset, tmf):
     assert set(q["resource_id"]) == {"u-bad"}
     subs = catalog.read_table(cfg, "silver", "dim_subscriber")
     assert "tenant_a-cust-late" in set(subs["customer_id"])
+
+
+def test_fact_conform_runs_on_every_core(spark, tmp_path, dataset):
+    # SCN-ORC-07.5: a fact batch is conformed in one partition per core, with the
+    # same records as before (SCN-SLV-09.1 covers the values)
+    cfg = lake_cfg(tmp_path)
+    to_bronze(cfg, {"tmf_product_usage": raw_events(dataset, load_profile("standard"))["tmf_product_usage"]})
+    raw = lake.read_table(spark, cfg, "bronze", "tmf_product_usage")
+    ok, bad, cached = conform.conform_facts(raw, "tmf_product_usage")
+    try:
+        assert cached.rdd.getNumPartitions() == spark.sparkContext.defaultParallelism
+        assert ok.count() == len(dataset.voice_events) + len(dataset.data_events) and bad.count() == 0
+    finally:
+        cached.unpersist()
+

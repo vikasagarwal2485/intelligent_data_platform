@@ -186,12 +186,17 @@ class PlatformConfig:
         s["driver_memory"] = env.get("IDP_SPARK_DRIVER_MEMORY", s.get("driver_memory", "1g"))
         return s
 
-    def spark_profile(self, stage: str) -> dict[str, dict[str, Any]]:
+    def spark_profile(self, stage: str) -> dict[str, Any]:
         """Resource profile of a Spark stage (REQ-ORC-07): ``{"driver": {...},
         "executor": {...}}`` with ``cores``, ``memory``, ``memoryOverhead`` (and the
-        executor's ``instances``). Unknown stages get an empty profile."""
+        executor's ``instances``), plus ``shuffle_partitions`` when the profile sets
+        it. Unknown stages get an empty profile."""
         prof = dict(self.raw.get("spark", {}).get("profiles", {}).get(stage, {}))
-        return {"driver": dict(prof.get("driver", {})), "executor": dict(prof.get("executor", {}))}
+        out: dict[str, Any] = {"driver": dict(prof.get("driver", {})),
+                               "executor": dict(prof.get("executor", {}))}
+        if prof.get("shuffle_partitions") is not None:
+            out["shuffle_partitions"] = int(prof["shuffle_partitions"])
+        return out
 
     @property
     def s3(self) -> dict[str, Any]:

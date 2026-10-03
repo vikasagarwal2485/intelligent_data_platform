@@ -163,3 +163,35 @@ def test_readers_never_see_a_partial_write(spark, tmp_path, batches):
     final = len(catalog.read_table(cfg, "silver", "fact_recharge"))
     assert not errors
     assert seen and set(seen) <= valid | {final}      # before or after the commit only
+
+
+def test_streaming_facts_use_the_profile_shuffle_partitions(spark, tmp_path, batches):
+    # SCN-ORC-07.5: the fact checkpoints record the session's shuffle parallelism
+    # (twice the cores, here local[2] -> 4), not Spark's default 200; Spark reuses
+    # the recorded value for every later micro-batch of the checkpoint
+    import json
+    from pathlib import Path
+
+    from idp.transforms.incremental import FACTS, checkpoint_dir
+    cfg = lake_cfg(tmp_path)
+    to_bronze(cfg, batches[0])
+    to_silver(cfg)
+    expected = str(2 * spark.sparkContext.defaultParallelism)
+    assert spark.conf.get("spark.sql.shuffle.partitions") == expected and expected != "200"
+    for fact, (source, _) in FACTS.items():
+        offsets = Path(checkpoint_dir(cfg, fact, source).removeprefix("file:")) / "offsets" / "0"
+        meta = json.loads(offsets.read_text().splitlines()[1])
+        assert meta["conf"]["spark.sql.shuffle.partitions"] == expected, fact
+
+
+def test_new_tables_start_with_their_first_write(spark, tmp_path, batches):
+    # a Silver table is created from its schema: its first write is its only
+    # snapshot (no empty create commit), with its partitioning
+    cfg = lake_cfg(tmp_path)
+    to_bronze(cfg, batches[0])
+    to_silver(cfg)
+    cat = catalog.load_catalog(cfg)
+    for table in ("dim_subscriber", "dim_customer", "fact_usage", "fact_recharge"):
+        assert len(cat.load_table(f"silver.{table}").snapshots()) == 1, table
+    spec = [f.name for f in cat.load_table("silver.fact_usage").spec().fields]
+    assert spec == ["tenant_id", "started_at_day"]

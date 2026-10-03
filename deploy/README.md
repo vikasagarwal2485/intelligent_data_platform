@@ -193,11 +193,11 @@ conforms it to the canonical model and quarantines what fails.
   canonical contract is landed in Bronze and quarantined by `make silver`
   (`silver.quarantine`, with the reason). Silver reports the counts and doesn't
   fail; after a fix, `make silver-full-refresh` conforms them again.
-- **The `customer` topics are compacted and never expire** (`cleanup.policy:
-  compact,delete`, `retention.ms: -1`). They're consumed like the others; Silver
-  resolves an agreement's customer against the customers in Bronze, so one
-  published in an earlier run still resolves. `make kafka-purge` empties them
-  too.
+- **Every topic has the same policy** (`cleanup.policy: delete`, 7-day retention),
+  the `customer` topics included: Bronze keeps every event, and Silver resolves an
+  agreement's customer against the customers in Bronze, so one published in an
+  earlier run still resolves. Topics created when `customer` was compacted are
+  switched by `make topics`.
 - **Keep `IDP_SUBSCRIBERS`/`IDP_DAYS` equal** in `generate-job.yaml`,
   `produce-job.yaml` and `labels-job.yaml`, because labels are regenerated from
   them.
@@ -220,6 +220,11 @@ Every stage pod gets the catalog from `IDP_CATALOG_TYPE=sql` and
     namespace locations. That's all the catalog database stores.
   - `make lake-table-show TABLE=bronze.tmf_billing_account` decodes that table's
     `metadata.json` from MinIO: schema, partitioning, properties and snapshots.
+  - `make lake-table-rows TABLE=gold.credit_features` shows the table's rows
+    through Trino (a read-only `SELECT`, as `admin`). Options: `ROWS_LIMIT=20`,
+    `TENANT=tenant_a` (the default; `TENANT=` for all tenants),
+    `COLUMNS=tenant_id,service_id`, and `FORMAT=VERTICAL` (handy for Bronze's
+    `payload`) or `CSV_HEADER`/`JSON`. Bronze holds raw, untokenized PII.
   - `make lake-catalog-psql` opens a SQL shell on the `iceberg` database.
 - **Resetting the lake is buckets plus catalog.** The tables are registered in the
   `iceberg` database, not in MinIO. `make minio-reset` recreates the buckets **and**

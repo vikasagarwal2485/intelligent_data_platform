@@ -3,9 +3,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import pytest
 
 import pandas as pd
+
+# Every Spark session in the tests is local[2], whichever test creates it first: a
+# stage's shuffle parallelism and conform parallelism follow the session's cores
+# (REQ-ORC-07), so a local[*] session would run tiny test data on dozens of
+# partitions and Python workers. Tests that need another master set it themselves.
+os.environ.setdefault("IDP_SPARK_MASTER", "local[2]")
 
 from idp.common import pii
 from idp.common.config import PlatformConfig, StorageConfig, Tenant

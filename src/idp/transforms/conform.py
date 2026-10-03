@@ -201,7 +201,11 @@ def conform_facts(batch: Any, table: str, profile_name: str | None = None) -> tu
     from pyspark.sql import functions as F
 
     raw_cols = [c for c in batch.columns if not c.startswith("_") and c != "ingest_date"]
+    # spread the Python work over every executor core: a small raw table is often a
+    # single Iceberg split, which would conform on one core (REQ-ORC-07)
+    cores = max(1, batch.sparkSession.sparkContext.defaultParallelism)
     out = (batch.select(*raw_cols)
+                .repartition(cores)
                 .mapInPandas(_conform_partitions(table, profile_name), schema=_fact_out_schema(table))
                 .persist())
     ok = out.filter(F.col("_q_reason").isNull()).drop(*[c for c in out.columns if c.startswith("_q_")])

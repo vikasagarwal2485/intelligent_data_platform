@@ -21,8 +21,8 @@ RETENTION_MS=$(( RETENTION_DAYS * 24 * 60 * 60 * 1000 ))
 # Topic suffixes: one per TM Forum resource, each carrying its create events
 # (REQ-STR-01; keep in sync with idp.streaming.TOPIC_RESOURCES), plus the DLQ.
 # Individuals and organizations share `party`; voice and data share `productUsage`.
-# `customer` is log-compacted (latest event per customer, never expired): the
-# consumer reads it in full each run to resolve references (REQ-STR-02).
+# Every topic uses the delete policy with RETENTION_DAYS: Bronze keeps every event,
+# and Silver resolves customers from it (REQ-SLV-09), so nothing is log-compacted.
 SUFFIXES=(
   customer party billingAccount agreement product
   appliedCustomerBillingRate topupBalance productUsage dlq
@@ -46,13 +46,6 @@ for t in "${TENANTS[@]}"; do
     name="$(printf 't-%s-%s' "${t//_/-}" "${s//./-}" | tr '[:upper:]' '[:lower:]')"
     partitions=3
     [[ "$s" == productUsage ]] && partitions=6   # higher throughput for usage events
-    if [[ "$s" == customer ]]; then
-      # compact,delete with unlimited retention: compacted, nothing expires, and
-      # purge-topics.sh can still truncate it (DeleteRecords needs `delete`)
-      policy="compact,delete"; retention="-1"; retention_note="never (compacted)"
-    else
-      policy="delete"; retention="${RETENTION_MS}"; retention_note="${RETENTION_DAYS} days"
-    fi
     cat <<EOF | kubectl apply -n "${NS}" -f -
 apiVersion: kafka.strimzi.io/${TVER}
 kind: KafkaTopic
@@ -65,8 +58,8 @@ spec:
   partitions: ${partitions}
   replicas: 1
   config:
-    retention.ms: "${retention}"   # ${retention_note}
-    cleanup.policy: "${policy}"
+    retention.ms: "${RETENTION_MS}"   # ${RETENTION_DAYS} days
+    cleanup.policy: delete
 EOF
   done
 done

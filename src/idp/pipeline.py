@@ -149,8 +149,18 @@ def to_gold(cfg: PlatformConfig) -> dict:
         raise RuntimeError(f"Silver is missing {missing}. Run the Silver stage ('idp silver') first.")
 
     windows = tuple(int(w) for w in cfg.features.get("windows", [30, 90]))
-    lake.overwrite_tenants(features.build_credit_features(silver, windows), cfg, "gold", "credit_features")
-    lake.overwrite_tenants(features.build_fraud_features(silver, windows), cfg, "gold", "fraud_features")
+    # the aggregates both tables use, computed once and kept for the two writes
+    # (one row per subscriber, so small)
+    shared = features.shared_aggregates(silver, windows)
+    cached = [df.persist() for key, df in shared.items() if key != "dim" and df is not None]
+    try:
+        lake.overwrite_tenants(features.build_credit_features(silver, windows, shared), cfg, "gold",
+                               "credit_features")
+        lake.overwrite_tenants(features.build_fraud_features(silver, windows, shared), cfg, "gold",
+                               "fraud_features")
+    finally:
+        for df in cached:
+            df.unpersist()
     return {
         "gold_tables": list(GOLD_FEATURE_TABLES),
         "counts": {"subscribers": _table_count(spark, cfg, "gold", "credit_features")},

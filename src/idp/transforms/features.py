@@ -8,6 +8,11 @@ consent (REQ-FND-05) — followed by exactly the model feature contract (``idp.c
 Lookback windows use one reference time per source table: that table's latest
 timestamp across all tenants. A missing aggregate (an empty window, or a subscriber
 without recharges) is 0.
+
+The credit and fraud tables share the recharge and usage aggregates:
+:func:`shared_aggregates` builds them (and the fee aggregates) once per Gold run,
+each reference time read in one scan, and both builders take them, so the
+expensive usage aggregation isn't computed twice.
 """
 from __future__ import annotations
 
@@ -54,11 +59,12 @@ def _count_if(cond: Any) -> Any:
     return F.sum(F.when(cond, 1).otherwise(0))
 
 
-def recharge_aggregates(recharge: Any, windows) -> Any:
-    """Per-subscriber recharge ability/reliability aggregates (plan 4.2)."""
+def recharge_aggregates(recharge: Any, windows, ref: int | None = None) -> Any:
+    """Per-subscriber recharge ability/reliability aggregates (plan 4.2). ``ref`` is
+    the reference time (read from the table when not given)."""
     from pyspark.sql import functions as F
 
-    ref = _ref_us(recharge, "created_at")
+    ref = _ref_us(recharge, "created_at") if ref is None else ref
     ts = F.unix_micros(F.col("created_at"))
     ok = F.col("status") == "successful"
     total = F.count(F.lit(1))
@@ -79,11 +85,12 @@ def recharge_aggregates(recharge: Any, windows) -> Any:
     return recharge.groupBy(*KEY).agg(*aggs).na.fill(0)
 
 
-def usage_aggregates(usage: Any, windows) -> Any:
-    """Per-subscriber usage/spend and velocity aggregates (plan 4.2/4.3)."""
+def usage_aggregates(usage: Any, windows, ref: int | None = None) -> Any:
+    """Per-subscriber usage/spend and velocity aggregates (plan 4.2/4.3). ``ref`` is
+    the reference time (read from the table when not given)."""
     from pyspark.sql import functions as F
 
-    ref = _ref_us(usage, "started_at")
+    ref = _ref_us(usage, "started_at") if ref is None else ref
     ts = F.unix_micros(F.col("started_at"))
     voice = F.col("event_type") == "voice"
     data = F.col("event_type") == "data"
@@ -141,6 +148,20 @@ def fee_aggregates(fees: Any | None, dim: Any, windows) -> Any | None:
     return df.groupBy(*KEY).agg(*aggs).na.fill(0)
 
 
+def shared_aggregates(silver: dict[str, Any], windows=(30, 90)) -> dict[str, Any]:
+    """The aggregates both feature tables use, built once: the consenting
+    subscribers (``dim``) and their ``recharge``, ``usage`` and ``fees`` aggregates
+    (``fees`` may be None). Each reference time is read in one scan. The caller may
+    persist them for the run."""
+    dim = consenting_subscribers(silver["dim_subscriber"])
+    return {
+        "dim": dim,
+        "recharge": recharge_aggregates(silver["fact_recharge"], windows),
+        "usage": usage_aggregates(silver["fact_usage"], windows),
+        "fees": fee_aggregates(silver.get("fact_fee_charge"), dim, windows),
+    }
+
+
 def _merge(dim: Any, *aggregates: Any) -> Any:
     """dim LEFT JOIN each aggregate; missing numeric aggregates -> 0."""
     out = dim
@@ -157,18 +178,17 @@ def _select(df: Any, features: list[str]) -> Any:
     return df.select(*KEY, *cols)
 
 
-def build_credit_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
+def build_credit_features(silver: dict[str, Any], windows=(30, 90),
+                          shared: dict[str, Any] | None = None) -> Any:
     """Credit feature table (plan 4.2): recharge ability/reliability, spend, tenure, fees.
 
-    Only subscribers with analytics consent get a row (REQ-FND-05).
+    Only subscribers with analytics consent get a row (REQ-FND-05). ``shared`` are
+    the run's :func:`shared_aggregates` (built here when not given).
     """
     from pyspark.sql import functions as F
 
-    dim = consenting_subscribers(silver["dim_subscriber"])
-    feats = _merge(dim,
-                   recharge_aggregates(silver["fact_recharge"], windows),
-                   usage_aggregates(silver["fact_usage"], windows),
-                   fee_aggregates(silver.get("fact_fee_charge"), dim, windows))
+    shared = shared or shared_aggregates(silver, windows)
+    feats = _merge(shared["dim"], shared["recharge"], shared["usage"], shared["fees"])
     feats = (feats
              .withColumn("has_device_agreement",
                          F.coalesce(F.col("has_device_agreement").cast("int"), F.lit(0)))
@@ -183,17 +203,18 @@ def build_credit_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
     return _select(feats, CREDIT_FEATURES)
 
 
-def build_fraud_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
+def build_fraud_features(silver: dict[str, Any], windows=(30, 90),
+                         shared: dict[str, Any] | None = None) -> Any:
     """Fraud feature table (plan 4.3): velocity, traffic asymmetry, roaming, recharge anomalies.
 
-    Only subscribers with analytics consent get a row (REQ-FND-05).
+    Only subscribers with analytics consent get a row (REQ-FND-05). ``shared`` are
+    the run's :func:`shared_aggregates` (built here when not given).
     """
     from pyspark.sql import Window
     from pyspark.sql import functions as F
 
-    feats = _merge(consenting_subscribers(silver["dim_subscriber"]),
-                   recharge_aggregates(silver["fact_recharge"], windows),
-                   usage_aggregates(silver["fact_usage"], windows))
+    shared = shared or shared_aggregates(silver, windows)
+    feats = _merge(shared["dim"], shared["recharge"], shared["usage"])
     # per-tenant population z-score of the max recharge (card-fraud signal)
     by_tenant = Window.partitionBy("tenant_id")
     std = F.stddev_pop("recharge_max").over(by_tenant)

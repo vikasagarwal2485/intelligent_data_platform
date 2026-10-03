@@ -56,10 +56,18 @@ def ensure_table(df: Any, cfg: PlatformConfig, layer: str, table: str,
     attach(df.sparkSession, cfg)
     name = catalog.spark_table(cfg, layer, table)
     if not catalog.table_exists(cfg, layer, table):
-        (df.limit(0).writeTo(name).using("iceberg")
-           .partitionedBy(*_partition_exprs(partition_by))
-           .tableProperty("location", catalog.table_location(cfg, layer, table))
-           .create())
+        # CREATE TABLE from the schema: the table starts with no snapshot, so the
+        # first write is its first commit (a CTAS of an empty frame would commit an
+        # empty snapshot first)
+        parts = ", ".join(p if isinstance(p, str) else p._jc.toString() for p in partition_by)
+        location = catalog.table_location(cfg, layer, table)
+        # every column optional, as the tables were before (a frame's NOT NULL would
+        # make later writes with nullable columns fail)
+        columns = ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in df.schema.fields)
+        df.sparkSession.sql(
+            f"CREATE TABLE {name} ({columns}) USING iceberg"
+            + (f" PARTITIONED BY ({parts})" if parts else "")
+            + f" LOCATION '{location}'")
         return name
     spark = df.sparkSession
     existing = {f.name for f in spark.table(name).schema.fields}

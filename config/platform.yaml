@@ -105,7 +105,10 @@ spark:
   # isn't local; `local[*]` runs (tests, `idp run`) use the driver settings alone.
   # Scale a stage by raising executor.instances (or memory); no code change. These
   # defaults are sized for a 12 GB minikube node (`make mk-check`); on EKS use e.g.
-  # 2-4g executors and more instances.
+  # 2-4g executors and more instances. A profile may also set `shuffle_partitions`;
+  # by default a stage uses twice its executor cores (instances x cores), or twice
+  # the local cores, for every shuffle. After changing it, run
+  # `make silver-full-refresh` once: streaming checkpoints keep their first value.
   profiles:
     silver:   {driver: {cores: 1, memory: 1g, memoryOverhead: 512m}, executor: {instances: 2, cores: 1, memory: 1g, memoryOverhead: 512m}}
     gold:     {driver: {cores: 1, memory: 1g, memoryOverhead: 512m}, executor: {instances: 2, cores: 1, memory: 1g, memoryOverhead: 512m}}

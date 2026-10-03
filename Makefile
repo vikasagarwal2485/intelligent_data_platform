@@ -179,6 +179,21 @@ lake-catalog-show: ## Show what the Iceberg catalog (TimescaleDB `iceberg` DB) s
 lake-table-show: ## Decode one lake table's current Iceberg metadata from MinIO: schema, partitioning, snapshots (read-only). TABLE=bronze.tmf_billing_account
 	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform table "$(TABLE)"
 
+ROWS_LIMIT ?= 20
+COLUMNS ?= *
+FORMAT ?= ALIGNED
+.PHONY: lake-table-rows
+lake-table-rows: ## Show a lake table's rows via Trino (read-only; Bronze holds raw PII): TABLE=gold.credit_features [ROWS_LIMIT=20] [TENANT=tenant_a (default; TENANT= for all)] [COLUMNS=a,b] [FORMAT=ALIGNED|VERTICAL|CSV_HEADER|JSON]
+	@case "$(TABLE)" in bronze.*|silver.*|gold.*) ;; *) echo "TABLE must be <bronze|silver|gold>.<table>, e.g. gold.credit_features (make lake-catalog-show lists them)" >&2; exit 1;; esac
+	@case "$(TABLE)" in *[!a-z0-9_.]*|*.*.*) echo "TABLE must be <layer>.<table>: lower-case letters, digits and _" >&2; exit 1;; esac
+	@case "$(ROWS_LIMIT)" in *[!0-9]*|"") echo "ROWS_LIMIT must be a number" >&2; exit 1;; esac
+	@case "$(TENANT)" in *[!a-z0-9_]*) echo "TENANT must be a tenant id like tenant_a" >&2; exit 1;; esac
+	@case "$(COLUMNS)" in "*") ;; *[!a-z0-9_,]*|"") echo "COLUMNS must be * or comma-separated column names" >&2; exit 1;; esac
+	@case "$(FORMAT)" in ALIGNED|VERTICAL|CSV|CSV_HEADER|TSV|TSV_HEADER|JSON) ;; *) echo "FORMAT must be ALIGNED, VERTICAL, CSV(_HEADER), TSV(_HEADER) or JSON" >&2; exit 1;; esac
+	@kubectl -n $(NAMESPACE_PLATFORM) exec deploy/trino-coordinator -- trino --user admin \
+	  --output-format $(FORMAT) \
+	  --execute "SELECT $(COLUMNS) FROM lake.$(TABLE)$(if $(TENANT), WHERE tenant_id = '$(TENANT)',) LIMIT $(ROWS_LIMIT)"
+
 .PHONY: lake-catalog-psql
 lake-catalog-psql: ## Open a psql shell on the Iceberg catalog database (`iceberg`): tables iceberg_tables, iceberg_namespace_properties
 	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform psql

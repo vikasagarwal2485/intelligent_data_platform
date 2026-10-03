@@ -467,7 +467,9 @@ Consequences. Status: `Accepted` unless noted.
 
 ### ADR-0031 — TM Forum events on Kafka; the adapter runs in the consumer; two contracts
 - **Status:** Accepted (2026-10-02). Supersedes ADR-0013's wire-contract part. Its
-  "adapter in the consumer" part is revised by ADR-0032 (raw Bronze).
+  "adapter in the consumer" part is revised by ADR-0032 (raw Bronze). The customer
+  topic's compaction was withdrawn after ADR-0032 (2026-10-03): all topics use the
+  delete policy, since Silver resolves customers from Bronze.
 - **Context:** The landing zone holds TM Forum Open API v5 resources (REQ-BRZ-03),
   but the producer adapted them to canonical records before publishing. So Kafka
   carried the platform's internal model, not what a real TMF source would send.

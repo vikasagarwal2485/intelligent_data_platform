@@ -99,7 +99,7 @@ Creates one `KafkaTopic` per **tenant × TM Forum resource**, named
 
 | Topic (per tenant `tenant_a`, `tenant_b`) | Partitions | Policy | Carries |
 |---|---|---|---|
-| `t.<tenant>.customer` | 3 | `compact,delete`, never expires | `CustomerCreateEvent` (read in full by the consumer) |
+| `t.<tenant>.customer` | 3 | delete, 7 days | `CustomerCreateEvent` (published first) |
 | `t.<tenant>.party` | 3 | delete, 7 days | `IndividualCreateEvent`, `OrganizationCreateEvent` |
 | `t.<tenant>.billingAccount` / `.agreement` / `.product` | 3 | delete, 7 days | `<Resource>CreateEvent` |
 | `t.<tenant>.appliedCustomerBillingRate` / `.topupBalance` | 3 | delete, 7 days | fee charges / recharges |
@@ -190,11 +190,10 @@ evolve safely.
 
 ## Message retention & on-demand purge
 
-**Time-based retention (automatic).** Every topic except `t.<tenant>.customer` is
-created with `retention.ms = 7 days` and `cleanup.policy = delete` (see
-`create-topics.sh`), so Kafka deletes messages older than 7 days on its own. The
-customer topics are `compact,delete` with `retention.ms = -1`: compacted to the
-latest event per customer, and never expired. Change the window and
+**Time-based retention (automatic).** Every topic is created with
+`retention.ms = 7 days` and `cleanup.policy = delete` (see `create-topics.sh`), so
+Kafka deletes messages older than 7 days on its own. Bronze keeps every event, so
+no topic needs compaction. Change the window and
 re-apply — the Strimzi Topic Operator reconciles it onto the existing topics:
 
 ```bash
