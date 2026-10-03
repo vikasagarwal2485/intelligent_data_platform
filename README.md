@@ -76,14 +76,11 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **Trino** | Distributed SQL over the lake for ad-hoc queries | **Active** (query Silver/Gold) |
 | **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
 | **Keycloak** | OIDC identity: realm `idp` issues the scoring API's tenant-scoped tokens | **Active** (`make keycloak` + `make keycloak-token`) |
-| **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | Provisioned (DAG in `pipelines/airflow`) |
+| **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | **Active** (DAG in `pipelines/airflow`) |
 | **MLflow** | Experiment tracking + model registry (versions, gated `champion` alias) | **Active** (`make mlflow` + `make mlflow-ui`) |
 | **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
-| **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | Optional (`make kafka-ui`) |
+| **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | **Active** (`make kafka-ui`) |
 
-> "Provisioned" = installed and part of the target architecture, but not yet
-> wired into the runnable prototype. This is called out honestly so you
-> know what's exercised end-to-end today.
 
 ### 1.3 Applications
 
