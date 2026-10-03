@@ -237,7 +237,8 @@ def _cmd_gold(args: argparse.Namespace) -> None:
     result = to_gold(cfg)
     print(json.dumps({"gold_tables": result["gold_tables"], "counts": result["counts"]},
                      indent=2, default=str))
-    print("Next: 'idp score' to write credit/fraud scores from these features.")
+    print("Next: 'idp labels' (once per dataset; training needs it), then 'idp train', "
+          "'idp score' and 'idp publish'. With trained champion models: 'idp score', then 'idp publish'.")
 
 
 def _cmd_score(args: argparse.Namespace) -> None:
@@ -248,7 +249,9 @@ def _cmd_score(args: argparse.Namespace) -> None:
     result = to_scores(cfg, persist=True)
     print(json.dumps({"score_tables": result["score_tables"]}, indent=2, default=str))
     if not result["score_tables"]:
-        print("No scores written — no trained model in the store. Run 'idp train' first.")
+        print("No scores written — no trained model in the store. Run 'idp labels' and 'idp train' first.")
+    else:
+        print("Next: 'idp publish' to load the scores and features into the serving store.")
 
 
 def _cmd_labels(args: argparse.Namespace) -> None:
@@ -259,6 +262,7 @@ def _cmd_labels(args: argparse.Namespace) -> None:
     labels = to_labels(cfg, persist=True)
     print(json.dumps({"labels_written": int(len(labels)),
                       "tenants": sorted(labels["tenant_id"].unique().tolist())}, indent=2))
+    print("Next: 'idp train' to train the models on the Gold features and these labels.")
 
 
 def _cmd_publish(args: argparse.Namespace) -> None:
@@ -268,6 +272,7 @@ def _cmd_publish(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     result = publish_serving(cfg)
     print(json.dumps(result, indent=2, default=str))
+    print("Next: 'idp serve' (or the cluster's scoring API) answers from these tables.")
 
 
 def _cmd_train(args: argparse.Namespace) -> None:
@@ -279,6 +284,7 @@ def _cmd_train(args: argparse.Namespace) -> None:
     print(json.dumps({"credit_metrics": result["credit_metrics"],
                       "fraud_metrics": result["fraud_metrics"],
                       "registry": result["registry"]}, indent=2, default=str))
+    print("Next: 'idp score' to score with the champion models, then 'idp publish'.")
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:

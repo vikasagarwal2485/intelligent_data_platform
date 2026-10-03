@@ -319,7 +319,7 @@ stream: ## Ingestion (idp-app): in-memory produce -> Kafka, then consume -> Bron
 	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
 	@echo ">> Consuming -> Bronze... (follow: kubectl -n idp-app logs -f job/idp-consume)"
 	kubectl -n idp-app wait --for=condition=complete job/idp-consume --timeout=600s
-	@echo ">> Bronze ready. Next: make silver, then make gold."
+	@echo ">> Bronze ready. Next: make silver"
 
 # Spark stages run as Spark Operator SparkApplications (REQ-PLT-10): render the
 # stage's manifest from its profile (idp spark-manifest), apply it, and wait for its
@@ -374,7 +374,7 @@ stream-from-landing: ## Ingestion via the landing zone: generate -> s3://idp-lan
 	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
 	@echo ">> [3/3] Consuming -> Bronze ..."
 	$(call wait_job,idp-consume,600)
-	@echo ">> Bronze ready (from the landing zone). Next: make silver, then make gold."
+	@echo ">> Bronze ready (from the landing zone). Next: make silver"
 
 .PHONY: generate-job
 generate-job: ## Landing only (idp-app): write synthetic source files to s3://idp-landing (step 1 of stream-from-landing)
@@ -391,15 +391,17 @@ stream-replay: ## Re-publish the EXISTING landing files (no regenerate) -> Kafka
 	kubectl -n idp-app apply -f deploy/app/jobs/consume-job.yaml
 	@echo ">> [2/2] Consuming -> Bronze ..."
 	$(call wait_job,idp-consume,600)
-	@echo ">> Bronze ready. Next: make silver, then make gold."
+	@echo ">> Bronze ready. Next: make silver"
 
 .PHONY: silver
 silver: mk-check ## Silver stage (SparkApplication in idp-app): new Bronze (S3) -> canonical Silver (S3), incremental
 	$(call run_sparkapp,silver,)
+	@echo ">> Silver ready. Next: make gold"
 
 .PHONY: silver-full-refresh
 silver-full-refresh: mk-check ## Silver stage with --full-refresh (SparkApplication): reset the checkpoints, rebuild the facts from all of Bronze
 	$(call run_sparkapp,silver,-- --full-refresh)
+	@echo ">> Silver rebuilt. Next: make gold"
 
 .PHONY: maintain
 maintain: mk-check ## Lake maintenance (SparkApplication in idp-app): compact, expire snapshots, remove orphan files on every table
@@ -408,11 +410,13 @@ maintain: mk-check ## Lake maintenance (SparkApplication in idp-app): compact, e
 .PHONY: gold
 gold: mk-check ## Gold stage (SparkApplication in idp-app): Silver (S3) -> feature tables ONLY (S3)
 	$(call run_sparkapp,gold,)
-	@echo ">> Gold features written. Run 'make score' to add credit/fraud scores."
+	@echo ">> Gold features written. Next: make labels (once per dataset; train needs it), then make train, make score, make publish."
+	@echo "   With champion models already trained: make score, then make publish."
 
 .PHONY: score
-score: mk-check ## Score stage (SparkApplication in idp-app): Gold features + models -> score tables (S3), distributed
+score: mk-check ## Score stage (SparkApplication in idp-app): Gold features + models -> score tables (S3), distributed. Needs trained models ('make train').
 	$(call run_sparkapp,score,)
+	@echo ">> Scores written. Next: make publish"
 
 .PHONY: labels
 labels: ## Seed the labels/outcomes store (idp-app): -> s3://idp-ml/labels (training input)
@@ -420,15 +424,18 @@ labels: ## Seed the labels/outcomes store (idp-app): -> s3://idp-ml/labels (trai
 	kubectl -n idp-app apply -f deploy/app/jobs/labels-job.yaml
 	kubectl -n idp-app wait --for=condition=complete job/idp-labels --timeout=600s
 	kubectl -n idp-app logs job/idp-labels
+	@echo ">> Labels seeded. Next: make train"
 
 .PHONY: train
 train: mk-check ## Train stage (SparkApplication in idp-app): Gold features + labels store -> models (MLflow registry). Needs 'make labels' first.
 	$(call run_sparkapp,train,)
-	@echo ">> Models registered (MLflow when IDP_MLFLOW_TRACKING_URI is set, else s3://idp-ml); see 'registry' above for the champion gate. 'make score' scores with the champions."
+	@echo ">> Models registered (MLflow when IDP_MLFLOW_TRACKING_URI is set, else s3://idp-ml); see 'registry' above for the champion gate."
+	@echo "   Next: make score (scores with the champions), then make publish"
 
 .PHONY: publish
 publish: mk-check ## Serving stage (SparkApplication in idp-app): Gold (S3) -> TimescaleDB (staging load + atomic swap)
 	$(call run_sparkapp,publish,)
+	@echo ">> Serving tables published. Next: make serve-cluster to query the scoring API"
 
 .PHONY: timescale-psql
 timescale-psql: ## Open a psql shell on TimescaleDB (inspect the gold.* serving tables)

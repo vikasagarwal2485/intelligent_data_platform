@@ -427,11 +427,13 @@ Health checks & fixes if a component is unhappy:
 make stream        # 1) produce -> Kafka, then consume -> BRONZE (S3). Bronze only.
                    #    (or: make stream-from-landing — via the s3://idp-landing source files)
 make silver        # 2) Silver stage: Bronze (S3) -> canonical Silver (S3)
-make labels        # 3) Seed the labels/outcomes store -> s3://idp-ml/labels (training input; once, not in Airflow)
-make gold          # 4) Gold stage:  Silver (S3) -> feature tables ONLY (S3)
+make gold          # 3) Gold stage:  Silver (S3) -> feature tables ONLY (S3)
+make labels        # 4) Seed the labels/outcomes store -> s3://idp-ml/labels (training input; once per
+                   #    dataset, not in Airflow; any time before train, independent of Gold)
 make train         # 5) Train stage (SparkApplication): Gold features + labels -> models (MLflow registry)
 make score         # 6) Score stage: Gold features + models -> credit/fraud SCORES (S3)
 make publish       # 7) Serving stage: Gold (S3) -> TimescaleDB (indexed by service_id)
+make serve-cluster # 8) Port-forward the cluster's scoring API (127.0.0.1:18000) to query it
 ```
 > **Training vs scoring are separate** (phase-13). `train` (fit) learns from
 > **historical Gold features + the labels store** — no synthetic regeneration — and
@@ -921,6 +923,72 @@ can't silently score as 0.
 `(tenant_id, service_id)`. Dashboards/APIs then read a ready-made score with a
 single indexed lookup instead of recomputing — the plan's Gold serving layer
 (Q4/Q6). The `GET /serving/...` endpoint above reads from it.
+
+**Two kinds of inference call.** *Inference* is running a trained model on a
+subscriber's features to get a score. The platform offers it two ways:
+
+| | On-demand (`POST /credit-limit`, `POST /fraud-score`) | Precomputed (`GET /serving/{table}/{tenant}/{service_id}`) |
+|---|---|---|
+| When the model runs | at request time, in the API, on the features the caller sends | ahead of time, in `make score`, for every consenting subscriber in Gold |
+| What the call does | loads the champion model (once) and scores the request body | reads the stored row from TimescaleDB with one indexed lookup; no model involved |
+| Freshness | as fresh as the caller's features | as of the last `make score` + `make publish` (`scored_at` in the row) |
+| Typical use | what-if and new data: an application with features not in the lake yet, a simulation | known subscribers: a checkout or top-up screen, a CRM, dashboards; fast, cheap, and the same number analytics sees |
+| Cost and latency | one model run per call | milliseconds, independent of model size |
+
+Both run the same model code (`CreditLimitModel.recommend_limit`,
+`FraudModel.score`), so a credit score is the same either way for the same features.
+A fraud score's `anomaly_score` needs a population to scale against: `make score`
+scales by the min/max over the subscribers it scores, and a single on-demand request
+uses the **training population's range, stored with the model** at `make train`
+(clipped to 0–1). So the two agree closely but can differ slightly when today's
+population isn't the training one. A model trained before the range was stored
+returns `anomaly_score` 0 on demand until it's retrained. Serving holds only each
+tenant's latest score run; `gold.credit_scores` / `gold.fraud_scores` in the lake
+keep every run for history. `make score` and `make publish` refresh it (after
+`make train` when the models change).
+
+```bash
+TOKEN=$(make -s keycloak-token TENANT=tenant_a)
+curl -s localhost:18000/serving/credit_scores/tenant_a/tok_5bf6544411eb5a3d64d7316d -H "Authorization: Bearer $TOKEN"
+# {"tenant_id":"tenant_a","service_id":"tok_5bf6544411eb5a3d64d7316d","pd":0.2251,
+#  "affordability_base":152.08,"recommended_limit":117.85,"scored_at":"2026-10-03T13:57:29.693354"}
+```
+
+**Reading a credit score** (`credit_scores`):
+
+| Field | Meaning | Example `tok_5bf6…` |
+|---|---|---|
+| `pd` | probability of default (0–1): *will they repay?* | 0.2251, about a 23% estimated chance of default |
+| `affordability_base` | capacity from behaviour alone: *how much can they handle?* `3 × avg successful recharge × tenure factor (tenure days / 365, capped at 1) × recharge success rate × 1.3 for companies`, clipped to 5–500 | 3 × 42.89 × 1.0 (864 days) × 0.909 × 1.3 (a company) = **152.08** |
+| `recommended_limit` | the offer: capacity reduced by risk, `affordability_base × (1 − pd)`, clipped to 5–500 | 152.08 × 0.7749 = **117.85** |
+
+So this subscriber can afford about 152 by their recharge pattern, but carries
+moderate default risk, so the default offer is about 118. A risk team can apply its
+own policy on the separate fields (e.g. decline above a `pd` cut-off, or cap new
+customers) without retraining; the on-demand `POST /credit-limit` also returns
+`reason_codes`, the features that push `pd` up.
+
+**Reading a fraud score** (`fraud_scores`): three detectors fused into one
+`fraud_score = 0.6 × fraud_proba + 0.2 × anomaly_score + 0.2 × rule_score`
+(0–1, higher is more suspicious).
+
+| Field | Meaning |
+|---|---|
+| `fraud_proba` | supervised model: probability the subscriber looks like known fraud (trained on labels) |
+| `anomaly_score` | IsolationForest: how unusual the behaviour is vs the population (0–1; scaled over the scored table, or over the training population for an on-demand call), catches new patterns |
+| `rule_score` | 1 when a deterministic rule fires: SIM-box (≥ 90% originating calls *and* ≥ 200 calls per active day), a burst of ≥ 5 failed recharges, or roaming share ≥ 50%; else 0 |
+| `fraud_score` | the fused score used for decisions |
+
+| Subscriber | `fraud_proba` | `anomaly_score` | `rule_score` | `fraud_score` | Reading |
+|---|---|---|---|---|---|
+| `tok_5bf6…` | 0.0003 | 0.2405 | 0 | **0.0483** | normal: the model sees no fraud pattern, behaviour is ordinary, no rule fires |
+| `tok_5e01…` | 0.9985 | 0.3837 | 1 | **0.8759** | high risk: the model is near-certain, and the failed-recharge rule fired (5 failed recharges; its max recharge is also 3.6 standard deviations above the tenant's) |
+
+A threshold turns the score into an action; it's a policy choice, not part of the
+model. For example, review at ≥ 0.5 and block at ≥ 0.9: in the run above that's 12
+of tenant_a's 136 consenting subscribers to review (the median score is 0.03).
+`rule_score` makes the decision explainable: when it's 1, the fired rule is the
+first thing to check.
 
 **Tenant isolation at the edge (REQ-SRV-03).** In the cluster every endpoint except
 `/health` needs a Bearer access token from the Keycloak realm `idp`. The API checks

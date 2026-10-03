@@ -59,6 +59,9 @@ class FraudModel:
     thresholds: dict = field(default_factory=lambda: dict(DEFAULT_RULES))
     clf: HistGradientBoostingClassifier | None = None
     iforest: IsolationForest | None = None
+    # (min, max) of the raw anomaly score over the training population: the scale a
+    # single on-demand request is scored on, since it has no population of its own
+    anomaly_range: tuple[float, float] | None = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray) -> "FraudModel":
         Xm = X[self.features].astype(float)
@@ -70,6 +73,8 @@ class FraudModel:
         self.iforest = IsolationForest(
             contamination=self.contamination, random_state=42, n_estimators=200,
         ).fit(Xm)
+        raw = -self.iforest.score_samples(Xm)
+        self.anomaly_range = (float(raw.min()), float(raw.max()))
         return self
 
     def raw_anomaly(self, X: pd.DataFrame) -> np.ndarray:
@@ -87,7 +92,11 @@ class FraudModel:
         # the min/max of this frame, the single-process behaviour)
         raw = -self.iforest.score_samples(Xm)
         lo, hi = anomaly_range if anomaly_range is not None else (raw.min(), raw.max())
-        return (raw - lo) / (hi - lo) if hi > lo else np.zeros_like(raw)
+        if hi <= lo:
+            return np.zeros_like(raw)
+        # a row outside the given population's range (an on-demand request scored on
+        # the training range) is clipped to the 0-1 scale
+        return np.clip((raw - lo) / (hi - lo), 0.0, 1.0)
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         if self.clf is None:

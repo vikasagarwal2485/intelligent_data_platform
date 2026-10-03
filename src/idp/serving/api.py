@@ -103,7 +103,11 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
     def fraud_score(req: ScoreRequest, token_tenant: str | None = Depends(current_tenant)) -> dict[str, Any]:
         req.tenant_id = scoped_tenant(req.tenant_id, token_tenant)
         frame = _to_frame(req, FRAUD_FEATURES)
-        result = _fraud().score(frame).iloc[0].to_dict()
+        model = _fraud()
+        # one subscriber has no population to scale the anomaly score against: use
+        # the training population's range stored with the model (a model trained
+        # before it was stored falls back to the request alone, i.e. 0)
+        result = model.score(frame, anomaly_range=getattr(model, "anomaly_range", None)).iloc[0].to_dict()
         return result
 
     @app.get("/serving/{table}/{tenant_id}/{service_id}")

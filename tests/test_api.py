@@ -1,6 +1,8 @@
 """Tests for the FastAPI scoring service (plan 5.6 / 6.6)."""
 from __future__ import annotations
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from idp.common.config import StorageConfig, load_config
@@ -49,6 +51,19 @@ def test_fraud_score_endpoint(tmp_path):
     resp = client.post("/fraud-score", json=payload)
     assert resp.status_code == 200
     assert "fraud_score" in resp.json()
+
+
+def test_fraud_score_uses_the_training_range(tmp_path):
+    # a single on-demand request gets a real anomaly score, scaled on the training
+    # population's range stored with the model (it used to be always 0)
+    art = _train_models(tmp_path)
+    client = TestClient(create_app(artifacts_dir=art))
+    features = {f: 1000.0 for f in FRAUD_FEATURES}                 # far from typical behaviour
+    body = client.post("/fraud-score", json={"tenant_id": "tenant_b", "service_id": "tok_x",
+                                             "features": features}).json()
+    assert 0.0 < body["anomaly_score"] <= 1.0
+    assert body["fraud_score"] == pytest.approx(min(1.0, 0.6 * body["fraud_proba"] + 0.2 * body["anomaly_score"]
+                                                     + 0.2 * body["rule_score"]), abs=1e-3)
 
 
 def test_unknown_feature_names_are_rejected(tmp_path):

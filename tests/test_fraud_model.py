@@ -80,3 +80,31 @@ def test_default_score_unchanged_and_global_range_reproduces_whole_frame(fraud_l
     naive = pd.concat(model.score(fraud_labeled.iloc[i::3]) for i in range(3))
     naive = naive.sort_values(["tenant_id", "service_id"]).reset_index(drop=True)
     assert not np.allclose(naive["anomaly_score"], expected["anomaly_score"])
+
+
+def test_training_population_range_is_stored_and_saved(fraud_labeled, tmp_path):
+    # the range a single on-demand request is scored on: the raw anomaly min/max over
+    # the training rows, kept with the model
+    model = FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])
+    raw = model.raw_anomaly(fraud_labeled)
+    assert model.anomaly_range == (float(raw.min()), float(raw.max()))
+    path = tmp_path / "fraud.joblib"
+    model.save(path)
+    assert FraudModel.load(path).anomaly_range == model.anomaly_range
+
+
+def test_single_row_scored_on_the_training_range(fraud_labeled):
+    # one subscriber alone has no population: without a range its anomaly score is 0;
+    # with the stored training range it matches its place in the training population
+    model = FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"])
+    whole = model.score(fraud_labeled, anomaly_range=model.anomaly_range)
+    i = int(whole["anomaly_score"].idxmax())
+    alone = model.score(fraud_labeled.iloc[[i]], anomaly_range=model.anomaly_range).iloc[0]
+    assert model.score(fraud_labeled.iloc[[i]]).iloc[0]["anomaly_score"] == 0.0
+    assert alone["anomaly_score"] == whole.loc[i, "anomaly_score"] > 0.5
+    assert alone["fraud_score"] == whole.loc[i, "fraud_score"]
+    # outside the training range: clipped to the 0-1 scale
+    extreme = fraud_labeled.iloc[[i]].copy()
+    for col in model.features:
+        extreme[col] = extreme[col].astype(float) * 50
+    assert 0.0 <= model.score(extreme, anomaly_range=model.anomaly_range).iloc[0]["anomaly_score"] <= 1.0
