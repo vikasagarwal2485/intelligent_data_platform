@@ -535,6 +535,9 @@ Consequences. Status: `Accepted` unless noted.
     agreements carry `customer_id`. New Silver dimensions `dim_customer`,
     `dim_billing_account` and `dim_product`; `dim_subscriber` carries `customer_id`,
     the customer's `segment` and `customer_tenure_days`.
+  - **Contracts.** `config/avro/canonical/` holds the canonical record contracts the
+    conform step enforces; `config/avro/silver/` documents every Silver table
+    (dimensions, facts, quarantine), checked by tests.
   - **Feature rename.** `account_tenure_days` becomes `customer_tenure_days` in the
     feature contract, Gold, the credit model and the API; the API refuses unknown
     feature names with 422.

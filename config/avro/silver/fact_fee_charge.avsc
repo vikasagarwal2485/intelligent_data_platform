@@ -1,0 +1,85 @@
+{
+  "type": "record",
+  "name": "FactFeeCharge",
+  "namespace": "com.idp.silver",
+  "doc": "Silver fact_fee_charge: one row per product fee charge (documented contract, checked by tests). Partitioned by (tenant_id, day(charged_at)). product_name, category and agreement_id are joined from the product (REQ-SLV-05); no PII.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "product_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "charge_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "amount",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
+    },
+    {
+      "name": "currency",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "charged_at",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ],
+      "default": null,
+      "doc": "UTC."
+    },
+    {
+      "name": "product_name",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "category",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "agreement_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "The product's agreement (the subscriber link)."
+    }
+  ]
+}

@@ -192,7 +192,7 @@ src/idp/                     # the platform package
   mcp/                       #   MCP analytics server + tools
   pipeline.py                #   stage functions (to_silver/to_gold/to_scores/train/...) + local run()
   cli.py                     #   `idp` entrypoint
-config/                      # platform.yaml, canonical Avro contracts (config/avro), TM Forum schemas,
+config/                      # platform.yaml, Avro contracts (config/avro: canonical/, silver/), TM Forum schemas,
                              #   extensions and mapping profiles (config/tmf)
 data_samples/                # one TM Forum Open API v5 sample per landing resource type
 deploy/                      # split by owning team (ADR-0018)
@@ -338,9 +338,10 @@ Run `make help` to list every target with a description.
    - **Two contracts.** The wire contract is each topic's TMF JSON Schema, registered
      in Apicurio as `<topic>-value` (schema type JSON) by `make schemas`
      (`idp registry-schemas` writes them). The canonical contract is
-     `config/avro/*.avsc`, one Avro schema per canonical entity, field for field as
-     Silver's conform step produces it; the conform step enforces it.
-     `config/avro/silver/` documents Silver's dimension tables.
+     `config/avro/canonical/*.avsc`, one Avro schema per canonical entity, field for
+     field as Silver's conform step produces it; the conform step enforces it.
+     `config/avro/silver/` documents every Silver table (dimensions, facts,
+     quarantine) as Silver stores it: tokenized identifiers, UTC timestamps.
 3. **Watch / verify** (jobs are in `idp-app`):
    ```bash
    kubectl -n idp-app logs -f job/idp-produce      # per-topic message counts
@@ -640,7 +641,7 @@ table's resource type, its resource valid against the TMF and extension schemas,
 its `tenantId` equal to the event's tenant), adapted with the mapping profile
 (`ingestion/tmf/`, resolving an agreement's customer against the tenant's
 customers in Bronze), and checked against its canonical Avro contract
-(`config/avro/`). An event that fails goes to **`silver.quarantine`** (tenant,
+(`config/avro/canonical/`). An event that fails goes to **`silver.quarantine`** (tenant,
 source table, `event_id`, resource, reason, times) and nowhere else; the run
 reports the count per source and doesn't fail. Reasons name fields and rules,
 never values, and the quarantine holds no payload, so it carries no PII; the event

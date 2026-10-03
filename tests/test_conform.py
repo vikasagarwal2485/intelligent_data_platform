@@ -153,7 +153,8 @@ def test_quarantine_through_silver_runs(spark, tmp_path, dataset, tmf):
     assert first["quarantined"] == {"tmf_agreement": 1, "tmf_product_usage": 1}
     q = catalog.read_table(cfg, "silver", "quarantine")
     assert set(q["resource_id"]) == {"tenant_a-agr-orphan", "u-bad"} and q["quarantined_at"].notna().all()
-    assert "payload" not in q.columns
+    from idp.common import contracts
+    assert list(q.columns) == contracts.fields("silver/quarantine")      # no payload (SCN-STR-03.5)
     to_silver(cfg)                                              # re-run: no duplicates
     assert len(catalog.read_table(cfg, "silver", "quarantine")) == 2
     # the customer arrives; a full refresh conforms the agreement

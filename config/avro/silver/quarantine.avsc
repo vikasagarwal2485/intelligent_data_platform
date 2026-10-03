@@ -1,0 +1,67 @@
+{
+  "type": "record",
+  "name": "Quarantine",
+  "namespace": "com.idp.silver",
+  "doc": "Silver quarantine: the raw Bronze events that failed conforming (REQ-SLV-09), one row per event (documented contract, checked by tests). No payload and no offending values: the event is in Bronze, found by event_id.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "source_table",
+      "type": "string",
+      "doc": "The raw Bronze table."
+    },
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "resource_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "resource_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "reason",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "The failed check: fields and rules, never values."
+    },
+    {
+      "name": "event_time",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "The event's eventTime, as received."
+    },
+    {
+      "name": "quarantined_at",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ],
+      "default": null,
+      "doc": "UTC."
+    }
+  ]
+}

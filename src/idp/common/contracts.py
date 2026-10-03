@@ -1,10 +1,13 @@
 """Canonical record contracts (REQ-STR-03).
 
-``config/avro/<schema>.avsc`` describes, field for field, the canonical record of
-an entity as Silver's conform step produces it from the raw Bronze events (the TMF
-adapter's output). The conform step checks every record against it and
-quarantines the ones that break it (REQ-SLV-09). ``config/avro/silver/`` documents
-Silver's dimension tables; tests check them.
+Two sets of Avro schemas in ``config/avro/``:
+
+* ``canonical/<schema>.avsc`` describes, field for field, the canonical record of an
+  entity as Silver's conform step produces it from the raw Bronze events (the TMF
+  adapter's output). The conform step checks every record against it and
+  quarantines the ones that break it (REQ-SLV-09).
+* ``silver/<table>.avsc`` documents each Silver table (dimensions, facts,
+  quarantine): the curated output, tokenized and typed. Tests check them.
 
 The schemas are contracts only: payloads stay JSON on Kafka and Arrow/Parquet in
 the lake, and the schemas aren't registered as Kafka subjects.
@@ -21,23 +24,27 @@ from idp.common.config import DEFAULT_CONFIG_PATH
 
 AVRO_DIR = DEFAULT_CONFIG_PATH.parent / "avro"
 
-# Bronze entity -> its contract (voice and data usage share one)
+# canonical entity -> its contract (voice and data usage share one)
 ENTITY_SCHEMA = {
-    "parties": "party",
-    "customers": "customer",
-    "billing_accounts": "billing_account",
-    "agreements": "agreement",
-    "products": "product",
-    "voice_events": "usage_event",
-    "data_events": "usage_event",
-    "recharge_events": "recharge_event",
-    "fee_charges": "fee_charge",
+    "parties": "canonical/party",
+    "customers": "canonical/customer",
+    "billing_accounts": "canonical/billing_account",
+    "agreements": "canonical/agreement",
+    "products": "canonical/product",
+    "voice_events": "canonical/usage_event",
+    "data_events": "canonical/usage_event",
+    "recharge_events": "canonical/recharge_event",
+    "fee_charges": "canonical/fee_charge",
 }
+# every Silver table with a documented contract (config/avro/silver/<table>.avsc)
+SILVER_TABLES = ("dim_subscriber", "dim_customer", "dim_billing_account", "dim_product",
+                 "fact_usage", "fact_recharge", "fact_fee_charge", "quarantine")
 
 
 @functools.lru_cache(maxsize=None)
 def load(name: str) -> dict[str, Any]:
-    """A contract's Avro schema as written, e.g. ``load("party")`` or ``load("silver/dim_subscriber")``."""
+    """A contract's Avro schema as written, e.g. ``load("canonical/party")`` or
+    ``load("silver/dim_subscriber")``."""
     return json.loads((AVRO_DIR / f"{name}.avsc").read_text(encoding="utf-8"))
 
 
@@ -78,9 +85,10 @@ def error(entity: str, record: dict[str, Any]) -> str | None:
     ``silver.quarantine``, which must not hold PII (REQ-SLV-03).
     """
     name = ENTITY_SCHEMA[entity]
+    label = name.rsplit("/", 1)[-1]
     extra = set(record) - set(fields(name))
     if extra:
-        return f"{name}: unexpected fields {sorted(extra)}"
+        return f"{label}: unexpected fields {sorted(extra)}"
     if fastavro.validation.validate(record, _parsed(name), raise_errors=False):
         return None
     bad = []
@@ -93,7 +101,7 @@ def error(entity: str, record: dict[str, Any]) -> str | None:
         if not ok:
             bad.append(f"{field}: missing, expected {expected}" if value is None
                        else f"{field}: expected {expected}")
-    return f"{name}: {'; '.join(bad) or 'does not conform'}"
+    return f"{label}: {'; '.join(bad) or 'does not conform'}"
 
 
 _SPARK_TYPES = {"string": "StringType", "boolean": "BooleanType", "long": "LongType",

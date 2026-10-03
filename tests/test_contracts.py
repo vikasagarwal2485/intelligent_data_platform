@@ -1,4 +1,4 @@
-"""Canonical record contracts in config/avro (REQ-STR-03)."""
+"""Avro contracts: canonical records (config/avro/canonical) and Silver tables (config/avro/silver), REQ-STR-03."""
 from __future__ import annotations
 
 import pytest
@@ -52,16 +52,27 @@ def test_spark_schema_follows_the_contract():
     assert types["customer_id"] == ("string", False)
     assert types["segment"] == ("string", True)                 # nullable enum
     assert types["valid_from"] == ("timestamp", True)
-    assert contracts.spark_schema("usage_event")["qty"].dataType.simpleString() == "bigint"
+    assert contracts.spark_schema("canonical/usage_event")["qty"].dataType.simpleString() == "bigint"
 
 
-def test_silver_contract_matches_dim_subscriber(silver):
-    # SCN-STR-03.4: Silver's dim_subscriber has exactly the documented fields
-    assert list(silver["dim_subscriber"].columns) == contracts.fields("silver/dim_subscriber")
+@pytest.mark.parametrize("table", [t for t in contracts.SILVER_TABLES if t != "quarantine"])
+def test_silver_contracts_match_the_silver_tables(silver, table):
+    # SCN-STR-03.4 / 03.5: every Silver table has exactly its contract's columns, in
+    # order, and its timestamp columns are timestamps (the quarantine is checked
+    # where a run quarantines something, tests/test_conform.py)
+    import pandas as pd
+    df = silver[table]
+    assert list(df.columns) == contracts.fields(f"silver/{table}")
+    schema = contracts.spark_schema(f"silver/{table}")
+    for field in schema.fields:
+        if field.dataType.simpleString() == "timestamp":
+            assert pd.api.types.is_datetime64_any_dtype(df[field.name]), (table, field.name)
 
 
-@pytest.mark.parametrize("table", ["dim_customer", "dim_billing_account", "dim_product"])
-def test_silver_contracts_match_the_new_dimensions(silver, table):
-    # SCN-STR-03.5
-    assert list(silver[table].columns) == contracts.fields(f"silver/{table}")
-
+def test_every_silver_table_has_a_contract():
+    from pathlib import Path
+    written = {p.stem for p in (contracts.AVRO_DIR / "silver").glob("*.avsc")}
+    assert written == set(contracts.SILVER_TABLES)
+    assert {p.stem for p in (contracts.AVRO_DIR / "canonical").glob("*.avsc")} == \
+        {n.split("/")[1] for n in contracts.ENTITY_SCHEMA.values()}
+    assert not list(contracts.AVRO_DIR.glob("*.avsc"))             # nothing left at the top level

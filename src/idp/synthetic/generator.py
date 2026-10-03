@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 FRAUD_TYPES = ("sim_box", "card_fraud", "roaming_fraud")
-# The categorical values below double as Avro enum symbols (config/avro/*.avsc),
+# The categorical values below double as Avro enum symbols (config/avro/canonical/*.avsc),
 # so they must be Avro-enum-safe: letters/digits/underscore only, no hyphens.
 PAYMENT_METHODS = ("credit_card", "cash", "voucher")
 NETWORK_TECH = ("3G", "4G", "4G+", "5G")
@@ -47,7 +47,7 @@ PRODUCT_CATALOG = {
     "Roaming Pass": ("roaming", 12.99),
 }
 PRODUCT_NAMES = tuple(PRODUCT_CATALOG)
-# Recharge channels (weighted). Avro-enum-safe symbols (config/avro/recharge_event.avsc);
+# Recharge channels (weighted). Avro-enum-safe symbols (config/avro/canonical/recharge_event.avsc);
 # was a constant "manual", which made the recharge-type split degenerate for analytics.
 RECHARGE_TYPES = ("voucher", "topup")
 RECHARGE_TYPE_WEIGHTS = (0.4, 0.6)

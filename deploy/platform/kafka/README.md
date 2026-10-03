@@ -3,8 +3,9 @@
 Step-by-step for standing up the streaming layer (plan section 3): an Apache
 Kafka cluster (Strimzi), per-tenant topics carrying TM Forum create events, and an
 Apicurio Schema Registry holding each topic's TMF JSON Schema (the wire contract).
-The canonical Avro contracts in [`config/avro/`](../../../config/avro) describe
-Bronze, not the wire.
+The Avro contracts in [`config/avro/`](../../../config/avro) describe the canonical
+records Silver conforms to (`canonical/`) and Silver's tables (`silver/`), not the
+wire.
 
 ```
 deploy/kafka/
@@ -141,8 +142,9 @@ they reference) and POSTs it as the **value** schema of the topic, with
 `schemaType: JSON` (subject = `<topic>-value`, `TopicNameStrategy`), e.g.
 `t.tenant_a.productUsage-value`. The `party` subject accepts both party events.
 
-The Avro schemas in `config/avro/` aren't registered: they're the canonical
-contract of the Bronze records, which the consumer enforces (REQ-STR-03). Avro
+The Avro schemas in `config/avro/` aren't registered: `canonical/` is the contract
+of the records Silver's conform step produces, which it enforces, and `silver/`
+documents Silver's tables (REQ-STR-03). Avro
 subjects registered before this change (`t.<tenant>.usage.voice-value` …) are
 unused and can stay.
 

@@ -11,13 +11,18 @@ The platform SHALL keep two contracts:
   SHALL accept both the Individual and the Organization event. These schemas SHALL be
   registerable to a Confluent-compatible registry as `<topic>-value` subjects with
   schema type JSON. Message payloads on the wire SHALL be UTF-8 JSON.
-- **Canonical contract.** Avro schemas in `config/avro/` SHALL describe the canonical
-  record of every conformed entity (`parties`, `customers`, `billing_accounts`,
-  `agreements`, `products`, voice and data usage, recharges, fee charges), field for
-  field as Silver's conform step produces them. The conform step SHALL enforce them
-  (REQ-SLV-09). The Silver dimension contracts (`dim_subscriber`, `dim_customer`,
-  `dim_billing_account`, `dim_product`) SHALL be documented in `config/avro/silver/`.
-  The canonical schemas SHALL NOT be registered as Kafka subjects.
+- **Canonical contract.** Avro schemas in `config/avro/canonical/` SHALL describe the
+  canonical record of every conformed entity (`parties`, `customers`,
+  `billing_accounts`, `agreements`, `products`, voice and data usage, recharges, fee
+  charges), field for field as Silver's conform step produces them. The conform step
+  SHALL enforce them (REQ-SLV-09). The canonical schemas SHALL NOT be registered as
+  Kafka subjects.
+- **Silver contracts.** Every Silver table (`dim_subscriber`, `dim_customer`,
+  `dim_billing_account`, `dim_product`, `fact_usage`, `fact_recharge`,
+  `fact_fee_charge` and `quarantine`) SHALL have an Avro schema in
+  `config/avro/silver/` documenting its columns, in order, and their types as Silver
+  stores them (tokenized identifiers, UTC timestamps). They are documentation,
+  checked by tests, not enforced at run time.
 
 #### Scenario: SCN-STR-03.1 — Schema registration
 - **WHEN** the schema registration runs against the registry
@@ -31,7 +36,7 @@ The platform SHALL keep two contracts:
 
 #### Scenario: SCN-STR-03.3 — Canonical contract matches the records
 - **WHEN** a generated dataset's canonical records are checked against
-  `config/avro/`
+  `config/avro/canonical/`
 - **THEN** every entity has a schema, every record conforms to it, and each schema's
   fields are exactly the entity's canonical columns
 
@@ -40,10 +45,12 @@ The platform SHALL keep two contracts:
 - **THEN** its columns are exactly the fields of
   `config/avro/silver/dim_subscriber.avsc`
 
-#### Scenario: SCN-STR-03.5 — Silver contracts match the new dimensions
-- **WHEN** Silver builds `dim_customer`, `dim_billing_account` and `dim_product`
-- **THEN** each one's columns are exactly the fields of its contract in
-  `config/avro/silver/`
+#### Scenario: SCN-STR-03.5 — Silver contracts match every Silver table
+- **WHEN** Silver builds its dimensions and facts, and quarantines an event
+- **THEN** each of `dim_customer`, `dim_billing_account`, `dim_product`,
+  `fact_usage`, `fact_recharge`, `fact_fee_charge` and `quarantine` has exactly the
+  fields of its contract in `config/avro/silver/`, in order, and the contract's
+  timestamp fields are timestamps in the table
 
 ## REMOVED Requirements
 

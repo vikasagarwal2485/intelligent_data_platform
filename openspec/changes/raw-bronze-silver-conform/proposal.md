@@ -135,8 +135,9 @@ accounts, products or customers.
   - `config/tmf/profiles/standard.yaml`;
   - the `IdpBillingAccount` extension schema;
   - `synthetic/generator.py`;
-  - `common/contracts.py` and `config/avro/` (new and renamed contracts, plus the
-    Silver dimension contracts);
+  - `common/contracts.py` and `config/avro/`: the canonical contracts move to
+    `canonical/` (with the new and renamed ones), and `silver/` gets a contract for
+    every Silver table (dimensions, facts, quarantine);
   - `maintenance.py` (table names);
   - `common/feature_contract.py`, `transforms/features.py`, `ml/credit_model.py` and
     `serving/api.py` (the tenure rename and the 422).

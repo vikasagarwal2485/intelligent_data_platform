@@ -1,0 +1,103 @@
+{
+  "type": "record",
+  "name": "FactRecharge",
+  "namespace": "com.idp.silver",
+  "doc": "Silver fact_recharge: one row per recharge (documented contract, checked by tests). Partitioned by (tenant_id, day(created_at)); service_id is tokenized.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "service_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Tokenized MSISDN."
+    },
+    {
+      "name": "agreement_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "created_at",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ],
+      "default": null,
+      "doc": "UTC."
+    },
+    {
+      "name": "amount",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
+    },
+    {
+      "name": "currency",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "payment_method",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "status",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "successful or failed."
+    },
+    {
+      "name": "failure_reason_code",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Channel."
+    },
+    {
+      "name": "recharge_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
+  ]
+}

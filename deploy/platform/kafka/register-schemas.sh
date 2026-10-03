@@ -4,7 +4,7 @@
 # topic (`idp registry-schemas`), as schemaType JSON. Subjects follow the
 # TopicNameStrategy: "<topic>-value", e.g. t.tenant_a.productUsage-value.
 #
-# The canonical Avro schemas in config/avro describe Bronze records, not the wire,
+# The Avro schemas in config/avro describe canonical records and Silver tables, not the wire,
 # so they aren't registered (REQ-STR-03).
 #
 # Usage:  bash deploy/kafka/register-schemas.sh [namespace]

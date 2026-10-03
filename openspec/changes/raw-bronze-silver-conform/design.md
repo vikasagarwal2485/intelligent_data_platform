@@ -197,8 +197,13 @@ voice_events, data_events, recharge_events, fee_charges`. The Avro contracts fol
   In the generator the customer's party is the payer, and the customer's
   `valid_from` and segment are the account's former ones, so the values are
   unchanged.
-- **Contracts:** `config/avro/silver/` gets `dim_customer`, `dim_billing_account`
-  and `dim_product`, and `dim_subscriber` is updated.
+- **Contracts:** the canonical contracts move to `config/avro/canonical/`, which is
+  what the conform step enforces. `config/avro/silver/` documents every Silver
+  table: `dim_customer`, `dim_billing_account`, `dim_product`, the updated
+  `dim_subscriber`, and `fact_usage`, `fact_recharge`, `fact_fee_charge` and
+  `quarantine`. Tests check each table's columns and timestamp types against them.
+  (Decided after task 8.2: the facts had no contract, and the canonical files at the
+  top level read like Bronze leftovers.)
 - **PII:** no new PII columns (party ids aren't PII). `service_id` and `imsi` stay
   tokenized.
 
