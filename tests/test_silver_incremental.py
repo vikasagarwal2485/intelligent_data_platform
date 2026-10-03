@@ -8,22 +8,25 @@ import pytest
 
 from conftest import lake_cfg
 from idp.common import catalog
-from idp.pipeline import ENTITIES, to_bronze, to_silver
+from idp.ingestion.raw import raw_events
+from idp.pipeline import to_bronze, to_silver
 from idp.synthetic.generator import generate_for_tenants
 from idp.transforms import lake
 
 FACTS = ("fact_usage", "fact_recharge", "fact_fee_charge")
-EVENTS = ("voice_events", "data_events", "recharge_events", "fee_charges")
-REFERENCE = ("parties", "accounts", "agreements", "products")
+EVENTS = ("tmf_product_usage", "tmf_topup_balance", "tmf_applied_customer_billing_rate")
+REFERENCE = ("tmf_party", "tmf_customer", "tmf_billing_account", "tmf_agreement", "tmf_product")
 
 
 @pytest.fixture(scope="module")
 def batches():
-    """Reference entities in batch 1; the events split into 3 batches by row order."""
+    """Raw Bronze rows: the reference events in batch 1; the fact events split into 3
+    batches by row order."""
     ds = generate_for_tenants(["tenant_a", "tenant_b"], subscribers=15, days=9, fraud_rate=0.2, seed=5)
-    out = [{e: getattr(ds, e) for e in REFERENCE}, {}, {}]
+    raw = raw_events(ds)
+    out = [{t: raw[t] for t in REFERENCE}, {}, {}]
     for e in EVENTS:
-        df = getattr(ds, e).reset_index(drop=True)
+        df = raw[e].reset_index(drop=True)
         thirds = [df.iloc[i::3] for i in range(3)]
         for i in range(3):
             out[i][e] = thirds[i]
@@ -46,10 +49,10 @@ def test_only_new_bronze_is_processed(spark, tmp_path, batches):
     first = to_silver(cfg)["processed"]
     to_bronze(cfg, batches[1])
     second = to_silver(cfg)["processed"]
-    assert first["fact_recharge"] == len(batches[0]["recharge_events"])
-    assert second["fact_recharge"] == len(batches[1]["recharge_events"])      # only batch 2
-    assert second["fact_usage"] == len(batches[1]["voice_events"]) + len(batches[1]["data_events"])
-    total = len(batches[0]["recharge_events"]) + len(batches[1]["recharge_events"])
+    assert first["fact_recharge"] == len(batches[0]["tmf_topup_balance"])
+    assert second["fact_recharge"] == len(batches[1]["tmf_topup_balance"])      # only batch 2
+    assert second["fact_usage"] == len(batches[1]["tmf_product_usage"])
+    total = len(batches[0]["tmf_topup_balance"]) + len(batches[1]["tmf_topup_balance"])
     assert len(catalog.read_table(cfg, "silver", "fact_recharge")) == total
 
 
@@ -124,13 +127,13 @@ def test_full_refresh_rebuilds_and_later_runs_stay_incremental(spark, tmp_path, 
     to_silver(cfg)
     before = _facts(cfg)
     refreshed = to_silver(cfg, full_refresh=True)
-    expected_recharges = len(batches[0]["recharge_events"]) + len(batches[1]["recharge_events"])
+    expected_recharges = len(batches[0]["tmf_topup_balance"]) + len(batches[1]["tmf_topup_balance"])
     assert refreshed["processed"]["fact_recharge"] == expected_recharges     # all of Bronze again
     after = _facts(cfg)
     for f in FACTS:
         pd.testing.assert_frame_equal(before[f], after[f], check_like=True)
     to_bronze(cfg, batches[2])
-    assert to_silver(cfg)["processed"]["fact_recharge"] == len(batches[2]["recharge_events"])
+    assert to_silver(cfg)["processed"]["fact_recharge"] == len(batches[2]["tmf_topup_balance"])
 
 
 def test_readers_never_see_a_partial_write(spark, tmp_path, batches):

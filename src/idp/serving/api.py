@@ -32,6 +32,13 @@ class ScoreRequest(BaseModel):
 
 
 def _to_frame(req: ScoreRequest, feature_list: list[str]) -> pd.DataFrame:
+    """The model's input row. Missing features are 0; a feature name outside the
+    model's contract is a 422 naming it (REQ-SRV-02), so a misspelled or renamed
+    feature (e.g. the former ``account_tenure_days``) can't be silently scored as 0."""
+    unknown = sorted(set(req.features) - set(feature_list))
+    if unknown:
+        raise HTTPException(422, {"message": "unknown feature names (not in the model's feature contract)",
+                                  "unknown_features": unknown})
     row: dict[str, Any] = {"tenant_id": req.tenant_id, "service_id": req.service_id}
     for f in feature_list:
         row[f] = float(req.features.get(f, 0.0))

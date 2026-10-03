@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 
 from conftest import rewrite_table
 from golden_data import golden_cfg
+from idp.ingestion.raw import raw_events
 from idp.common import storage
 from idp.common.pii import ConsentError
 from idp.pipeline import (
@@ -44,7 +45,7 @@ def lake(spark, tmp_path):
     cfg = golden_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a", "tenant_b"], subscribers=60, days=30,
                               fraud_rate=0.2, default_rate=0.2, seed=7)
-    to_bronze(cfg, {e: getattr(ds, e) for e in ENTITIES})
+    to_bronze(cfg, raw_events(ds))
     to_silver(cfg)
     to_labels(cfg, dataset=ds)
     return cfg

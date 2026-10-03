@@ -2,11 +2,11 @@
   "@type": "IdpOrganization",
   "@baseType": "Organization",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpOrganization.schema.json",
-  "href": "/tmf-api/partyManagement/v5/organization/tenant_a-party-000004",
+  "href": "/tmf-api/partyManagement/v5/organization/tenant_a-party-000001",
   "status": "validated",
   "isLegalEntity": true,
   "tenantId": "tenant_a",
-  "id": "tenant_a-party-000004",
+  "id": "tenant_a-party-000001",
   "partyCharacteristic": [
     {
       "@type": "StringCharacteristic",
@@ -32,14 +32,14 @@
       "@type": "PhoneContactMedium",
       "contactType": "mobile",
       "preferred": true,
-      "phoneNumber": "+595913809249"
+      "phoneNumber": "+595984153193"
     },
     {
       "@type": "EmailContactMedium",
       "contactType": "email",
-      "emailAddress": "user000004@example.com"
+      "emailAddress": "user000001@example.com"
     }
   ],
-  "name": "Company 000004",
+  "name": "Company 000001",
   "organizationType": "company"
 }

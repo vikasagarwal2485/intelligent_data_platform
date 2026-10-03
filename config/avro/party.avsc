@@ -2,7 +2,7 @@
   "type": "record",
   "name": "Party",
   "namespace": "com.idp.canonical",
-  "doc": "Canonical party (Bronze `parties`). Adapted from TMF632 Individual / Organization and its TMF629 Customer role (REQ-BRZ-05). Person fields are null for organizations.",
+  "doc": "Canonical party (TMF632 Individual / Organization), as Silver's conform step produces it (REQ-BRZ-05). Person fields are null for organizations. The party's role and account belong to its customer.",
   "fields": [
     {
       "name": "tenant_id",
@@ -11,11 +11,6 @@
     {
       "name": "id",
       "type": "string"
-    },
-    {
-      "name": "role",
-      "type": "string",
-      "doc": "The party's customer role (e.g. owner)."
     },
     {
       "name": "first_name",
@@ -63,10 +58,6 @@
     {
       "name": "consent_analytics",
       "type": "boolean"
-    },
-    {
-      "name": "account_id",
-      "type": "string"
     },
     {
       "name": "party_type",

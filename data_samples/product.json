@@ -2,7 +2,7 @@
   "@type": "IdpProduct",
   "@baseType": "Product",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpProduct.schema.json",
-  "href": "/tmf-api/productInventory/v5/product/tenant_a-prod-000000-0",
+  "href": "/tmf-api/productInventory/v5/product/tenant_a-prod-000001-0",
   "productPrice": [
     {
       "@type": "ProductPrice",
@@ -12,13 +12,13 @@
         "@type": "Price",
         "taxIncludedAmount": {
           "unit": "EUR",
-          "value": 7.99
+          "value": 14.99
         }
       }
     }
   ],
   "tenantId": "tenant_a",
-  "id": "tenant_a-prod-000000-0",
+  "id": "tenant_a-prod-000001-0",
   "productCharacteristic": [
     {
       "@type": "StringCharacteristic",
@@ -30,14 +30,14 @@
       "@type": "StringCharacteristic",
       "name": "category",
       "valueType": "string",
-      "value": "addon"
+      "value": "subscription"
     }
   ],
-  "name": "Unlimited Social",
+  "name": "Voice 100",
   "status": "active",
   "agreementItem": [
     {
-      "agreementId": "tenant_a-agr-000000",
+      "agreementId": "tenant_a-agr-000001",
       "@type": "AgreementItemRef"
     }
   ]

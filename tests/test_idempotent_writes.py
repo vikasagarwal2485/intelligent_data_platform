@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 
+from idp.ingestion.raw import raw_events
 from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.ml.credit_model import CreditLimitModel
@@ -46,7 +47,7 @@ def dataset():
 
 @pytest.fixture()
 def frames(dataset):
-    return {e: getattr(dataset, e) for e in ENTITIES}
+    return raw_events(dataset)
 
 
 # --- 1. storage write modes --------------------------------------------------
@@ -108,7 +109,7 @@ def test_bronze_stays_append_only(tmp_path, frames):
     cfg = _cfg(tmp_path)
     to_bronze(cfg, frames)
     to_bronze(cfg, frames)
-    assert len(_read(cfg, "bronze", "parties")) == 2 * len(frames["parties"])
+    assert len(_read(cfg, "bronze", "tmf_party")) == 2 * len(frames["tmf_party"])
     to_silver(cfg)
     assert not _read(cfg, "silver", "dim_subscriber").duplicated(KEY).any()
 

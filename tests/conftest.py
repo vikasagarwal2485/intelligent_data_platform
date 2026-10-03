@@ -55,13 +55,10 @@ def multi_tenant_dataset():
 
 @pytest.fixture(scope="session")
 def bronze_frames(multi_tenant_dataset):
-    ds = multi_tenant_dataset
-    return {
-        "parties": ds.parties, "accounts": ds.accounts, "agreements": ds.agreements,
-        "products": ds.products, "voice_events": ds.voice_events,
-        "data_events": ds.data_events, "recharge_events": ds.recharge_events,
-        "fee_charges": ds.fee_charges,
-    }
+    """The dataset as raw Bronze rows per table: the TMF events the producer would
+    publish, as the consumer lands them (REQ-BRZ-01)."""
+    from idp.ingestion.raw import raw_events
+    return raw_events(multi_tenant_dataset)
 
 
 def lake_cfg(root) -> PlatformConfig:
@@ -118,7 +115,7 @@ def clone_lake(src: PlatformConfig, root: Path, *, layers=("silver",), drop_tena
 @pytest.fixture(scope="session")
 def lake(spark, tmp_path_factory, bronze_frames):
     """The multi-tenant dataset built once through the real stages:
-    Bronze (landing) -> Silver -> Gold on Spark, into a session temp lake."""
+    raw Bronze -> Silver (conform + curate) -> Gold on Spark, into a session temp lake."""
     from idp.pipeline import to_bronze, to_gold, to_silver
 
     cfg = lake_cfg(tmp_path_factory.mktemp("lake"))
@@ -132,7 +129,8 @@ def lake(spark, tmp_path_factory, bronze_frames):
 def silver(lake):
     """Silver tables (pandas views of the lake)."""
     return {t: read_lake(lake, "silver", t)
-            for t in ("dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge")}
+            for t in ("dim_subscriber", "dim_customer", "dim_billing_account", "dim_product",
+                      "fact_usage", "fact_recharge", "fact_fee_charge")}
 
 
 @pytest.fixture(scope="session")

@@ -46,7 +46,6 @@ def test_paths():
 
 TOY = {
     "name": "toy",
-    "customer": {"resource": "Customer", "file": "customer.json"},
     "resources": [{
         "entity": "things", "resource": "Product", "type": "Product", "file": "thing.json",
         "set": {"status": "active"},
@@ -85,6 +84,15 @@ def test_profile_errors_are_caught_on_load(broken, message):
     doc = copy.deepcopy(TOY)
     doc["resources"][0]["fields"].update(broken)
     with pytest.raises(ProfileError, match=message):
+        parse_profile(doc)
+
+
+def test_customer_is_a_mapped_resource_not_a_section():
+    with pytest.raises(ProfileError, match="no longer a section"):
+        parse_profile({**copy.deepcopy(TOY), "customer": {"resource": "Customer", "file": "c.json"}})
+    doc = copy.deepcopy(TOY)
+    doc["resources"][0]["fields"]["owner"] = {"via": "customer", "path": "x"}
+    with pytest.raises(ProfileError, match="need a Customer resource"):
         parse_profile(doc)
 
 
@@ -162,22 +170,58 @@ def test_standard_profile_emits_valid_plain_tmf(dataset, profile, tenant):
 # adapter behaviour (task 3.2)                                                 #
 # --------------------------------------------------------------------------- #
 def test_organization_reached_through_the_customer_role(dataset, profile):
-    # SCN-BRZ-05.2
+    # SCN-BRZ-05.2: an agreement references its Customer (role customer), whose
+    # engaged party is an Organization
     canonical = _canonical(dataset, "tenant_a")
     files = _json(to_tmf(profile, canonical))
     org = files["organization.json"][0]
     customer = next(c for c in files["customer.json"] if c["engagedParty"]["id"] == org["id"])
-    assert customer["engagedParty"]["@referredType"] == "Organization"
-    account_ref = customer["account"][0]["id"]
-    acct = next(a for a in files["billingAccount.json"] if a["id"] == account_ref)
-    assert acct["relatedParty"][0]["partyOrPartyRole"] == {
-        "@type": "PartyRoleRef", "id": customer["id"], "@referredType": "Customer"}
+    agreement = next(a for a in files["agreement.json"]
+                     if a["engagedParty"][0]["partyOrPartyRole"]["id"] == customer["id"])
+    assert agreement["engagedParty"][0] == {
+        "@type": "RelatedPartyRefOrPartyRoleRef", "role": "customer",
+        "partyOrPartyRole": {"@type": "PartyRoleRef", "id": customer["id"], "@referredType": "Customer"}}
     back = from_tmf(profile, files)
-    row = next(a for a in back["accounts"] if a["id"] == account_ref)
-    assert row["party_id"] == org["id"] and row["is_company"] is True
+    assert next(c for c in back["customers"] if c["id"] == customer["id"])["party_id"] == org["id"]
+    assert next(a for a in back["agreements"] if a["id"] == agreement["id"])["customer_id"] == customer["id"]
     party = next(p for p in back["parties"] if p["id"] == org["id"])
     assert party["party_type"] == "organization"
     assert party["first_name"] is party["last_name"] is party["date_of_birth"] is None
+
+
+def test_billing_account_payer_resolved(dataset, profile):
+    # SCN-BRZ-05.7: the billing account references its paying party directly
+    canonical = _canonical(dataset, "tenant_a")
+    files = _json(to_tmf(profile, canonical))
+    org = files["organization.json"][0]
+    acct = next(a for a in files["billingAccount.json"]
+                if a["relatedParty"][0]["partyOrPartyRole"]["id"] == org["id"])
+    assert acct["relatedParty"][0] == {
+        "@type": "RelatedPartyRefOrPartyRoleRef", "role": "payer",
+        "partyOrPartyRole": {"@type": "PartyRef", "id": org["id"], "@referredType": "Organization"}}
+    assert "characteristic" not in acct and acct["validFor"]["startDateTime"]   # no segment; validity extension
+    row = next(a for a in from_tmf(profile, files)["billing_accounts"] if a["id"] == acct["id"])
+    assert row["payer_party_id"] == org["id"] and row["is_company"] is True
+
+
+def test_agreement_linked_through_its_customer(dataset, profile):
+    # SCN-BRZ-05.6: the agreement's account is its customer's
+    files = _json(to_tmf(profile, _canonical(dataset, "tenant_a")))
+    back = from_tmf(profile, files)
+    customers = {c["id"]: c for c in back["customers"]}
+    for agr in back["agreements"]:
+        assert agr["account_id"] == customers[agr["customer_id"]]["account_id"]
+    segments = {c["segment"] for c in back["customers"]}
+    assert segments <= {"B2C", "B2B", "B2B2C"} and segments
+
+
+def test_inconsistent_customer_account_is_refused(dataset, profile):
+    # the agreement's account isn't written (its customer carries it), so a record
+    # disagreeing with its customer can't round-trip: the writer refuses it
+    canonical = _canonical(dataset, "tenant_a")
+    canonical["agreements"][0] = {**canonical["agreements"][0], "account_id": "tenant_a-acct-other"}
+    with pytest.raises(ValueError, match="account_id"):
+        to_tmf(profile, canonical)
 
 
 def test_usage_split_by_type_with_amounts(dataset, profile):
@@ -280,7 +324,7 @@ def test_one_resource_at_a_time_equals_whole_files(dataset, profile, tenant):
 
     files = _json(to_tmf(profile, _canonical(dataset, tenant)))
     customers = customer_index(profile, files[profile.customer.file])
-    resources = [r for name, rs in files.items() if name != profile.customer.file for r in rs]
+    resources = [r for rs in files.values() for r in rs]
     random.Random(5).shuffle(resources)
     one_by_one: dict[str, list[dict]] = {}
     for res in resources:
@@ -297,7 +341,9 @@ def test_one_resource_with_an_unknown_customer(dataset, profile):
     files = _json(to_tmf(profile, _canonical(dataset, "tenant_a")))
     empty = customer_index(profile, [])
     with pytest.raises(ReferenceError_, match="isn't in the tenant's files"):
-        adapt_resource(profile, files["billingAccount.json"][0], empty)
+        adapt_resource(profile, files["agreement.json"][0], empty)
+    entity, rec = adapt_resource(profile, files["billingAccount.json"][0], empty)   # payer: no customer
+    assert entity == "billing_accounts" and rec["payer_party_id"]
     entity, rec = adapt_resource(profile, files["productUsage.json"][0], empty)   # needs no customer
     assert entity in ("voice_events", "data_events") and rec["id"]
 

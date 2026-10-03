@@ -317,35 +317,6 @@ def overwrite_tenants(cfg: PlatformConfig, layer: str, table: str, df: pd.DataFr
     return arrow.num_rows
 
 
-def append_chunks(cfg: PlatformConfig, layer: str, table: str, schema: pa.Schema,
-                  chunks: Iterable[pa.Table], partition_by: Iterable[str] = ("tenant_id",),
-                  properties: dict[str, str] | None = None) -> int:
-    """Append every chunk as ONE snapshot, and set ``properties``, in one commit.
-
-    ``schema`` covers all chunks (it creates or evolves the table up front), so a
-    large load can be streamed chunk by chunk without a schema change mid-commit.
-    """
-    from pyiceberg.io.pyarrow import _dataframe_to_data_files
-
-    t = create_or_evolve(cfg, layer, table, _normalize_arrow(schema.empty_table()), partition_by)
-    rows = 0
-    with t.transaction() as tx:
-        # ONE append snapshot whose summary lists every chunk's files as added:
-        # an incremental reader (Silver's Structured Streaming source) reads the
-        # files a snapshot added, so several appends squashed into one commit
-        # would hide all but the last chunk from it.
-        with tx.update_snapshot().fast_append() as append_files:
-            for chunk in chunks:
-                data = _conform(_normalize_arrow(chunk), t)
-                for data_file in _dataframe_to_data_files(table_metadata=tx.table_metadata, df=data,
-                                                          io=t.io, write_uuid=append_files.commit_uuid):
-                    append_files.append_data_file(data_file)
-                rows += chunk.num_rows
-        if properties:
-            tx.set_properties(properties)
-    return rows
-
-
 def replace_table(cfg: PlatformConfig, layer: str, table: str, df: pd.DataFrame,
                   partition_by: Iterable[str] = ("tenant_id",)) -> int:
     """Replace the whole table's contents with ``df`` in one snapshot."""

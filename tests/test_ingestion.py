@@ -158,12 +158,12 @@ def test_read_landing_rejects_bad_files_and_keeps_good_ones(multi_tenant_dataset
     assert reasons[("", "stray.json")] == "not a tenant folder"
     # the entities adapted from rejected files, or holding a dangling reference
     for entity, file in (("recharge_events", "topupBalance.json"), ("fee_charges", "appliedCustomerBillingRate.json"),
-                         ("accounts", "billingAccount.json"), ("products", "product.json")):
+                         ("billing_accounts", "billingAccount.json"), ("products", "product.json")):
         assert reasons[("tenant_a", entity)] == f"depends on rejected file {file!r}"
         assert by_name[("tenant_a", entity)].records is None                 # never partly returned
     assert "tenant_a-cust-gone" in reasons[("tenant_a", "agreements")]
     # everything else still goes, including the other tenant
-    for entity in ("parties", "voice_events", "data_events"):
+    for entity in ("parties", "customers", "voice_events", "data_events"):
         assert by_name[("tenant_a", entity)].records
     assert all(f.reason is None for k, f in by_name.items() if k[0] == "tenant_b")
 

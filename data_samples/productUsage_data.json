@@ -2,7 +2,7 @@
   "@type": "IdpProductUsage",
   "@baseType": "ProductUsage",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpProductUsage.schema.json",
-  "href": "/tmf-api/productUsageManagement/v5/productUsage/tenant_a-agr-000000-d-0-0",
+  "href": "/tmf-api/productUsageManagement/v5/productUsage/tenant_a-agr-000001-d-0-0",
   "status": "rated",
   "usageProductPrice": [
     {
@@ -11,42 +11,42 @@
       "price": {
         "@type": "Price",
         "dutyFreeAmount": {
-          "value": 0.06323,
+          "value": 0.01999,
           "unit": "EUR"
         },
         "taxIncludedAmount": {
-          "value": 0.06955,
+          "value": 0.02199,
           "unit": "EUR"
         }
       }
     }
   ],
   "tenantId": "tenant_a",
-  "id": "tenant_a-agr-000000-d-0-0",
+  "id": "tenant_a-agr-000001-d-0-0",
   "usageCharacteristic": [
     {
       "@type": "StringCharacteristic",
       "name": "msisdn",
       "valueType": "string",
-      "value": "595950846137"
+      "value": "595984153193"
     },
     {
       "@type": "StringCharacteristic",
       "name": "agreementId",
       "valueType": "string",
-      "value": "tenant_a-agr-000000"
+      "value": "tenant_a-agr-000001"
     },
     {
       "@type": "StringCharacteristic",
       "name": "startDateTime",
       "valueType": "string",
-      "value": "2026-01-01T10:56:50.000Z"
+      "value": "2026-01-01T12:20:44.000Z"
     },
     {
       "@type": "IntegerCharacteristic",
       "name": "quantity",
       "valueType": "integer",
-      "value": 6630400
+      "value": 2096128
     },
     {
       "@type": "StringCharacteristic",
@@ -64,15 +64,15 @@
       "@type": "StringCharacteristic",
       "name": "networkTechnology",
       "valueType": "string",
-      "value": "3G"
+      "value": "4G"
     },
     {
       "@type": "StringCharacteristic",
       "name": "imei",
       "valueType": "string",
-      "value": "355024631279268"
+      "value": "355064347675075"
     }
   ],
   "usageType": "data",
-  "creationDate": "2026-01-01T10:56:50.000Z"
+  "creationDate": "2026-01-01T12:20:44.000Z"
 }

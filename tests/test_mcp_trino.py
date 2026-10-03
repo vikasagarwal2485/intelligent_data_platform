@@ -26,6 +26,7 @@ import pandas as pd
 import pytest
 
 import mcp_reference as ref
+from idp.ingestion.raw import raw_events
 from idp.common.config import load_config
 from idp.mcp import sql
 from idp.mcp import tools
@@ -101,7 +102,7 @@ def lake(spark):
     cfg = _stack_cfg()
     _wipe(cfg)
     ds = generate_for_tenants(list(TENANTS), subscribers=150, days=60, fraud_rate=0.2, seed=11)
-    to_bronze(cfg, {e: getattr(ds, e) for e in ENTITIES}, persist=True)
+    to_bronze(cfg, raw_events(ds), persist=True)
     to_silver(cfg, full_refresh=True)
     for i, t in enumerate(TENANTS):
         fraud, credit = _scores(t, 400 + 100 * i, seed=i)

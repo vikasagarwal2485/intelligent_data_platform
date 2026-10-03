@@ -9,7 +9,7 @@ them (``idp.serving.api``).
 
 # Numeric features consumed by the credit model.
 CREDIT_FEATURES = [
-    "account_tenure_days", "num_products", "has_device_agreement", "is_company",
+    "customer_tenure_days", "num_products", "has_device_agreement", "is_company",
     "recharge_count", "recharge_success_rate", "recharge_avg_amount", "recharge_max",
     "recharge_total", "recharge_total_30d", "recharge_total_90d", "failed_recharge_count",
     "days_since_last_recharge", "share_credit_card",
@@ -25,7 +25,7 @@ FRAUD_FEATURES = [
     "voice_call_count", "data_bytes", "roaming_share", "roaming_event_count",
     "usage_charged_amount", "recharge_count", "failed_recharge_count",
     "recharge_success_rate", "recharge_max", "share_credit_card",
-    "account_tenure_days", "recharge_amount_zscore",
+    "customer_tenure_days", "recharge_amount_zscore",
 ]
 
 __all__ = ["CREDIT_FEATURES", "FRAUD_FEATURES"]

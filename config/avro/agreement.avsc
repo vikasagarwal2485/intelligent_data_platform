@@ -58,8 +58,14 @@
       "type": "string"
     },
     {
+      "name": "customer_id",
+      "type": "string",
+      "doc": "The agreement's customer (engagedParty role customer)."
+    },
+    {
       "name": "account_id",
-      "type": "string"
+      "type": "string",
+      "doc": "The customer's billing account."
     }
   ]
 }

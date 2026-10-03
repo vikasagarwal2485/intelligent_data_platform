@@ -20,9 +20,11 @@ Field kinds (one per canonical field):
 Any kind may add ``map`` (canonical -> TMF values, inverted for the way back),
 ``as: date`` (a canonical ``YYYY-MM-DD`` carried as a TMF date-time), and ``with``
 (constant TMF fields set alongside a non-null value). ``via: customer``
-puts the field on the entity's ``Customer`` party role instead of its own resource.
-The Customer role and the references to it are the one piece of structure in code
-(:class:`_Customers`): it is how TMF links accounts, agreements and parties.
+reads the field from the ``Customer`` (TMF629 party role, itself a mapped entity)
+that the resource references with role ``customer``: the writer leaves it out (the
+Customer resource carries it), and the adapter resolves the reference through the
+tenant's customers (:class:`_Customers`). That reference resolution is the one
+piece of structure in code.
 """
 from __future__ import annotations
 
@@ -41,6 +43,7 @@ PROFILE_DIR = schemas.TMF_DIR / "profiles"
 CHAR_TYPES = {"string": "StringCharacteristic", "boolean": "BooleanCharacteristic",
               "integer": "IntegerCharacteristic", "number": "FloatCharacteristic"}
 KINDS = ("path", "char", "item", "ext", "sum", "const", "absent")
+CUSTOMER_RESOURCE = "Customer"            # TMF629: the party role ``via: customer`` fields read
 _TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
@@ -244,13 +247,18 @@ class ResourceMap:
 class Profile:
     name: str
     resources: list[ResourceMap]
-    customer: ResourceMap
     entities: list[str]
 
+    @property
+    def customer(self) -> ResourceMap:
+        """The mapping of the Customer party role, which ``via: customer`` fields read."""
+        found = [r for r in self.resources if r.resource == CUSTOMER_RESOURCE]
+        if not found:
+            raise ProfileError(f"profile {self.name!r} maps no {CUSTOMER_RESOURCE} resource")
+        return found[0]
+
     def files(self) -> list[str]:
-        out = [r.file for r in self.resources]
-        out.append(self.customer.file)
-        return list(dict.fromkeys(out))
+        return list(dict.fromkeys(r.file for r in self.resources))
 
     def entity_columns(self, entity: str) -> list[str]:
         return next(r for r in self.resources if r.entity == entity).field_names
@@ -273,9 +281,14 @@ def _resource_map(entry: dict, *, entity: str | None) -> ResourceMap:
 def parse_profile(doc: dict, name: str = "profile") -> Profile:
     try:
         resources = [_resource_map(e, entity=e["entity"]) for e in doc["resources"]]
-        customer = _resource_map(doc["customer"], entity=None)
     except KeyError as e:
         raise ProfileError(f"profile {name!r}: missing {e.args[0]!r}") from e
+    if "customer" in doc:
+        raise ProfileError(f"profile {name!r}: 'customer' is no longer a section; map the "
+                           f"{CUSTOMER_RESOURCE} as a resource of the customers entity")
+    if any(f.via for r in resources for f in r.fields) and \
+            not any(r.resource == CUSTOMER_RESOURCE for r in resources):
+        raise ProfileError(f"profile {name!r}: 'via: customer' fields need a {CUSTOMER_RESOURCE} resource")
     entities = list(dict.fromkeys(r.entity for r in resources))
     for ent in entities:
         variants = [r for r in resources if r.entity == ent]
@@ -295,7 +308,7 @@ def parse_profile(doc: dict, name: str = "profile") -> Profile:
                                        f"which must be mapped before it")
         if len(variants) > 1 and not all(r.when for r in variants):
             raise ProfileError(f"profile {name!r}: every variant of {ent!r} needs 'when'")
-    return Profile(doc.get("name", name), resources, customer, entities)
+    return Profile(doc.get("name", name), resources, entities)
 
 
 def load_profile(name: str | None = None) -> Profile:
@@ -309,76 +322,28 @@ def load_profile(name: str | None = None) -> Profile:
 
 
 # --------------------------------------------------------------------------- #
-# the Customer role (TMF629): how accounts, agreements and parties are linked  #
+# the Customer role (TMF629): the reference ``via: customer`` fields resolve   #
 # --------------------------------------------------------------------------- #
-def customer_id(account_id: str) -> str:
-    return account_id.replace("-acct-", "-cust-") if "-acct-" in account_id else f"cust-{account_id}"
-
-
-def _role_ref(cid: str) -> dict:
-    return {"@type": "RelatedPartyRefOrPartyRoleRef", "role": "customer",
-            "partyOrPartyRole": {"@type": "PartyRoleRef", "id": cid, "@referredType": "Customer"}}
-
-
-def _add_ref(customer: dict, key: str, ref_type: str, ref_id: str) -> None:
-    """Reference ``ref_id`` from the Customer once (a mapped field may have set it)."""
-    refs = customer.setdefault(key, [])
-    for ref in refs:
-        if ref.get("id") == ref_id:
-            ref.setdefault("@type", ref_type)
-            return
-    refs.append({"@type": ref_type, "id": ref_id})
-
-
 class _Customers:
-    """Builds (writer) or resolves (adapter) the Customer role of each entity."""
+    """A tenant's Customer resources, by id: what ``via: customer`` fields read."""
 
     def __init__(self, profile: Profile):
         self.profile = profile
         self.by_id: dict[str, dict] = {}
 
-    # writer
-    def key(self, entity: str, record: dict) -> str | None:
-        account = record.get("id") if entity == "accounts" else record.get("account_id")
-        return customer_id(account) if account else None
-
-    def get_or_new(self, cid: str, record: dict) -> dict:
-        if cid not in self.by_id:
-            res = self.profile.customer.skeleton({**record, "customer_id": cid})
-            res["id"] = cid
-            if self.profile.customer.href:
-                res["href"] = _template(self.profile.customer.href, {"id": cid})
-            self.by_id[cid] = res
-        return self.by_id[cid]
-
-    def link(self, entity: str, resource: dict, record: dict) -> None:
-        cid = self.key(entity, record)
-        if cid is None:
-            return
-        customer = self.get_or_new(cid, record)
-        if entity == "accounts":
-            resource["relatedParty"] = [_role_ref(cid)]
-            _add_ref(customer, "account", "AccountRef", record["id"])
-        elif entity == "agreements":
-            resource["engagedParty"] = [_role_ref(cid)]
-            _add_ref(customer, "agreement", "AgreementRef", record["id"])
-
-    # adapter
     @classmethod
     def index(cls, profile: Profile, customers: list[dict]) -> "_Customers":
         idx = cls(profile)
         idx.by_id = {c.get("id"): c for c in customers}
-        idx.by_party = {get_path(c, "engagedParty.id"): c for c in customers}
         return idx
 
-    def resolve(self, entity: str, resource: dict, file: str) -> dict:
+    def resolve(self, entity: str, resource: dict, file: str, reads_account: bool = False) -> dict:
+        """The Customer the resource references with role ``customer`` (in
+        ``engagedParty`` or ``relatedParty``). Raises :class:`ReferenceError_` when
+        there isn't exactly one such reference, it doesn't resolve, or (with
+        ``reads_account``) the customer's account is ambiguous."""
         rid = resource.get("id")
-        if entity == "parties":
-            customer = self.by_party.get(rid)
-            if customer is None:
-                raise ReferenceError_(file, f"{rid}: no Customer engages this party")
-            return customer
-        refs = resource.get("relatedParty" if entity == "accounts" else "engagedParty") or []
+        refs = (resource.get("engagedParty") or []) + (resource.get("relatedParty") or [])
         cids = [get_path(r, "partyOrPartyRole.id") for r in refs
                 if isinstance(r, dict) and r.get("role") == "customer"]
         if len(cids) != 1:
@@ -386,9 +351,9 @@ class _Customers:
         customer = self.by_id.get(cids[0])
         if customer is None:
             raise ReferenceError_(file, f"{rid}: references Customer {cids[0]!r}, which isn't in the tenant's files")
-        if entity == "agreements" and len(customer.get("account") or []) != 1:
+        if reads_account and len(customer.get("account") or []) != 1:
             raise ReferenceError_(file, f"{rid}: Customer {cids[0]!r} has "
-                                        f"{len(customer.get('account') or [])} accounts, so the agreement's account is ambiguous")
+                                        f"{len(customer.get('account') or [])} accounts, so its account is ambiguous")
         return customer
 
 
@@ -396,10 +361,16 @@ class _Customers:
 # the two directions                                                           #
 # --------------------------------------------------------------------------- #
 def to_tmf(profile: Profile, entities: dict[str, Iterable[dict]]) -> dict[str, list[dict]]:
-    """Canonical records (per entity, one tenant) -> TMF resources per landing file."""
+    """Canonical records (per entity, one tenant) -> TMF resources per landing file.
+
+    A ``via: customer`` field isn't written: the Customer resource (written from the
+    customers entity) carries it. It is checked instead: the value read back through
+    the resource's customer reference must equal the record's, so an inconsistent
+    dataset raises instead of silently not round-tripping.
+    """
     out: dict[str, list[dict]] = defaultdict(list)
-    customers = _Customers(profile)
     records = {e: list(rs) for e, rs in entities.items()}
+    deferred: list[tuple[ResourceMap, dict, dict]] = []      # (map, record, resource) with via fields
     for rmap in profile.resources:
         for rec in records.get(rmap.entity, []):
             if any(rec.get(k) != v for k, v in rmap.when.items()):
@@ -408,23 +379,28 @@ def to_tmf(profile: Profile, entities: dict[str, Iterable[dict]]) -> dict[str, l
             for f in rmap.fields:
                 value = rec.get(f.name)
                 if f.via == "customer":
-                    cid = customers.key(rmap.entity, rec)
-                    if cid is None:
-                        if value is not None:
-                            raise ValueError(f"{rmap.entity} {rec.get('id')}: {f.name} needs a customer, "
-                                             f"but the record has no account")
-                        continue
-                    f.write(customers.get_or_new(cid, rec), value, rec)
-                else:
-                    if f.kind == "absent" and value is not None:
-                        raise ValueError(f"{rmap.entity} {rec.get('id')}: {rmap.resource} doesn't carry "
-                                         f"{f.name}, but it is {value!r}")
-                    f.write(res, value, rec)
-            customers.link(rmap.entity, res, rec)
+                    continue
+                if f.kind == "absent" and value is not None:
+                    raise ValueError(f"{rmap.entity} {rec.get('id')}: {rmap.resource} doesn't carry "
+                                     f"{f.name}, but it is {value!r}")
+                f.write(res, value, rec)
+            if any(f.via for f in rmap.fields):
+                deferred.append((rmap, rec, res))
             out[rmap.file].append(res)
-    if customers.by_id:
-        out[profile.customer.file] = list(customers.by_id.values())
+    if deferred:
+        customers = customer_index(profile, out.get(profile.customer.file, []))
+        for rmap, rec, res in deferred:
+            customer = customers.resolve(rmap.entity, res, rmap.file, _reads_account(rmap))
+            for f in rmap.fields:
+                if f.via and f.read(customer, rec) != rec.get(f.name):
+                    raise ValueError(f"{rmap.entity} {rec.get('id')}: {f.name} is {rec.get(f.name)!r}, "
+                                     f"but its customer {customer.get('id')!r} carries "
+                                     f"{f.read(customer, rec)!r}")
     return dict(out)
+
+
+def _reads_account(rmap: ResourceMap) -> bool:
+    return any(f.via and str(f.spec.get("path", "")).startswith("account[") for f in rmap.fields)
 
 
 def customer_index(profile: Profile, customers: Iterable[dict]) -> _Customers:
@@ -452,7 +428,8 @@ def adapt_resource(profile: Profile, resource: dict, customers: _Customers,
     """
     rmap = rmap or resource_map(profile, resource)
     needs_customer = any(f.via == "customer" for f in rmap.fields)
-    customer = customers.resolve(rmap.entity, resource, rmap.file) if needs_customer else None
+    customer = (customers.resolve(rmap.entity, resource, rmap.file, _reads_account(rmap))
+                if needs_customer else None)
     rec: dict[str, Any] = {}
     for f in rmap.fields:
         rec[f.name] = f.read(customer if f.via == "customer" else resource, rec)
@@ -466,7 +443,8 @@ def from_tmf(profile: Profile, files: dict[str, list[dict]],
 
     Raises :class:`ReferenceError_` (naming the file) when a reference doesn't resolve.
     """
-    customers = customer_index(profile, files.get(profile.customer.file, []))
+    has_customers = any(f.via for r in profile.resources for f in r.fields)
+    customers = customer_index(profile, files.get(profile.customer.file, []) if has_customers else [])
     out: dict[str, list[dict]] = {}
     wanted = list(entities) if entities is not None else profile.entities
     for ent in wanted:

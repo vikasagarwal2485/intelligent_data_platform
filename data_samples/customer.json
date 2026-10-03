@@ -2,37 +2,30 @@
   "@type": "IdpCustomer",
   "@baseType": "Customer",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpCustomer.schema.json",
-  "href": "/tmf-api/customerManagement/v5/customer/tenant_a-cust-000004",
-  "status": "approved",
+  "href": "/tmf-api/customerManagement/v5/customer/tenant_a-cust-000001",
   "tenantId": "tenant_a",
-  "id": "tenant_a-cust-000004",
+  "id": "tenant_a-cust-000001",
+  "engagedParty": {
+    "id": "tenant_a-party-000001",
+    "@type": "PartyRef"
+  },
   "role": "owner",
-  "account": [
-    {
-      "id": "tenant_a-acct-000004",
-      "@type": "AccountRef"
-    }
-  ],
   "characteristic": [
     {
       "@type": "StringCharacteristic",
-      "name": "accountSegment",
+      "name": "segment",
       "valueType": "string",
       "value": "B2B"
     }
   ],
+  "status": "approved",
   "validFor": {
-    "startDateTime": "2024-02-28T00:00:00.000Z"
+    "startDateTime": "2024-12-17T00:00:00.000Z"
   },
-  "engagedParty": {
-    "id": "tenant_a-party-000004",
-    "@type": "PartyRef",
-    "@referredType": "Organization"
-  },
-  "agreement": [
+  "account": [
     {
-      "@type": "AgreementRef",
-      "id": "tenant_a-agr-000004"
+      "id": "tenant_a-acct-000001",
+      "@type": "AccountRef"
     }
   ]
 }

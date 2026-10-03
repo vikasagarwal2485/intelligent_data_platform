@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from golden_data import golden_cfg, land_golden_bronze
+from idp.ingestion.raw import raw_events
 from idp.common import storage
 from idp.pipeline import ENTITIES, to_bronze, to_gold, to_labels, to_scores, to_silver, train
 from idp.synthetic.generator import generate_for_tenants
@@ -33,7 +34,7 @@ def test_silver_fails_clearly_without_core_bronze(spark, tmp_path):
     # SCN-SLV-04.1
     cfg = golden_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a"], subscribers=5, days=3, seed=1)
-    to_bronze(cfg, {"voice_events": ds.voice_events})          # no parties/accounts/agreements
+    to_bronze(cfg, {"tmf_product_usage": raw_events(ds)["tmf_product_usage"]})   # no reference tables
     with pytest.raises(RuntimeError, match="Populate Bronze first"):
         to_silver(cfg)
 
@@ -45,7 +46,8 @@ def test_silver_reads_the_bronze_the_landing_wrote(spark, tmp_path):
     summary = to_silver(cfg)["silver_tables"]
     assert summary["dim_subscriber"] == 40                     # 2 tenants x 20 subscribers
     assert summary["dim_subscriber"] == len(_read(cfg, "silver", "dim_subscriber"))
-    assert set(summary) == {"dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge"}
+    assert set(summary) == {"dim_subscriber", "dim_customer", "dim_billing_account", "dim_product",
+                            "fact_usage", "fact_recharge", "fact_fee_charge"}   # no quarantine: all conformed
 
 
 # --- REQ-GLD-05 ---------------------------------------------------------------
@@ -101,7 +103,7 @@ def local_lake(spark, tmp_path_factory):
     cfg = golden_cfg(tmp_path_factory.mktemp("lake"))
     ds = generate_for_tenants(["tenant_a", "tenant_b"], subscribers=60, days=30, fraud_rate=0.2,
                               default_rate=0.2, seed=7)
-    to_bronze(cfg, {e: getattr(ds, e) for e in ENTITIES})
+    to_bronze(cfg, raw_events(ds))
     to_silver(cfg)
     to_labels(cfg, dataset=ds)
     to_gold(cfg)

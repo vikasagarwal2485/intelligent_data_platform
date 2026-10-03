@@ -70,6 +70,6 @@ def test_one_cluster_path_per_spark_stage():
     applied = set(re.findall(r"deploy/app/jobs/([\w-]+\.yaml)", (ROOT / "Makefile").read_text()))
     assert {j.name for j in jobs} == applied == {
         "generate-job.yaml", "produce-job.yaml", "produce-from-landing-job.yaml",
-        "consume-job.yaml", "labels-job.yaml", "migrate-lake-job.yaml"}
+        "consume-job.yaml", "labels-job.yaml"}
     for stage in SPARK_STAGES:
         assert (ROOT / "deploy/app/spark" / f"{stage}.yaml").exists(), stage

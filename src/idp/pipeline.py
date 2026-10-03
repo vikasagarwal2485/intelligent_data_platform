@@ -3,7 +3,7 @@
 Each stage is an INDEPENDENT step that reads its input layer and writes its
 output layer, so the concerns stay separated (no consumer->silver->gold chaining):
 
-    to_bronze      : raw frames              -> Bronze   (s3://idp-bronze / local)
+    to_bronze      : raw TMF event rows      -> Bronze   (s3://idp-bronze / local)
     to_silver      : Bronze  -> canonical    -> Silver   (s3://idp-silver / local)
     to_gold        : Silver  -> features     -> Gold     (s3://idp-gold   / local; features ONLY)
     to_scores      : Gold features + models  -> Gold score tables (inference)
@@ -58,13 +58,15 @@ BRONZE_PARTITIONS = ("tenant_id", "ingest_date")
 
 
 def to_bronze(cfg: PlatformConfig, frames: dict[str, pd.DataFrame], *, persist: bool = True) -> dict:
-    """Append raw per-entity frames to Iceberg Bronze (REQ-BRZ-01).
+    """Append raw TMF event rows to Iceberg Bronze (REQ-BRZ-01).
 
-    Each entity becomes one append (one snapshot) to ``bronze.<entity>``,
-    partitioned by ``(tenant_id, ingest_date)``; every record carries the batch's
-    landing time ``_ingested_at`` (UTC) and ``ingest_date``. Bronze is an
-    append-only raw log: nothing already landed is rewritten or removed (Silver
-    de-duplicates on natural keys).
+    ``frames`` maps a raw table (``tmf_product_usage`` …, see ``ingestion.raw``) to
+    its rows: one event each, its payload as received. Each table becomes one
+    append (one snapshot) to ``bronze.<table>``, partitioned by ``(tenant_id,
+    ingest_date)``; every row carries the batch's landing time ``_ingested_at``
+    (UTC) and ``ingest_date``. Bronze is an append-only raw log: nothing already
+    landed is rewritten or removed, and nothing is parsed or de-duplicated here
+    (Silver conforms, REQ-SLV-09).
     """
     from idp.common import catalog
 
@@ -87,27 +89,34 @@ def _table_count(spark, cfg: PlatformConfig, layer: str, table: str) -> int:
 
 
 def to_silver(cfg: PlatformConfig, *, full_refresh: bool = False) -> dict:
-    """Iceberg Bronze -> canonical Iceberg Silver, incrementally, on Spark.
+    """Raw Iceberg Bronze -> conformed -> canonical Iceberg Silver, incrementally, on Spark.
 
-    ``dim_subscriber`` is rebuilt from the Bronze reference tables; the event facts
-    process only the Bronze appended since the last run and merge it on
-    ``(tenant_id, id)`` (REQ-SLV-04/06/07). ``full_refresh`` drops the fact
-    checkpoints and rebuilds every Silver table from all of Bronze (REQ-SLV-08).
-    Returns ``{"silver_tables": {table: rows}, "processed": {fact: new_bronze_rows}}``;
-    no table is materialized in driver memory.
+    The dimensions are rebuilt from the latest version of each reference resource;
+    the event facts process only the raw Bronze appended since the last run and merge
+    it on ``(tenant_id, id)``; events that fail conforming go to ``silver.quarantine``
+    (REQ-SLV-04/06/07/09/10). ``full_refresh`` drops the fact checkpoints, the facts
+    and the quarantine, and rebuilds every Silver table from all of Bronze
+    (REQ-SLV-08). Returns ``{"silver_tables": {table: rows}, "processed":
+    {fact: new_bronze_events}, "quarantined": {raw_table: events}}``; no table is
+    materialized in driver memory.
     """
     from idp.transforms import incremental
     from idp.transforms.session import get_spark
 
     spark = get_spark(cfg, app_name="idp-silver", stage="silver")
     salts = _salts(cfg)
-    incremental.build_dim(spark, cfg, salts, full_refresh=full_refresh)
+    profile = cfg.tmf["profile"]
     if full_refresh:
         incremental.reset_facts(spark, cfg)
-    processed = incremental.process_facts(spark, cfg, salts)
-    tables = ["dim_subscriber", *[f for f in incremental.FACTS if _exists(cfg, "silver", f)]]
+    products, quarantined = incremental.build_dims(spark, cfg, salts, full_refresh=full_refresh,
+                                                   profile=profile)
+    processed, fact_quarantined = incremental.process_facts(spark, cfg, salts, products, profile)
+    for table, n in fact_quarantined.items():
+        quarantined[table] = quarantined.get(table, 0) + n
+    tables = [t for t in (*incremental.DIMENSIONS, *incremental.FACTS, incremental.QUARANTINE)
+              if _exists(cfg, "silver", t)]
     return {"silver_tables": {name: _table_count(spark, cfg, "silver", name) for name in tables},
-            "processed": processed}
+            "processed": processed, "quarantined": quarantined}
 
 
 def _exists(cfg: PlatformConfig, layer: str, table: str) -> bool:
@@ -452,7 +461,8 @@ def run(cfg: PlatformConfig | None = None, *, persist: bool = True) -> dict:
             silver=str(tmp / "silver"), gold=str(tmp / "gold"), ml_artifacts=str(tmp / "ml")))
     try:
         dataset = _gen_dataset(cfg)
-        to_bronze(cfg, {e: getattr(dataset, e) for e in ENTITIES})
+        from idp.ingestion.raw import raw_events
+        to_bronze(cfg, raw_events(dataset, topic_prefix=cfg.kafka["topic_prefix"]))   # as consume would
         silver = to_silver(cfg)
         to_labels(cfg, dataset=dataset)                    # seed the outcomes store
         to_gold(cfg)                                       # features only

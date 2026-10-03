@@ -42,7 +42,7 @@ def heuristic_limit(
     ``limit0 = k * avg_recharge * tenure_factor * success_rate * segment_factor``.
     """
     avg_recharge = features.get("recharge_avg_amount", pd.Series(0, index=features.index)).fillna(0)
-    tenure_factor = (features.get("account_tenure_days", 0).clip(lower=0) / 365.0).clip(upper=1.0)
+    tenure_factor = (features.get("customer_tenure_days", 0).clip(lower=0) / 365.0).clip(upper=1.0)
     success = features.get("recharge_success_rate", pd.Series(0, index=features.index)).clip(0, 1)
     segment_factor = np.where(features.get("is_company", 0).astype(bool), 1.3, 1.0)
     limit = base_multiplier * avg_recharge * tenure_factor * success.clip(lower=0.1) * segment_factor

@@ -7,7 +7,7 @@ from idp.common.tenancy import TENANT_COLUMN
 def test_subscriber_dim_one_row_per_subscriber(silver):
     dim = silver["dim_subscriber"]
     assert dim.duplicated(subset=["tenant_id", "service_id"]).sum() == 0
-    assert {"account_type", "account_tenure_days", "num_products"}.issubset(dim.columns)
+    assert {"account_type", "customer_tenure_days", "num_products"}.issubset(dim.columns)
 
 
 def test_service_id_is_tokenized(silver):

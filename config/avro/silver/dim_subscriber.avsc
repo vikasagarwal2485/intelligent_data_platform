@@ -2,7 +2,7 @@
   "type": "record",
   "name": "DimSubscriber",
   "namespace": "com.idp.silver",
-  "doc": "Silver dim_subscriber: one row per subscriber (MSISDN), joining agreement, account, party and product counts (REQ-STR-03, documented contract; checked by tests, not enforced at run time). service_id and imsi are tokenized. Account and party fields are null when the join finds none; person fields are null for organizations.",
+  "doc": "Silver dim_subscriber: one row per subscriber (MSISDN), joining agreement, customer, billing account, party and product counts (REQ-STR-03, documented contract; checked by tests, not enforced at run time). service_id and imsi are tokenized. Account and party fields are null when the join finds none; person fields are null for organizations.",
   "fields": [
     {
       "name": "tenant_id",
@@ -23,11 +23,12 @@
       "default": null
     },
     {
-      "name": "party_id",
+      "name": "customer_id",
       "type": [
         "null",
         "string"
       ],
+      "doc": "The agreement's customer (joins dim_customer).",
       "default": null
     },
     {
@@ -51,12 +52,12 @@
       "default": null
     },
     {
-      "name": "account_segment",
+      "name": "segment",
       "type": [
         "null",
         {
           "type": "enum",
-          "name": "AccountSegment",
+          "name": "Segment",
           "symbols": [
             "B2C",
             "B2B",
@@ -64,6 +65,7 @@
           ]
         }
       ],
+      "doc": "The customer's segment.",
       "default": null
     },
     {
@@ -94,9 +96,9 @@
       }
     },
     {
-      "name": "account_tenure_days",
+      "name": "customer_tenure_days",
       "type": "long",
-      "doc": "Whole days since the account's valid_from, vs the latest in the batch; 0 when unknown."
+      "doc": "Whole days since the customer's valid_from, vs the latest in the run; 0 when unknown."
     },
     {
       "name": "date_of_birth",

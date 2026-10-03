@@ -28,7 +28,7 @@ deploy/
     deployment/             #   scoring-api base (Deployment/Service + kustomization)
     overlays/local/         #   scoring-api patch: dev image, imagePullPolicy Never, 1 replica
     overlays/aws/           #   scoring-api patch: ECR image, IRSA, 3 replicas
-    jobs/                   #   the non-Spark stages' Jobs: generate/produce/consume/labels/migrate-lake
+    jobs/                   #   the non-Spark stages' Jobs: generate/produce/consume/labels
     spark/                  #   SparkApplications for silver/gold/score/publish/maintain/train: the one
                             #   copy (`make spark-manifests`); the Airflow DAG image bakes it in
 ```
@@ -154,11 +154,13 @@ Kubernetes Jobs.
 
 Two ways to fill Bronze from Kafka. Both publish the same TM Forum create events
 (one topic per resource, `t.<tenant>.<resource>`; see the README's "Kafka carries
-TM Forum events") and end in the same canonical Bronze for the same data.
+TM Forum events") and end in the same raw Bronze for the same data: one table per
+topic, `bronze.tmf_<resource>`, holding each event as received. `make silver` then
+conforms it to the canonical model and quarantines what fails.
 
 | Target | Steps (Jobs in `idp-app`) |
 |---|---|
-| `make stream` | `idp-produce` (generates in memory → TMF events → Kafka) → `idp-consume` (adapts → Bronze) |
+| `make stream` | `idp-produce` (generates in memory → TMF events → Kafka) → `idp-consume` (→ raw Bronze) |
 | `make stream-from-landing` | `idp-generate` (→ `s3://idp-landing`) → `idp-produce-from-landing` (landing files → TMF events → Kafka) → `idp-consume` |
 | `make stream-replay` | `idp-produce-from-landing` → `idp-consume`: re-publish the landing files already there |
 | `make generate-job` | `idp-generate` only |
@@ -181,14 +183,20 @@ TM Forum events") and end in the same canonical Bronze for the same data.
   `customer.json`) are rejected too. The produce Job publishes the rest, lists the
   rejections in its log, and exits 1, so consume doesn't run. Fix or remove the
   file, then `make stream-replay`.
-- **A dead-lettered message fails the chain too:** the consume Job lands the valid
-  records, sends each message it can't check, resolve or adapt to
-  `t.<tenant>.dlq` (with an `idp.reason` header), commits, lists them in its log
-  and exits 1, so the chain stops before Silver. Re-produce the fixed source; the
-  DLQ isn't replayed.
+- **A dead-lettered message fails the chain too:** the consume Job lands every
+  event as received, sends each message that isn't an event at all (not JSON, no
+  `eventType`/`eventId`/resource) to `t.<tenant>.dlq` (with an `idp.reason`
+  header), commits, lists them in its log and exits 1, so the chain stops before
+  Silver. Re-produce the fixed source; the DLQ isn't replayed.
+- **Invalid events are Silver's business:** a resource that fails its schema, has
+  another tenant's `tenantId`, references a missing customer or breaks the
+  canonical contract is landed in Bronze and quarantined by `make silver`
+  (`silver.quarantine`, with the reason). Silver reports the counts and doesn't
+  fail; after a fix, `make silver-full-refresh` conforms them again.
 - **The `customer` topics are compacted and never expire** (`cleanup.policy:
-  compact,delete`, `retention.ms: -1`). The consumer reads them in full each run,
-  so a customer published earlier still resolves. `make kafka-purge` empties them
+  compact,delete`, `retention.ms: -1`). They're consumed like the others; Silver
+  resolves an agreement's customer against the customers in Bronze, so one
+  published in an earlier run still resolves. `make kafka-purge` empties them
   too.
 - **Keep `IDP_SUBSCRIBERS`/`IDP_DAYS` equal** in `generate-job.yaml`,
   `produce-job.yaml` and `labels-job.yaml`, because labels are regenerated from
@@ -210,7 +218,7 @@ Every stage pod gets the catalog from `IDP_CATALOG_TYPE=sql` and
 - **Look inside the catalog (read-only):**
   - `make lake-catalog-show` lists every table's current `metadata.json` and the
     namespace locations. That's all the catalog database stores.
-  - `make lake-table-show TABLE=bronze.accounts` decodes that table's
+  - `make lake-table-show TABLE=bronze.tmf_billing_account` decodes that table's
     `metadata.json` from MinIO: schema, partitioning, properties and snapshots.
   - `make lake-catalog-psql` opens a SQL shell on the `iceberg` database.
 - **Resetting the lake is buckets plus catalog.** The tables are registered in the
@@ -238,21 +246,10 @@ Every stage pod gets the catalog from `IDP_CATALOG_TYPE=sql` and
   `aws s3api put-bucket-lifecycle-configuration` (S3 Glacier Instant Retrieval
   keeps objects readable for a full refresh).
 
-### Migrating a pre-Iceberg (Parquet) lake
-```bash
-make lake-catalog               # the `iceberg` catalog database
-make image && make app-deploy && make airflow-reload
-make migrate-lake               # Parquet Bronze -> Iceberg Bronze (re-runs skip migrated entities)
-make silver-full-refresh && make gold && make score && make publish
-```
-- `idp migrate-lake` appends each legacy `s3://idp-bronze/<entity>` to
-  `bronze.<entity>` in one commit, and marks the table (`idp.migrated-from`).
-- Silver and Gold are rebuilt, not migrated.
-- The old Parquet score history isn't carried over, so the MCP score windows
-  restart from the migration.
-- The legacy Parquet paths are left untouched, and orphan cleanup only scans
-  `tables/`. Remove them once the Iceberg lake checks out.
-- Rollback: redeploy the previous image, which reads the untouched Parquet.
+### A pre-Iceberg (Parquet) or canonical-Bronze lake
+There is no migration: Silver reads only the raw `bronze.tmf_*` tables (ADR-0032).
+Run `make minio-reset`, then stream again (`make stream-from-landing`) and rebuild
+Silver, Gold, labels and models. The former `idp migrate-lake` was removed.
 
 ## Production (AWS EKS)
 ```bash

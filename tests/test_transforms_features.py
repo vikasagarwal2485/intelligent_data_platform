@@ -6,7 +6,7 @@ import pytest
 from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
 from idp.transforms import features
 
-DIM_SCHEMA = ("tenant_id string, service_id string, agreement_id string, account_tenure_days long, "
+DIM_SCHEMA = ("tenant_id string, service_id string, agreement_id string, customer_tenure_days long, "
               "num_products long, has_device_agreement boolean, is_company boolean, "
               "consent_analytics boolean")
 RECH_SCHEMA = ("tenant_id string, id string, service_id string, created_at timestamp, amount double, "

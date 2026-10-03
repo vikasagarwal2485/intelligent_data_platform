@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 import mcp_reference as ref
+from idp.ingestion.raw import raw_events
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.pipeline import ENTITIES, to_bronze, to_silver
 from idp.synthetic.generator import generate_for_tenants
@@ -36,7 +37,7 @@ def local_cfg(spark, tmp_path_factory):
     cfg = PlatformConfig(raw=raw, tenants=tenants, storage=storage)
 
     ds = generate_for_tenants(["tenant_a", "tenant_b"], subscribers=60, days=40, fraud_rate=0.2, seed=7)
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames, persist=True)
     to_silver(cfg)
     return cfg

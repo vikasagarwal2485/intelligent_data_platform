@@ -8,6 +8,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from idp.ingestion.raw import raw_events
 from idp.common import storage
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.common.feature_contract import CREDIT_FEATURES
@@ -110,7 +111,7 @@ def test_train_reads_gold_and_labels_from_lake(tmp_path):
     from idp.synthetic.generator import generate_for_tenants
     cfg = _local_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a"], subscribers=80, days=40, fraud_rate=0.2, seed=7)
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)                       # persist Gold features to the (local) lake
@@ -131,7 +132,7 @@ def test_labels_from_config_join_gold_features(tmp_path):
     cfg.raw["synthetic"] = {"subscribers_per_tenant": 50, "days": 25, "seed": 7,
                             "fraud_rate": 0.2, "default_rate": 0.2}
     ds = _gen_dataset(cfg)                       # build the lake from cfg.synthetic
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)
@@ -149,7 +150,7 @@ def test_train_lake_path_errors_without_labels(tmp_path):
     from idp.synthetic.generator import generate_for_tenants
     cfg = _local_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)                                  # Gold exists but NO labels seeded
@@ -164,7 +165,7 @@ def test_train_errors_clearly_on_empty_label_join(tmp_path):
     from idp.synthetic.generator import generate_for_tenants
     cfg = _local_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a"], subscribers=40, days=30, seed=7)
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)
@@ -202,7 +203,7 @@ def test_duplicate_labels_do_not_fan_out(tmp_path):
     from idp.synthetic.generator import generate_for_tenants
     cfg = _local_cfg(tmp_path)
     ds = generate_for_tenants(["tenant_a"], subscribers=60, days=30, fraud_rate=0.2, seed=7)
-    frames = {e: getattr(ds, e) for e in ENTITIES}
+    frames = raw_events(ds)
     to_bronze(cfg, frames)
     to_silver(cfg)
     to_gold(cfg)

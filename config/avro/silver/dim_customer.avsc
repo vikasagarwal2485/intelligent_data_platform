@@ -1,0 +1,83 @@
+{
+  "type": "record",
+  "name": "DimCustomer",
+  "namespace": "com.idp.silver",
+  "doc": "Silver dim_customer: one row per customer (documented contract, checked by tests).",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "customer_id",
+      "type": "string"
+    },
+    {
+      "name": "party_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "party_type",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PartyType",
+          "symbols": [
+            "individual",
+            "organization"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "role",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "segment",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "Segment",
+          "symbols": [
+            "B2C",
+            "B2B",
+            "B2B2C"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "status",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "valid_from",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ],
+      "doc": "Customer since, UTC.",
+      "default": null
+    }
+  ]
+}

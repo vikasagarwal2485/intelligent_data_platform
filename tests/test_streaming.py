@@ -16,7 +16,8 @@ from idp.pipeline import to_scores
 
 def test_silver_stage_from_bronze(silver):
     """Silver stage builds the canonical tables from the landed Bronze (conftest `lake`)."""
-    assert set(silver) == {"dim_subscriber", "fact_usage", "fact_recharge", "fact_fee_charge"}
+    assert set(silver) == {"dim_subscriber", "dim_customer", "dim_billing_account", "dim_product",
+                           "fact_usage", "fact_recharge", "fact_fee_charge"}
     assert len(silver["dim_subscriber"]) > 0
     assert set(silver["dim_subscriber"]["tenant_id"]) == {"tenant_a", "tenant_b"}
 
@@ -204,11 +205,12 @@ def test_rejected_landing_files_are_not_published_and_fail_the_run(monkeypatch, 
     assert main(["--config", cfg, "produce", "--from-landing"]) == 1
     topics = broker.topics()
     for gone in ("t.tenant_a.topupBalance", "t.tenant_a.agreement",       # own reasons
-                 "t.tenant_b.customer", "t.tenant_b.party", "t.tenant_b.billingAccount",
-                 "t.tenant_b.agreement"):                                  # depend on customer.json
+                 "t.tenant_b.customer",
+                 "t.tenant_b.agreement"):                                  # reads its customer
         assert gone not in topics, gone
     assert not any(t.startswith("t.tenant_x.") for t in topics)
     assert {"t.tenant_a.customer", "t.tenant_a.party", "t.tenant_a.productUsage",
+            "t.tenant_b.party", "t.tenant_b.billingAccount",              # payer: no customer needed
             "t.tenant_b.topupBalance", "t.tenant_b.productUsage"} <= topics      # the rest goes
     out = capsys.readouterr().out
     assert "tenant mismatch" in out and "unknown tenant" in out and "tenant_a-cust-gone" in out
@@ -224,78 +226,64 @@ def test_empty_landing_zone_fails(monkeypatch, tmp_path, capsys):
 
 
 # --------------------------------------------------------------------------- #
-# consumer: TMF events -> canonical Bronze (REQ-STR-02)                        #
+# consumer: TMF events -> raw Bronze (REQ-STR-04)                              #
 # --------------------------------------------------------------------------- #
-def test_customer_index_reads_the_compacted_topic(monkeypatch, dataset, profile):
-    # the last event of each customer wins; an invalid one is reported and left out
-    from idp.ingestion.tmf.events import to_event
-    from idp.streaming.consumer import read_customers
-    from idp.streaming.producer import dataset_files
-    broker = _broker(monkeypatch)
-    files = dict(dataset_files(dataset, profile))["tenant_a"]
-    first, second = files["customer.json"][:2]
-    broker.append("t.tenant_a.customer", to_event(first, "tenant_a"))
-    broker.append("t.tenant_a.customer", to_event(second, "tenant_a"))
-    newer = copy.deepcopy(first); newer["status"] = "validated"
-    broker.append("t.tenant_a.customer", to_event(newer, "tenant_a"))
-    broker.append("t.tenant_a.customer", {"eventType": "nonsense"})
-    customers, problems = read_customers("x:9092", ["tenant_a", "tenant_b"])
-    assert {c["id"]: c["status"] for c in customers["tenant_a"]} == {first["id"]: "validated",
-                                                                     second["id"]: second["status"]}
-    assert customers["tenant_b"] == []
-    assert len(problems) == 1 and "t.tenant_a.customer[0]@3" in problems[0]
+def _published(broker):
+    """Every message value per raw Bronze table, as published."""
+    from idp.ingestion.raw import bronze_table
+    out: dict[str, list[bytes]] = {}
+    for topic, msgs in broker.log.items():
+        suffix = topic.split(".", 2)[2]
+        if suffix != "dlq":
+            out.setdefault(bronze_table(suffix), []).extend(m.value for m in msgs)
+    return out
 
 
-def test_consume_lands_exactly_the_canonical_records(monkeypatch, tmp_path, dataset, profile):
-    # SCN-STR-02.1 / 02.3: TMF in, the dataset's canonical records out, no customer
-    # table, no Silver; offsets committed after landing
+def test_consume_lands_every_event_raw(monkeypatch, tmp_path, dataset, profile):
+    # SCN-STR-04.1 / 04.3: each published event once, customers included, payload
+    # equal to the message value; no Silver; offsets committed after landing
     from conftest import lake_cfg
     from idp.common import catalog
     from idp.pipeline import to_bronze
-    from idp.streaming import BRONZE_ENTITIES, produce_to_kafka
+    from idp.streaming import produce_to_kafka
     from idp.streaming.consumer import consume_to_bronze
     broker = _broker(monkeypatch)
     produce_to_kafka(dataset, "x:9092", profile=profile)
     cfg = lake_cfg(tmp_path)
-    result = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], profile=profile,
-                               land=lambda f: to_bronze(cfg, f))
-    assert result.dead_letters == [] and result.customer_problems == [] and broker.commits == 1
-    for entity in BRONZE_ENTITIES:
-        assert _canonical(catalog.read_table(cfg, "bronze", entity)) == \
-            _canonical(getattr(dataset, entity)), entity
-    assert not catalog.table_exists(cfg, "bronze", "customer")
+    result = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], land=lambda f: to_bronze(cfg, f))
+    assert result.dead_letters == [] and broker.commits == 1
+    published = _published(broker)
+    assert "tmf_customer" in published
+    for table, values in published.items():
+        landed = catalog.read_table(cfg, "bronze", table)
+        assert sorted(landed["payload"]) == sorted(v.decode() for v in values), table
     assert not catalog.table_exists(cfg, "silver", "dim_subscriber")
-    # the next consume sees nothing new
-    again = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], profile=profile,
-                              land=lambda f: to_bronze(cfg, f))
+    again = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], land=lambda f: to_bronze(cfg, f))
     assert again.frames == {} and again.dead_letters == []
 
 
-def test_customer_from_an_earlier_run_resolves(monkeypatch, dataset, profile):
-    # SCN-STR-02.4: customers published (and a consume run) before the accounts,
-    # agreements and parties that reference them
+def test_customer_from_an_earlier_run_is_landed(monkeypatch, dataset, profile):
+    # SCN-STR-04.4: the consumer doesn't resolve: billing accounts, agreements and
+    # parties consumed after their customers are landed as they are
     from idp.streaming.consumer import consume_to_bronze
     from idp.streaming.producer import dataset_files, tenant_events
     broker = _broker(monkeypatch)
     events = list(tenant_events(profile, "tenant_a", dict(dataset_files(dataset, profile))["tenant_a"]))
-    for suffix, key, event in events:
-        if suffix == "customer":
-            broker.append(f"t.tenant_a.{suffix}", event, key)
     landed = []
-    consume_to_bronze("x:9092", ["tenant_a"], profile=profile, land=landed.append)
-    assert landed == []                                        # nothing but customers yet
-    for suffix, key, event in events:
-        if suffix in ("party", "billingAccount", "agreement"):
-            broker.append(f"t.tenant_a.{suffix}", event, key)
-    result = consume_to_bronze("x:9092", ["tenant_a"], profile=profile, land=landed.append)
-    assert result.dead_letters == []
-    assert {e: len(df) for e, df in landed[0].items()} == {
-        e: int((getattr(dataset, e)["tenant_id"] == "tenant_a").sum())
-        for e in ("parties", "accounts", "agreements")}
+    for wanted in (("customer",), ("party", "billingAccount", "agreement")):
+        for suffix, key, event in events:
+            if suffix in wanted:
+                broker.append(f"t.tenant_a.{suffix}", event, key)
+        result = consume_to_bronze("x:9092", ["tenant_a"], land=landed.append)
+        assert result.dead_letters == []
+    assert set(landed[0]) == {"tmf_customer"}
+    assert set(landed[1]) == {"tmf_party", "tmf_billing_account", "tmf_agreement"}
+    assert len(landed[1]["tmf_agreement"]) == int((dataset.agreements["tenant_id"] == "tenant_a").sum())
 
 
 def _bad_messages(broker, dataset, profile):
-    """Publish tenant_a, plus a dangling agreement and one breaking the canonical contract."""
+    """Publish the dataset, a message that isn't JSON, and two events Silver must
+    quarantine (a dangling customer, a contract violation) but Bronze must keep."""
     from idp.ingestion.tmf.events import to_event
     from idp.streaming import produce_to_kafka
     from idp.streaming.producer import dataset_files
@@ -312,9 +300,9 @@ def _bad_messages(broker, dataset, profile):
     broker.append("t.tenant_a.productUsage", b"{not json", b"k3")
 
 
-def test_bad_messages_are_dead_lettered(monkeypatch, tmp_path, dataset, profile):
-    # SCN-STR-02.5 / 02.6: the valid records land, each bad message goes to the
-    # tenant's DLQ with its reason and source position, and the offsets are committed
+def test_only_unstorable_messages_are_dead_lettered(monkeypatch, tmp_path, dataset, profile):
+    # SCN-STR-04.5 / 04.6: the message that isn't JSON goes to the DLQ with its
+    # reason and source position; the dangling and off-contract events are landed
     from conftest import lake_cfg
     from idp.common import catalog
     from idp.pipeline import to_bronze
@@ -322,21 +310,14 @@ def test_bad_messages_are_dead_lettered(monkeypatch, tmp_path, dataset, profile)
     broker = _broker(monkeypatch)
     _bad_messages(broker, dataset, profile)
     cfg = lake_cfg(tmp_path)
-    result = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], profile=profile,
-                               land=lambda f: to_bronze(cfg, f))
-    reasons = {d.key: d.reason for d in result.dead_letters}
-    assert set(reasons) == {b"k1", b"k2", b"k3"}
-    assert "tenant_a-cust-gone" in reasons[b"k1"]
-    assert "canonical contract" in reasons[b"k2"] and "BusinessLine" in reasons[b"k2"]
-    assert reasons[b"k3"].startswith("invalid json")
-    dlq = broker.log["t.tenant_a.dlq"]
-    assert [m.key for m in dlq] == [b"k1", b"k2", b"k3"]
-    headers = dict(dlq[0].headers)
-    assert headers["idp.source.topic"] == b"t.tenant_a.agreement"
-    assert int(headers["idp.source.offset"]) == len(broker.log["t.tenant_a.agreement"]) - 2
-    assert json.loads(dlq[0].value)["event"]["agreement"]["id"] == "tenant_a-agr-dangling"
-    agreements = catalog.read_table(cfg, "bronze", "agreements")
-    assert set(agreements["id"]) == set(dataset.agreements["id"])         # all valid ones landed
+    result = consume_to_bronze("x:9092", ["tenant_a", "tenant_b"], land=lambda f: to_bronze(cfg, f))
+    assert [(d.key, d.reason.split(":")[0]) for d in result.dead_letters] == [(b"k3", "invalid json")]
+    [dlq] = broker.log["t.tenant_a.dlq"]
+    headers = dict(dlq.headers)
+    assert dlq.value == b"{not json" and headers["idp.source.topic"] == b"t.tenant_a.productUsage"
+    assert int(headers["idp.source.offset"]) == len(broker.log["t.tenant_a.productUsage"]) - 1
+    agreements = catalog.read_table(cfg, "bronze", "tmf_agreement")
+    assert {"tenant_a-agr-dangling", "tenant_a-agr-space"} <= set(agreements["resource_id"])
     assert broker.commits == 1
 
 
@@ -346,7 +327,7 @@ def test_consume_fails_when_messages_were_dead_lettered(monkeypatch, tmp_path, d
     broker = _broker(monkeypatch)
     _bad_messages(broker, dataset, profile)
     assert main(["--config", _small_config(tmp_path), "consume", "--idle-timeout", "0.1"]) == 1
-    assert "DEAD-LETTERED 3 message(s)" in capsys.readouterr().out
+    assert "DEAD-LETTERED 1 message(s)" in capsys.readouterr().out
 
 
 def test_failed_landing_commits_nothing(monkeypatch, dataset, profile):
@@ -355,46 +336,63 @@ def test_failed_landing_commits_nothing(monkeypatch, dataset, profile):
     from idp.streaming.consumer import consume_to_bronze
     broker = _broker(monkeypatch)
     produce_to_kafka(dataset, "x:9092", profile=profile)
+    broker.append("t.tenant_a.party", b"{not json")
 
     def boom(_frames):
         raise RuntimeError("catalog down")
     with pytest.raises(RuntimeError):
-        consume_to_bronze("x:9092", ["tenant_a"], profile=profile, land=boom)
+        consume_to_bronze("x:9092", ["tenant_a"], land=boom)
     assert broker.commits == 0 and "t.tenant_a.dlq" not in broker.log
     landed = []
-    consume_to_bronze("x:9092", ["tenant_a"], profile=profile, land=landed.append)
-    assert landed and broker.commits == 1
+    consume_to_bronze("x:9092", ["tenant_a"], land=landed.append)
+    assert landed and broker.commits == 1 and len(broker.log["t.tenant_a.dlq"]) == 1
 
 
-def test_empty_topics_no_snapshot(monkeypatch, tmp_path, profile):
-    # SCN-STR-02.2: nothing consumed, no landing, no Bronze snapshot, nothing committed
+def test_empty_topics_no_snapshot(monkeypatch, tmp_path):
+    # SCN-STR-04.2: nothing consumed, no landing, no Bronze snapshot, nothing committed
     from conftest import lake_cfg
     from idp.common import catalog
     from idp.pipeline import to_bronze
     from idp.streaming.consumer import consume_to_bronze
     broker = _broker(monkeypatch)
     cfg = lake_cfg(tmp_path)
-    out = consume_to_bronze("x:9092", ["tenant_a"], profile=profile, land=lambda f: to_bronze(cfg, f))
+    out = consume_to_bronze("x:9092", ["tenant_a"], land=lambda f: to_bronze(cfg, f))
     assert out.frames == {} and out.dead_letters == [] and broker.commits == 0
-    assert catalog.table_exists(cfg, "bronze", "parties") is False
+    assert catalog.table_exists(cfg, "bronze", "tmf_party") is False
 
 
-def test_landing_path_end_to_end_lands_exactly_the_generated_records(monkeypatch, tmp_path):
+def test_landing_path_end_to_end_conforms_exactly_the_generated_records(spark, monkeypatch, tmp_path):
     # SCN-BRZ-03.4: generate -> landing -> produce --from-landing -> Kafka (TMF) ->
-    # consume -> Bronze equals the generated canonical records
+    # consume -> raw Bronze -> Silver conform: one raw event per landed resource, and
+    # the conformed records equal the generated canonical records
+    from conftest import lake_cfg
     from idp.cli import main
-    from idp.common import catalog
     from idp.common.config import load_config
+    from idp.common.records import to_records
     from idp.pipeline import ENTITIES, _gen_dataset
+    from idp.transforms import conform, lake
     _no_s3(monkeypatch)
     broker = _broker(monkeypatch)
     cfg_path = _small_config(tmp_path)
     assert main(["--config", cfg_path, "generate"]) == 0
     assert main(["--config", cfg_path, "produce", "--from-landing"]) == 0
     assert main(["--config", cfg_path, "consume", "--idle-timeout", "0.1"]) == 0
-    assert "t.tenant_a.productUsage" in broker.topics()
     cfg = load_config(cfg_path)
+    published = sum(len(m) for t, m in broker.log.items() if not t.endswith(".dlq"))
+    landed = sum(len(catalog_rows) for catalog_rows in
+                 (lake.read_table(spark, cfg, "bronze", t).collect() for t in conform.bronze_tables().values()))
+    assert landed == published
+
+    frames, quarantine = conform.conform_reference(spark, cfg)
+    assert quarantine.empty
+    conformed = {e: to_records(df.toPandas()) for e, df in frames.items() if df is not None}
+    for table, entities in conform.FACT_TABLES.items():
+        ok, bad, _ = conform.conform_facts(lake.read_table(spark, cfg, "bronze", table), table)
+        assert bad.count() == 0
+        pdf = ok.toPandas()
+        for entity in entities:
+            conformed[entity] = to_records(pdf[pdf["_entity"] == entity].drop(columns="_entity"))
     generated = _gen_dataset(cfg)
     for entity in ENTITIES:
-        assert _canonical(catalog.read_table(cfg, "bronze", entity)) == \
-            _canonical(getattr(generated, entity)), entity
+        key = lambda r: r["id"]
+        assert sorted(conformed[entity], key=key) == sorted(to_records(getattr(generated, entity)), key=key), entity

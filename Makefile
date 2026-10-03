@@ -176,7 +176,7 @@ lake-catalog-show: ## Show what the Iceberg catalog (TimescaleDB `iceberg` DB) s
 	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform
 
 .PHONY: lake-table-show
-lake-table-show: ## Decode one lake table's current Iceberg metadata from MinIO: schema, partitioning, snapshots (read-only). TABLE=bronze.accounts
+lake-table-show: ## Decode one lake table's current Iceberg metadata from MinIO: schema, partitioning, snapshots (read-only). TABLE=bronze.tmf_billing_account
 	@bash deploy/platform/timescaledb/lake-catalog-show.sh idp-platform table "$(TABLE)"
 
 .PHONY: lake-catalog-psql
@@ -389,13 +389,6 @@ silver-full-refresh: mk-check ## Silver stage with --full-refresh (SparkApplicat
 .PHONY: maintain
 maintain: mk-check ## Lake maintenance (SparkApplication in idp-app): compact, expire snapshots, remove orphan files on every table
 	$(call run_sparkapp,maintain,)
-
-.PHONY: migrate-lake
-migrate-lake: ## One-off (idp-app): legacy Parquet Bronze -> Iceberg Bronze; then silver-full-refresh + gold
-	kubectl -n idp-app delete job idp-migrate-lake --ignore-not-found
-	kubectl -n idp-app apply -f deploy/app/jobs/migrate-lake-job.yaml
-	kubectl -n idp-app wait --for=condition=complete job/idp-migrate-lake --timeout=1200s
-	kubectl -n idp-app logs job/idp-migrate-lake
 
 .PHONY: gold
 gold: mk-check ## Gold stage (SparkApplication in idp-app): Silver (S3) -> feature tables ONLY (S3)

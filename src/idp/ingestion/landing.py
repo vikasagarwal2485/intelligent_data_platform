@@ -14,7 +14,7 @@ which checks the files and yields their resources to publish as TMF events
 :func:`read_landing` adapts a whole landing zone to canonical records directly. The
 layout mirrors a per-tenant source pickup (in production, e.g. NiFi). It doesn't
 write Bronze: Bronze is the Iceberg tables ``bronze.<entity>``, written by
-``pipeline.to_bronze`` (from ``idp consume``, ``idp run`` and ``idp migrate-lake``).
+``pipeline.to_bronze`` (from ``idp consume`` and ``idp run``).
 """
 from __future__ import annotations
 

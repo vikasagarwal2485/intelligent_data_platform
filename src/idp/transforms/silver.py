@@ -1,11 +1,18 @@
-"""Silver curation: Bronze -> canonical Silver tables, on Spark (plan section 3.3).
+"""Silver curation: conformed records -> canonical Silver tables, on Spark (plan 3.3).
 
-Pure DataFrame functions (no I/O) building the four canonical tables:
+Pure DataFrame functions (no I/O). Their inputs are the canonical records Silver's
+conform step produced from the raw Bronze events (``transforms.conform``,
+REQ-SLV-09): latest versions for the reference entities, one record per event for
+the facts.
 
-* ``dim_subscriber``  - party + account + agreement + product count, one row per MSISDN
-* ``fact_usage``      - unified voice + data events
-* ``fact_recharge``   - recharge events
-* ``fact_fee_charge`` - product fee charges, enriched from products (REQ-SLV-05)
+* ``dim_subscriber``      - agreement + customer + billing account + party + product
+                            count, one row per MSISDN, with ``customer_tenure_days``
+* ``dim_customer``        - one row per customer (party role), with its segment
+* ``dim_billing_account`` - one row per billing account, with its paying party
+* ``dim_product``         - one row per product
+* ``fact_usage``          - unified voice + data events
+* ``fact_recharge``       - recharge events
+* ``fact_fee_charge``     - product fee charges, enriched from products (REQ-SLV-05)
 
 Curation steps (plan 3.3): ``tenant_id`` carried on every table, id
 canonicalization (strip ``UUID(...)``), money normalization (net + tax -> gross),
@@ -18,32 +25,45 @@ from typing import Any
 from idp.transforms.tokens import salt_col, strip_uuid, token
 
 DIM_COLUMNS = [
-    "tenant_id", "service_id", "imsi", "party_id", "account_id", "agreement_id",
-    "account_type", "account_segment", "agreement_type", "business_line",
-    "account_tenure_days", "date_of_birth", "language", "is_company",
+    "tenant_id", "service_id", "imsi", "customer_id", "account_id", "agreement_id",
+    "account_type", "segment", "agreement_type", "business_line",
+    "customer_tenure_days", "date_of_birth", "language", "is_company",
     "consent_marketing", "consent_analytics", "num_products", "has_device_agreement",
 ]
-REQUIRED_ENTITIES = ("parties", "accounts", "agreements")
+DIM_CUSTOMER_COLUMNS = ["tenant_id", "customer_id", "party_id", "party_type", "role", "segment",
+                        "status", "valid_from"]
+DIM_BILLING_ACCOUNT_COLUMNS = ["tenant_id", "billing_account_id", "account_type", "lifecycle_status",
+                               "valid_from", "payer_party_id", "is_company"]
+DIM_PRODUCT_COLUMNS = ["tenant_id", "product_id", "agreement_id", "product_type", "name", "category",
+                       "monthly_fee", "lifecycle_status"]
+REQUIRED_ENTITIES = ("parties", "customers", "billing_accounts", "agreements")
 
 
-def build_dim_subscriber(parties: Any, accounts: Any, agreements: Any, products: Any | None,
-                         salts: dict[str, str]) -> Any:
-    """One row per subscriber (MSISDN) joining party/account/agreement/products."""
+def build_dim_subscriber(parties: Any, customers: Any, billing_accounts: Any, agreements: Any,
+                         products: Any | None, salts: dict[str, str]) -> Any:
+    """One row per subscriber (MSISDN): the agreement, its customer (segment, tenure
+    and party attributes), its billing account, and the product count."""
     from pyspark.sql import functions as F
 
     ag = (
         agreements
         .withColumn("account_id", strip_uuid(F.col("account_id")))
+        .withColumn("customer_id", strip_uuid(F.col("customer_id")))
         .withColumn("agreement_id", strip_uuid(F.col("id")))
         .select("tenant_id", "agreement_id", "agreement_type", "business_line",
-                F.col("valid_from").alias("agreement_valid_from"), "msisdn", "imsi", "account_id")
+                "msisdn", "imsi", "customer_id", "account_id")
+    )
+    cu = (
+        customers
+        .withColumn("customer_id", strip_uuid(F.col("id")))
+        .withColumn("party_id", strip_uuid(F.col("party_id")))
+        .select("tenant_id", "customer_id", "segment",
+                F.col("valid_from").alias("customer_valid_from"), "party_id")
     )
     ac = (
-        accounts
+        billing_accounts
         .withColumn("account_id", strip_uuid(F.col("id")))
-        .withColumn("party_id", strip_uuid(F.col("party_id")))
-        .select("tenant_id", "account_id", "account_type", "account_segment",
-                F.col("valid_from").alias("account_valid_from"), "party_id", "is_company")
+        .select("tenant_id", "account_id", "account_type", "is_company")
     )
     pa = (
         parties
@@ -51,7 +71,9 @@ def build_dim_subscriber(parties: Any, accounts: Any, agreements: Any, products:
         .select("tenant_id", "party_id", "date_of_birth", "language",
                 "consent_marketing", "consent_analytics")
     )
-    dim = ag.join(ac, ["tenant_id", "account_id"], "left").join(pa, ["tenant_id", "party_id"], "left")
+    dim = (ag.join(cu, ["tenant_id", "customer_id"], "left")
+             .join(ac, ["tenant_id", "account_id"], "left")
+             .join(pa, ["tenant_id", "party_id"], "left"))
 
     if products is not None:
         prod_counts = (products.groupBy("tenant_id", "agreement_id").count()
@@ -62,14 +84,14 @@ def build_dim_subscriber(parties: Any, accounts: Any, agreements: Any, products:
         dim = dim.withColumn("num_products", F.lit(0).cast("long"))
 
     dim = dim.withColumn("has_device_agreement", F.col("agreement_type") == F.lit("device"))
-    dim = dim.withColumn("account_valid_from", F.to_timestamp("account_valid_from"))
-    # Tenure in whole elapsed days vs the latest account_valid_from in the batch
-    # (floored like a timedelta's days, not calendar-day boundaries).
-    ref = dim.agg(F.max(F.unix_seconds("account_valid_from"))).collect()[0][0]
+    dim = dim.withColumn("customer_valid_from", F.to_timestamp("customer_valid_from"))
+    # Customer tenure in whole elapsed days vs the latest customer valid_from in the
+    # run (floored like a timedelta's days, not calendar-day boundaries); 0 if unknown.
+    ref = dim.agg(F.max(F.unix_seconds("customer_valid_from"))).collect()[0][0]
     dim = dim.withColumn(
-        "account_tenure_days",
-        F.when(F.col("account_valid_from").isNull(), F.lit(0))
-         .otherwise(F.floor((F.lit(ref) - F.unix_seconds("account_valid_from")) / F.lit(86400)))
+        "customer_tenure_days",
+        F.when(F.col("customer_valid_from").isNull(), F.lit(0))
+         .otherwise(F.floor((F.lit(ref) - F.unix_seconds("customer_valid_from")) / F.lit(86400)))
          .cast("long"),
     )
     sc = salt_col(salts)
@@ -78,6 +100,45 @@ def build_dim_subscriber(parties: Any, accounts: Any, agreements: Any, products:
               .withColumn("imsi", token(F.col("imsi"), sc)))
     return (dim.select([c for c in DIM_COLUMNS if c in dim.columns])
                .dropDuplicates(["tenant_id", "service_id"]))
+
+
+def build_dim_customer(customers: Any, parties: Any | None) -> Any:
+    """One row per customer, with its party's type."""
+    from pyspark.sql import functions as F
+
+    dim = (customers
+           .withColumn("customer_id", strip_uuid(F.col("id")))
+           .withColumn("party_id", strip_uuid(F.col("party_id")))
+           .withColumn("valid_from", F.to_timestamp("valid_from")))
+    if parties is not None:
+        types = parties.select("tenant_id", strip_uuid(F.col("id")).alias("party_id"), "party_type")
+        dim = dim.join(types, ["tenant_id", "party_id"], "left")
+    else:
+        dim = dim.withColumn("party_type", F.lit(None).cast("string"))
+    return dim.select(*DIM_CUSTOMER_COLUMNS).dropDuplicates(["tenant_id", "customer_id"])
+
+
+def build_dim_billing_account(billing_accounts: Any) -> Any:
+    """One row per billing account, with its paying party."""
+    from pyspark.sql import functions as F
+
+    return (billing_accounts
+            .withColumn("billing_account_id", strip_uuid(F.col("id")))
+            .withColumn("payer_party_id", strip_uuid(F.col("payer_party_id")))
+            .withColumn("valid_from", F.to_timestamp("valid_from"))
+            .select(*DIM_BILLING_ACCOUNT_COLUMNS)
+            .dropDuplicates(["tenant_id", "billing_account_id"]))
+
+
+def build_dim_product(products: Any) -> Any:
+    """One row per product."""
+    from pyspark.sql import functions as F
+
+    return (products
+            .withColumn("product_id", strip_uuid(F.col("id")))
+            .withColumn("agreement_id", strip_uuid(F.col("agreement_id")))
+            .select(*DIM_PRODUCT_COLUMNS)
+            .dropDuplicates(["tenant_id", "product_id"]))
 
 
 def build_fact_usage(voice: Any | None, data: Any | None, salts: dict[str, str]) -> Any | None:
@@ -144,22 +205,28 @@ def build_fact_fee_charge(fee_charges: Any | None, products: Any | None) -> Any 
     return fees.select("tenant_id", *fee_cols, *prod_cols)
 
 
-def curate(bronze: dict[str, Any], salts: dict[str, str]) -> dict[str, Any]:
-    """All Silver tables from the Bronze entity DataFrames (absent entities -> None).
+def curate(entities: dict[str, Any], salts: dict[str, str]) -> dict[str, Any]:
+    """All Silver tables from conformed canonical entity DataFrames (absent -> None).
 
-    Raises when a required entity (parties/accounts/agreements) is missing.
+    Raises when a required entity (parties/customers/billing_accounts/agreements)
+    is missing.
     """
-    missing = [e for e in REQUIRED_ENTITIES if bronze.get(e) is None]
+    missing = [e for e in REQUIRED_ENTITIES if entities.get(e) is None]
     if missing:
         raise RuntimeError(
-            f"Bronze is missing entity tables {missing}. Populate Bronze first "
+            f"Bronze is missing entities {missing}. Populate Bronze first "
             "('idp produce' then 'idp consume')."
         )
+    products = entities.get("products")
     tables = {
-        "dim_subscriber": build_dim_subscriber(bronze["parties"], bronze["accounts"],
-                                               bronze["agreements"], bronze.get("products"), salts),
-        "fact_usage": build_fact_usage(bronze.get("voice_events"), bronze.get("data_events"), salts),
-        "fact_recharge": build_fact_recharge(bronze.get("recharge_events"), salts),
-        "fact_fee_charge": build_fact_fee_charge(bronze.get("fee_charges"), bronze.get("products")),
+        "dim_subscriber": build_dim_subscriber(entities["parties"], entities["customers"],
+                                               entities["billing_accounts"], entities["agreements"],
+                                               products, salts),
+        "dim_customer": build_dim_customer(entities["customers"], entities["parties"]),
+        "dim_billing_account": build_dim_billing_account(entities["billing_accounts"]),
+        "dim_product": None if products is None else build_dim_product(products),
+        "fact_usage": build_fact_usage(entities.get("voice_events"), entities.get("data_events"), salts),
+        "fact_recharge": build_fact_recharge(entities.get("recharge_events"), salts),
+        "fact_fee_charge": build_fact_fee_charge(entities.get("fee_charges"), products),
     }
     return {name: df for name, df in tables.items() if df is not None}

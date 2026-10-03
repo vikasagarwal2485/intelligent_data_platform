@@ -4,23 +4,15 @@
 # both run from this file (src/idp/ingestion/tmf/profile.py explains the field kinds).
 #
 # Standard fields and typed characteristics only, plus the platform extension
-# Idp<Resource> (config/tmf/extensions/): tenantId everywhere, and TopupBalance's
-# rechargeType and agreement, which have no standard home (TMF654 has no
-# characteristics). A customer profile copies this file and adds its own @type
+# Idp<Resource> (config/tmf/extensions/): tenantId everywhere, BillingAccount's
+# validFor (TMF666 has none), and TopupBalance's rechargeType and agreement, which
+# have no standard home (TMF654 has no characteristics). A customer profile copies this file and adds its own @type
 # subtypes; it must not change the meaning of a standard field.
 #
 # Resource versions: TMF632/629/666/637/678/635 v5; Agreement (TMF651) and
 # TopupBalance (TMF654) follow v4.0.0 with v5 conventions (config/tmf/schemas/).
 name: standard
 version: 1
-
-customer:                       # TMF629 Customer: the party role accounts and agreements reference
-  resource: Customer
-  file: customer.json
-  href: /tmf-api/customerManagement/v5/customer/{id}
-  set:
-    status: approved
-    tenantId: "{tenant_id}"     # the role isn't a canonical entity: its tenant comes from the record that creates it
 
 resources:
   # --- parties: TMF632 Individual / Organization -----------------------------
@@ -33,7 +25,6 @@ resources:
     fields: &individual_fields
       tenant_id: {ext: tenantId}
       id: {path: id}
-      role: {via: customer, path: role}
       first_name: {path: givenName}
       last_name: {path: familyName}
       date_of_birth: {path: birthDate, as: date}      # TMF birthDate is a date-time
@@ -46,7 +37,6 @@ resources:
               set: {contactType: email}}
       consent_marketing: {char: consentMarketing, in: partyCharacteristic, type: boolean}
       consent_analytics: {char: consentAnalytics, in: partyCharacteristic, type: boolean}
-      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
       party_type: {const: individual}
       organization_name: absent
       organization_type: absent
@@ -60,7 +50,6 @@ resources:
     fields:
       tenant_id: {ext: tenantId}
       id: {path: id}
-      role: {via: customer, path: role}
       first_name: absent          # an organization has no person fields
       last_name: absent
       date_of_birth: absent
@@ -71,13 +60,30 @@ resources:
               set: {contactType: email}}
       consent_marketing: {char: consentMarketing, in: partyCharacteristic, type: boolean}
       consent_analytics: {char: consentAnalytics, in: partyCharacteristic, type: boolean}
-      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
       party_type: {const: organization}
       organization_name: {path: name}
       organization_type: {path: organizationType}
 
-  # --- accounts: TMF666 BillingAccount (its party, segment and start live on the Customer)
-  - entity: accounts
+  # --- customers: TMF629 Customer, the party role "customer" -----------------
+  # Links its party to its billing account and agreements; carries the segment and
+  # the since-date. Agreements reference it (role customer) and read their billing
+  # account from it (via: customer).
+  - entity: customers
+    resource: Customer
+    file: customer.json
+    href: /tmf-api/customerManagement/v5/customer/{id}
+    fields:
+      tenant_id: {ext: tenantId}
+      id: {path: id}
+      party_id: {path: engagedParty.id, with: {"engagedParty.@type": PartyRef}}
+      role: {path: role}
+      segment: {char: segment, in: characteristic, type: string}
+      status: {path: status}
+      valid_from: {path: validFor.startDateTime}
+      account_id: {path: "account[0].id", with: {"account[0].@type": AccountRef}}
+
+  # --- billing_accounts: TMF666 BillingAccount, referencing its paying party ---
+  - entity: billing_accounts
     resource: BillingAccount
     file: billingAccount.json
     href: /tmf-api/accountManagement/v5/billingAccount/{id}
@@ -85,11 +91,13 @@ resources:
       tenant_id: {ext: tenantId}
       id: {path: id}
       account_type: {path: accountType}
-      account_segment: {via: customer, char: accountSegment, in: characteristic, type: string}
       lifecycle_status: {path: state}
-      valid_from: {via: customer, path: validFor.startDateTime}
-      party_id: {via: customer, path: engagedParty.id, with: {"engagedParty.@type": PartyRef}}
-      is_company: {via: customer, path: "engagedParty.@referredType", map: {true: Organization, false: Individual}}
+      valid_from: {ext: validFor.startDateTime}       # TMF666 Account has no validFor
+      payer_party_id:
+        path: "relatedParty[0].partyOrPartyRole.id"
+        with: {"relatedParty[0].@type": RelatedPartyRefOrPartyRoleRef, "relatedParty[0].role": payer,
+               "relatedParty[0].partyOrPartyRole.@type": PartyRef}
+      is_company: {path: "relatedParty[0].partyOrPartyRole.@referredType", map: {true: Organization, false: Individual}}
 
   # --- agreements: TMF651 Agreement (v4.0 shape, v5 references) --------------
   - entity: agreements
@@ -108,7 +116,12 @@ resources:
       valid_from: {path: agreementPeriod.startDateTime}
       msisdn: {char: msisdn, in: characteristic, type: string}
       imsi: {char: imsi, in: characteristic, type: string}
-      account_id: {via: customer, path: "account[0].id", with: {"account[0].@type": AccountRef}}
+      customer_id:
+        path: "engagedParty[0].partyOrPartyRole.id"
+        with: {"engagedParty[0].@type": RelatedPartyRefOrPartyRoleRef, "engagedParty[0].role": customer,
+               "engagedParty[0].partyOrPartyRole.@type": PartyRoleRef,
+               "engagedParty[0].partyOrPartyRole.@referredType": Customer}
+      account_id: {via: customer, path: "account[0].id"}
 
   # --- products: TMF637 Product ----------------------------------------------
   - entity: products

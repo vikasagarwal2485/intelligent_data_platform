@@ -2,16 +2,16 @@
   "@type": "IdpAgreement",
   "@baseType": "Agreement",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpAgreement.schema.json",
-  "href": "/tmf-api/agreementManagement/v4/agreement/tenant_a-agr-000000",
-  "name": "Agreement tenant_a-agr-000000",
+  "href": "/tmf-api/agreementManagement/v4/agreement/tenant_a-agr-000001",
+  "name": "Agreement tenant_a-agr-000001",
   "agreementItem": [
     {
       "@type": "AgreementItem"
     }
   ],
   "tenantId": "tenant_a",
-  "id": "tenant_a-agr-000000",
-  "agreementType": "subscription",
+  "id": "tenant_a-agr-000001",
+  "agreementType": "device",
   "characteristic": [
     {
       "@type": "StringCharacteristic",
@@ -23,28 +23,28 @@
       "@type": "StringCharacteristic",
       "name": "msisdn",
       "valueType": "string",
-      "value": "595950846137"
+      "value": "595984153193"
     },
     {
       "@type": "StringCharacteristic",
       "name": "imsi",
       "valueType": "string",
-      "value": "744068220244029"
+      "value": "744017846199099"
     }
   ],
   "status": "active",
   "agreementPeriod": {
-    "startDateTime": "2021-12-12T00:00:00.000Z"
+    "startDateTime": "2024-12-17T00:00:00.000Z"
   },
   "engagedParty": [
     {
-      "@type": "RelatedPartyRefOrPartyRoleRef",
-      "role": "customer",
       "partyOrPartyRole": {
+        "id": "tenant_a-cust-000001",
         "@type": "PartyRoleRef",
-        "id": "tenant_a-cust-000000",
         "@referredType": "Customer"
-      }
+      },
+      "@type": "RelatedPartyRefOrPartyRoleRef",
+      "role": "customer"
     }
   ]
 }

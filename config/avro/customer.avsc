@@ -1,0 +1,51 @@
+{
+  "type": "record",
+  "name": "Customer",
+  "namespace": "com.idp.canonical",
+  "doc": "Canonical customer (TMF629 Customer, the party role `customer`): links its party to its billing account and agreements, and carries the segment and since-date.",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "party_id",
+      "type": "string",
+      "doc": "The engaged party."
+    },
+    {
+      "name": "role",
+      "type": "string"
+    },
+    {
+      "name": "segment",
+      "type": {
+        "type": "enum",
+        "name": "Segment",
+        "symbols": [
+          "B2C",
+          "B2B",
+          "B2B2C"
+        ]
+      }
+    },
+    {
+      "name": "status",
+      "type": "string"
+    },
+    {
+      "name": "valid_from",
+      "type": "string",
+      "doc": "Customer since: ISO-8601 timestamp, UTC."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "doc": "The customer's billing account."
+    }
+  ]
+}

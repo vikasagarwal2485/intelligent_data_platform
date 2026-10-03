@@ -66,25 +66,24 @@ def _hadoop_fs(spark: Any, path: str):
 def checkpoint_snapshot_ids(spark: Any, cfg: PlatformConfig) -> dict[str, set[int]]:
     """Bronze snapshot ids referenced by the latest offset of each Silver checkpoint."""
     refs: dict[str, set[int]] = {}
-    for fact, (sources, _) in incremental.FACTS.items():
-        for source in sources:
-            offsets = f"{incremental.checkpoint_dir(cfg, fact, source)}/offsets"
-            hpath, fs = _hadoop_fs(spark, offsets)
-            if not fs.exists(hpath):
-                continue
-            batches = [s.getPath().getName() for s in fs.listStatus(hpath)]
-            batches = sorted(int(b) for b in batches if b.isdigit())
-            if not batches:
-                continue
-            latest, _ = _hadoop_fs(spark, f"{offsets}/{batches[-1]}")
-            stream = fs.open(latest)
-            try:
-                text = spark.sparkContext._jvm.org.apache.commons.io.IOUtils.toString(stream, "UTF-8")
-            finally:
-                stream.close()
-            for line in text.splitlines():
-                if line.startswith("{") and "snapshot_id" in line:
-                    refs.setdefault(source, set()).add(int(json.loads(line)["snapshot_id"]))
+    for fact, (source, _) in incremental.FACTS.items():
+        offsets = f"{incremental.checkpoint_dir(cfg, fact, source)}/offsets"
+        hpath, fs = _hadoop_fs(spark, offsets)
+        if not fs.exists(hpath):
+            continue
+        batches = [s.getPath().getName() for s in fs.listStatus(hpath)]
+        batches = sorted(int(b) for b in batches if b.isdigit())
+        if not batches:
+            continue
+        latest, _ = _hadoop_fs(spark, f"{offsets}/{batches[-1]}")
+        stream = fs.open(latest)
+        try:
+            text = spark.sparkContext._jvm.org.apache.commons.io.IOUtils.toString(stream, "UTF-8")
+        finally:
+            stream.close()
+        for line in text.splitlines():
+            if line.startswith("{") and "snapshot_id" in line:
+                refs.setdefault(source, set()).add(int(json.loads(line)["snapshot_id"]))
     return refs
 
 

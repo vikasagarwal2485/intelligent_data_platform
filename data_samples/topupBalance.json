@@ -2,32 +2,31 @@
   "@type": "IdpTopupBalance",
   "@baseType": "TopupBalance",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpTopupBalance.schema.json",
-  "href": "/tmf-api/prepayBalanceManagement/v4/topupBalance/tenant_a-agr-000000-r-0",
+  "href": "/tmf-api/prepayBalanceManagement/v4/topupBalance/tenant_a-agr-000001-r-0",
   "tenantId": "tenant_a",
-  "id": "tenant_a-agr-000000-r-0",
+  "id": "tenant_a-agr-000001-r-0",
   "logicalResource": [
     {
-      "id": "595950846137",
+      "id": "595984153193",
       "@type": "LogicalResourceRef",
       "@referredType": "MSISDN"
     }
   ],
   "agreement": {
-    "id": "tenant_a-agr-000000",
+    "id": "tenant_a-agr-000001",
     "@referredType": "Agreement"
   },
-  "requestedDate": "2026-01-01T06:36:41.000Z",
+  "requestedDate": "2026-01-01T23:43:22.000Z",
   "amount": {
-    "amount": 16.46,
+    "amount": 29.41,
     "units": "EUR"
   },
   "paymentMethod": {
-    "id": "cash",
+    "id": "voucher",
     "@type": "PaymentMethodRef",
     "@referredType": "PaymentMethod"
   },
-  "status": "failed",
-  "reason": "insufficient-funds",
+  "status": "completed",
   "channel": {
     "id": "web",
     "@type": "ChannelRef"

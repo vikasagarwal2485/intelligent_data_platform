@@ -173,7 +173,7 @@ def build_credit_features(silver: dict[str, Any], windows=(30, 90)) -> Any:
              .withColumn("has_device_agreement",
                          F.coalesce(F.col("has_device_agreement").cast("int"), F.lit(0)))
              .withColumn("is_company", F.coalesce(F.col("is_company").cast("int"), F.lit(0))))
-    months = F.greatest(F.col("account_tenure_days"), F.lit(30)) / F.lit(30.0)
+    months = F.greatest(F.col("customer_tenure_days"), F.lit(30)) / F.lit(30.0)
     feats = feats.withColumn("arpu_monthly", F.bround(F.col("usage_charged_amount") / months, 4))
     feats = feats.withColumn(
         "spend_to_recharge_ratio",

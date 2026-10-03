@@ -51,6 +51,28 @@ def test_fraud_score_endpoint(tmp_path):
     assert "fraud_score" in resp.json()
 
 
+def test_unknown_feature_names_are_rejected(tmp_path):
+    # SCN-SRV-02.4: the former feature name is a 422 naming it, before any model is
+    # loaded (no artifacts here)
+    client = TestClient(create_app(artifacts_dir=tmp_path / "none"))
+    payload = {"tenant_id": "tenant_a", "service_id": "tok_test",
+               "features": {"recharge_avg_amount": 40, "account_tenure_days": 500}}
+    resp = client.post("/credit-limit", json=payload)
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["unknown_features"] == ["account_tenure_days"]
+    resp = client.post("/fraud-score", json={**payload, "features": {"recharge_max": 1, "bogus": 2}})
+    assert resp.status_code == 422 and resp.json()["detail"]["unknown_features"] == ["bogus"]
+
+
+def test_missing_features_default_to_zero(tmp_path):
+    # SCN-SRV-02.5: a partial feature map is still scored
+    art = _train_models(tmp_path)
+    client = TestClient(create_app(artifacts_dir=art))
+    resp = client.post("/fraud-score", json={"tenant_id": "tenant_b", "service_id": "tok_test",
+                                             "features": {"recharge_max": 10.0}})
+    assert resp.status_code == 200 and "fraud_score" in resp.json()
+
+
 def test_missing_model_returns_503(tmp_path):
     client = TestClient(create_app(artifacts_dir=tmp_path / "empty"))
     resp = client.post("/credit-limit", json={"tenant_id": "a", "service_id": "x", "features": {}})

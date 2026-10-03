@@ -2,7 +2,7 @@
 
 Usage (separated medallion stages):
     idp produce    # synthetic data -> Kafka topics (--from-landing: the TMF landing files)
-    idp consume    # Kafka (TMF events) -> canonical Bronze (S3)  [Bronze stage]
+    idp consume    # Kafka (TMF events) -> raw Bronze (S3)  [Bronze stage]
     idp silver     # new Bronze -> Silver (incremental; --full-refresh replays all)  [Silver stage]
     idp gold       # Silver (S3) -> Gold features  [Gold stage: features ONLY]
     idp score      # Gold features + models -> scores (S3)   [inference]
@@ -12,7 +12,6 @@ Usage (separated medallion stages):
     idp run        # local dev: compose all stages end-to-end (generate->...->gold)
     idp generate   # write synthetic data to the landing zone (TM Forum resource files)
     idp serve      # start the FastAPI scoring service
-    idp migrate-lake  # one-off: legacy Parquet Bronze -> Iceberg Bronze
     idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
     idp registry-schemas  # write each Kafka topic's TMF JSON Schema (wire contract)
     idp maintain   # compact, expire snapshots, remove orphans on every lake table
@@ -148,9 +147,8 @@ def _produce_from_landing(cfg, bootstrap: str) -> int:
 
 
 def _cmd_consume(args: argparse.Namespace) -> int | None:
-    """Bronze stage only: Kafka (TMF events) -> canonical Bronze. Silver/Gold are
-    separate stages. Returns 1 when any message was dead-lettered."""
-    from idp.ingestion.tmf.profile import load_profile
+    """Bronze stage only: Kafka (TMF events) -> raw Bronze, as received. Silver/Gold
+    are separate stages. Returns 1 when any message was dead-lettered."""
     from idp.pipeline import to_bronze
     from idp.streaming.consumer import consume_to_bronze
 
@@ -161,18 +159,15 @@ def _cmd_consume(args: argparse.Namespace) -> int | None:
     result = consume_to_bronze(
         bootstrap, cfg.tenant_ids,
         topic_prefix=cfg.kafka["topic_prefix"], idle_timeout=args.idle_timeout,
-        profile=load_profile(cfg.tmf["profile"]),
         land=lambda frames: landed.update(to_bronze(cfg, frames)),   # commit offsets after
     )
-    for problem in result.customer_problems:
-        print(f"WARNING invalid customer event (left out of the index): {problem}")
     total = sum(len(df) for df in result.frames.values())
-    print(f"Consumed {total} records: { {k: len(v) for k, v in result.frames.items()} }")
+    print(f"Consumed {total} events: { {k: len(v) for k, v in result.frames.items()} }")
     if total:
-        print(f"Appended to Iceberg Bronze: {landed.get('bronze_tables')}")
+        print(f"Appended to Iceberg Bronze (raw): {landed.get('bronze_tables')}")
     if result.dead_letters:
         print(f"DEAD-LETTERED {len(result.dead_letters)} message(s) to "
-              f"{cfg.kafka['topic_prefix']}.<tenant>.dlq (not landed):")
+              f"{cfg.kafka['topic_prefix']}.<tenant>.dlq (not stored):")
         for d in result.dead_letters[:20]:
             print(f"  {d.topic}[{d.partition}]@{d.offset}: {d.reason}")
         if len(result.dead_letters) > 20:
@@ -182,7 +177,7 @@ def _cmd_consume(args: argparse.Namespace) -> int | None:
         print("No messages consumed (topics empty or producer not finished). "
               "Run 'idp produce' first.")
         return None
-    print("Next: 'idp silver' to build Silver from Bronze.")
+    print("Next: 'idp silver' to conform Bronze and build Silver.")
     return None
 
 
@@ -193,14 +188,6 @@ def _cmd_silver(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     print(json.dumps(to_silver(cfg, full_refresh=args.full_refresh), indent=2))
     print("Next: 'idp gold' to build Gold from Silver.")
-
-
-def _cmd_migrate_lake(args: argparse.Namespace) -> None:
-    """One-off: legacy Parquet Bronze -> Iceberg Bronze (skips migrated entities)."""
-    from idp.migration import migrate_lake
-
-    print(json.dumps(migrate_lake(load_config(args.config)), indent=2))
-    print("Next: 'idp silver --full-refresh' then 'idp gold' to rebuild Silver and Gold.")
 
 
 def _cmd_archive_policy(args: argparse.Namespace) -> None:
@@ -326,8 +313,8 @@ def main(argv: list[str] | None = None) -> int:
                              "checked, as TMF create events, instead of generating in memory")
     p_prod.set_defaults(func=_cmd_produce)
 
-    p_cons = sub.add_parser("consume", help="Bronze stage: drain the TMF event topics, adapt them -> "
-                                            "canonical Bronze (S3); bad messages -> t.<tenant>.dlq")
+    p_cons = sub.add_parser("consume", help="Bronze stage: drain the TMF event topics -> raw Bronze (S3), "
+                                            "as received; messages that aren't events -> t.<tenant>.dlq")
     p_cons.add_argument("--bootstrap", default=None, help="Kafka bootstrap (default: config/env)")
     p_cons.add_argument("--idle-timeout", type=float, default=15.0,
                         help="Stop after N seconds with no new messages")
@@ -337,8 +324,6 @@ def main(argv: list[str] | None = None) -> int:
     p_silver.add_argument("--full-refresh", action="store_true",
                           help="Reset the checkpoints and rebuild the facts from all of Bronze")
     p_silver.set_defaults(func=_cmd_silver)
-    sub.add_parser("migrate-lake", help="One-off: legacy Parquet Bronze -> Iceberg Bronze"
-                   ).set_defaults(func=_cmd_migrate_lake)
     p_sm = sub.add_parser("spark-manifest", help="Render a Spark stage's SparkApplication YAML from its profile")
     from idp.transforms.sparkapp import SPARK_STAGES  # no pyspark: manifests are plain YAML
     p_sm.add_argument("stage", choices=SPARK_STAGES)

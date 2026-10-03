@@ -8,7 +8,7 @@
   "id": "tenant_a-party-000000",
   "givenName": "First",
   "familyName": "User000000",
-  "birthDate": "1971-01-01T00:00:00Z",
+  "birthDate": "1996-01-01T00:00:00Z",
   "languageAbility": [
     {
       "languageCode": "en-US",
@@ -21,7 +21,7 @@
       "@type": "PhoneContactMedium",
       "contactType": "mobile",
       "preferred": true,
-      "phoneNumber": "+595950846137"
+      "phoneNumber": "+595980910204"
     },
     {
       "@type": "EmailContactMedium",

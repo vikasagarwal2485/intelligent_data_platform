@@ -2,20 +2,23 @@
   "@type": "IdpBillingAccount",
   "@baseType": "BillingAccount",
   "@schemaLocation": "https://idp.local/tmf/extensions/IdpBillingAccount.schema.json",
-  "href": "/tmf-api/accountManagement/v5/billingAccount/tenant_a-acct-000004",
+  "href": "/tmf-api/accountManagement/v5/billingAccount/tenant_a-acct-000001",
   "tenantId": "tenant_a",
-  "id": "tenant_a-acct-000004",
+  "id": "tenant_a-acct-000001",
   "accountType": "company",
   "state": "active",
+  "validFor": {
+    "startDateTime": "2024-12-17T00:00:00.000Z"
+  },
   "relatedParty": [
     {
-      "@type": "RelatedPartyRefOrPartyRoleRef",
-      "role": "customer",
       "partyOrPartyRole": {
-        "@type": "PartyRoleRef",
-        "id": "tenant_a-cust-000004",
-        "@referredType": "Customer"
-      }
+        "id": "tenant_a-party-000001",
+        "@type": "PartyRef",
+        "@referredType": "Organization"
+      },
+      "@type": "RelatedPartyRefOrPartyRoleRef",
+      "role": "payer"
     }
   ]
 }

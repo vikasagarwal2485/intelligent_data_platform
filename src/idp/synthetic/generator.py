@@ -1,9 +1,11 @@
 """Synthetic data generator (plan section 3.0).
 
-Produces referentially-consistent records across all seven TMF entities
-(parties -> accounts -> agreements -> products, plus voice/data usage and
-recharge events) for one or more tenants, together with a ground-truth label
-table for the two ML use cases.
+Produces referentially-consistent canonical records (parties, customers, billing
+accounts, agreements, products, plus voice/data usage, recharge and fee-charge
+events) for one or more tenants, together with a ground-truth label table for the
+two ML use cases. A billing account references its paying party; a customer (the
+party role ``customer``) links that party to the account and its agreements, and
+carries the segment (REQ-SYN-01).
 
 Design goals (from reviewer decision "synthetic data generation is required"):
 
@@ -56,7 +58,8 @@ class SyntheticDataset:
     """Container of generated entity/event/label DataFrames."""
 
     parties: pd.DataFrame
-    accounts: pd.DataFrame
+    customers: pd.DataFrame
+    billing_accounts: pd.DataFrame
     agreements: pd.DataFrame
     products: pd.DataFrame
     voice_events: pd.DataFrame
@@ -82,7 +85,7 @@ class SyntheticDataset:
 # landing order. This is the one definition: the landing zone, Bronze
 # (``pipeline.ENTITIES``) and the Kafka topic map all cover exactly these.
 ENTITIES = (
-    "parties", "accounts", "agreements", "products",
+    "parties", "customers", "billing_accounts", "agreements", "products",
     "voice_events", "data_events", "recharge_events", "fee_charges",
 )
 
@@ -112,7 +115,7 @@ def generate(
     if start_date is None:
         start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-    parties, accounts, agreements, products = [], [], [], []
+    parties, customers, billing_accounts, agreements, products = [], [], [], [], []
     voice_rows, data_rows, recharge_rows, label_rows = [], [], [], []
     fee_rows: list[dict] = []
 
@@ -131,6 +134,7 @@ def generate(
     for i in range(subscribers):
         suffix = f"{i:06d}"
         party_id = f"{tenant_id}-party-{suffix}"
+        customer_id = f"{tenant_id}-cust-{suffix}"
         account_id = f"{tenant_id}-acct-{suffix}"
         agreement_id = f"{tenant_id}-agr-{suffix}"
         product_id = f"{tenant_id}-prod-{suffix}"
@@ -160,29 +164,35 @@ def generate(
         # person fields. Its name/type come from the suffix, not the rng, so no other
         # generated value changes (REQ-SYN-01).
         parties.append({
-            "tenant_id": tenant_id, "id": party_id, "role": "owner",
+            "tenant_id": tenant_id, "id": party_id,
             "first_name": None if is_company else "First",
             "last_name": None if is_company else f"User{suffix}",
             "date_of_birth": None if is_company else f"{birth_year}-01-01", "language": "en-US",
             "phone": f"+{msisdn}", "email": f"user{suffix}@example.com",
             "consent_marketing": consent_marketing, "consent_analytics": consent_analytics,
-            "account_id": account_id,
             "party_type": "organization" if is_company else "individual",
             "organization_name": f"Company {suffix}" if is_company else None,
             "organization_type": "company" if is_company else None,
         })
-        accounts.append({
+        # The customer is the party's role towards the operator: it holds the segment
+        # and the since-date, and links the party to its billing account. Everything
+        # comes from values drawn above, so nothing else changes (REQ-SYN-01).
+        customers.append({
+            "tenant_id": tenant_id, "id": customer_id, "party_id": party_id,
+            "role": "owner", "segment": segment, "status": "approved",
+            "valid_from": _iso(acct_valid_from), "account_id": account_id,
+        })
+        billing_accounts.append({
             "tenant_id": tenant_id, "id": account_id, "account_type": account_type,
-            "account_segment": segment, "lifecycle_status": "active",
-            "valid_from": _iso(acct_valid_from), "party_id": party_id,
-            "is_company": is_company,
+            "lifecycle_status": "active", "valid_from": _iso(acct_valid_from),
+            "payer_party_id": party_id, "is_company": is_company,
         })
         agreements.append({
             "tenant_id": tenant_id, "id": agreement_id,
             "agreement_type": "device" if has_device else "subscription",
             "business_line": business_line, "lifecycle_status": "active",
             "valid_from": _iso(acct_valid_from), "msisdn": msisdn, "imsi": imsi,
-            "account_id": account_id,
+            "customer_id": customer_id, "account_id": account_id,
         })
         sub_products: list[dict] = []
         for p in range(num_products):
@@ -371,7 +381,8 @@ def generate(
 
     return SyntheticDataset(
         parties=pd.DataFrame(parties),
-        accounts=pd.DataFrame(accounts),
+        customers=pd.DataFrame(customers),
+        billing_accounts=pd.DataFrame(billing_accounts),
         agreements=pd.DataFrame(agreements),
         products=pd.DataFrame(products),
         voice_events=pd.DataFrame(voice_rows),
@@ -389,7 +400,8 @@ def generate_for_tenants(
     parts = [generate(t, **kwargs) for t in tenant_ids]
     return SyntheticDataset(
         parties=pd.concat([p.parties for p in parts], ignore_index=True),
-        accounts=pd.concat([p.accounts for p in parts], ignore_index=True),
+        customers=pd.concat([p.customers for p in parts], ignore_index=True),
+        billing_accounts=pd.concat([p.billing_accounts for p in parts], ignore_index=True),
         agreements=pd.concat([p.agreements for p in parts], ignore_index=True),
         products=pd.concat([p.products for p in parts], ignore_index=True),
         voice_events=pd.concat([p.voice_events for p in parts], ignore_index=True),

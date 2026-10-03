@@ -1,0 +1,60 @@
+{
+  "type": "record",
+  "name": "DimBillingAccount",
+  "namespace": "com.idp.silver",
+  "doc": "Silver dim_billing_account: one row per billing account (documented contract, checked by tests).",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "billing_account_id",
+      "type": "string"
+    },
+    {
+      "name": "account_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "lifecycle_status",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "valid_from",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ],
+      "doc": "UTC.",
+      "default": null
+    },
+    {
+      "name": "payer_party_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "is_company",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    }
+  ]
+}

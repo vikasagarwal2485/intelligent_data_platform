@@ -345,8 +345,8 @@ Consequences. Status: `Accepted` unless noted.
     orphan files. Expiry never removes a Bronze snapshot that a checkpoint still
     references. Bronze is archived by an object-store lifecycle rule
     (`idp archive-policy`), never deleted.
-  - `idp migrate-lake` moves a legacy Parquet Bronze across as one snapshot per
-    entity.
+  - `idp migrate-lake` moved a legacy Parquet Bronze across as one snapshot per
+    entity (removed after ADR-0032: Silver reads only raw Bronze).
 - **Rejected: Nessie's Iceberg REST catalog.** It was the original plan, and was
   deployed and probed. It keeps only a table's **current** snapshot in its metadata
   (history lives in Nessie commits: three appends left one snapshot). That breaks
@@ -466,7 +466,8 @@ Consequences. Status: `Accepted` unless noted.
     Bitnami's frozen legacy build of the cluster's MinIO commit.
 
 ### ADR-0031 — TM Forum events on Kafka; the adapter runs in the consumer; two contracts
-- **Status:** Accepted (2026-10-02). Supersedes ADR-0013's wire-contract part.
+- **Status:** Accepted (2026-10-02). Supersedes ADR-0013's wire-contract part. Its
+  "adapter in the consumer" part is revised by ADR-0032 (raw Bronze).
 - **Context:** The landing zone holds TM Forum Open API v5 resources (REQ-BRZ-03),
   but the producer adapted them to canonical records before publishing. So Kafka
   carried the platform's internal model, not what a real TMF source would send.
@@ -507,4 +508,41 @@ Consequences. Status: `Accepted` unless noted.
     until the contract changes, which is intended.
   - The old topics (`parties`, `usage.voice`, …) and their Avro subjects are
     retired: the CRs are deleted at migration, and the subjects are left unused.
+
+### ADR-0032 — Raw Bronze; Silver conforms; customers and payer as canonical links
+- **Status:** Accepted (2026-10-03). Revises ADR-0031's "adapter in the consumer"; its
+  wire contract stands.
+- **Context:** In the medallion architecture Bronze keeps the source data as received
+  and Silver conforms it. Since ADR-0031 the consumer adapted TMF events to canonical
+  records before Bronze, so Bronze lost everything the profile doesn't map (`href`,
+  unmapped characteristics, event metadata), a mapping bug couldn't be repaired by
+  replay, valid events were dead-lettered for Silver-level reasons, and Silver kept an
+  arbitrary version of a party. The canonical model also didn't separate the billing
+  account's payer from the customer relationship.
+- **Decision:**
+  - **Raw Bronze.** One Iceberg table per topic (`bronze.tmf_<resource>`), one row per
+    event: the message value verbatim (`payload`, JSON text) and its envelope and Kafka
+    metadata as columns. The consumer only lands; it dead-letters only messages it
+    can't store.
+  - **Silver conforms** (`transforms/conform.py`): schema, tenant, the mapping profile's
+    adapter and the canonical Avro contract. Failures go to `silver.quarantine` (no
+    payload, no values in reasons) and the run continues. Reference entities use the
+    latest version per id by `event_time`; facts are conformed per micro-batch with
+    `mapInPandas`.
+  - **Canonical model.** `accounts` becomes `billing_accounts`, referencing the paying
+    party (`payer_party_id`, TMF `relatedParty` role `payer`). `customers` is an entity
+    (TMF629 Customer, the party role `customer`) with the segment and since-date;
+    agreements carry `customer_id`. New Silver dimensions `dim_customer`,
+    `dim_billing_account` and `dim_product`; `dim_subscriber` carries `customer_id`,
+    the customer's `segment` and `customer_tenure_days`.
+  - **Feature rename.** `account_tenure_days` becomes `customer_tenure_days` in the
+    feature contract, Gold, the credit model and the API; the API refuses unknown
+    feature names with 422.
+- **Consequences:**
+  - Bronze is larger (JSON payloads), compressed by Parquet; conforming costs move to
+    Silver.
+  - Models trained before the rename can't score renamed Gold: both are retrained after
+    migration. The values are unchanged, so the metrics are too.
+  - `idp migrate-lake` (legacy Parquet to canonical Iceberg Bronze) is removed: Silver
+    reads only raw tables. A legacy lake is reset and re-streamed instead.
 

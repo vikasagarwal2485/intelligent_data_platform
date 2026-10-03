@@ -37,7 +37,7 @@ def test_pipeline_persists_gold_and_artifacts(pipeline_result):
     # Every layer's tables were committed to the lake's Iceberg catalog ...
     for layer, table in (("gold", "credit_features"), ("gold", "fraud_features"),
                          ("gold", "credit_scores"), ("gold", "fraud_scores"),
-                         ("silver", "dim_subscriber"), ("bronze", "parties")):
+                         ("silver", "dim_subscriber"), ("bronze", "tmf_party")):
         assert catalog.table_exists(cfg, layer, table), (layer, table)
         # ... with their data under the layer's own directory
         assert catalog.table_location(cfg, layer, table).startswith((tmp_path / layer).as_uri())

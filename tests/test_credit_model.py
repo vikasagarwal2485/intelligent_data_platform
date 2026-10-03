@@ -16,7 +16,7 @@ def test_heuristic_increases_with_recharge():
     import pandas as pd
     df = pd.DataFrame({
         "recharge_avg_amount": [10, 100],
-        "account_tenure_days": [400, 400],
+        "customer_tenure_days": [400, 400],
         "recharge_success_rate": [1.0, 1.0],
         "is_company": [0, 0],
     })
