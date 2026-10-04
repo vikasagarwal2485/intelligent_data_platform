@@ -27,8 +27,9 @@ event is published.
 
 Each message SHALL be keyed by the subscriber's natural key (the MSISDN) where the
 resource carries one, and by the resource id otherwise. Customer messages SHALL be
-keyed by the customer id. The `customer` topic SHALL be log-compacted, keeping the
-latest event of each customer. The producer SHALL publish a tenant's customers
+keyed by the customer id. Every topic, `customer` included, SHALL use the delete
+cleanup policy with the platform's retention: Bronze keeps every event, and Silver
+resolves customers from it (REQ-SLV-09), so no topic is log-compacted. The producer SHALL publish a tenant's customers
 before the resources that reference them. It SHALL work one tenant at a time to
 bound memory.
 
@@ -96,6 +97,11 @@ any file was rejected.
 #### Scenario: SCN-STR-01.8 — Stable event ids
 - **WHEN** the same resource is published twice
 - **THEN** both messages carry the same `eventId`
+
+#### Scenario: SCN-STR-01.9 — Customer topic like the others
+- **WHEN** the topics are created or re-applied (`make topics`)
+- **THEN** `t.<tenant>.customer` has the delete cleanup policy and the same retention
+  as the other resource topics, and its message count is reported like theirs
 
 ### Requirement: REQ-STR-03 — Avro schema contracts
 The platform SHALL keep two contracts:

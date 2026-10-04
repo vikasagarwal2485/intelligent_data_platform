@@ -246,6 +246,12 @@ Each Spark stage SHALL run with an explicit resource profile from configuration:
 - driver cores, memory and memory overhead
 - executor cores, memory and memory overhead
 - either a fixed executor count or dynamic-allocation bounds
+- its shuffle parallelism (`shuffle_partitions`), by default twice its executor
+  cores (instances × cores), or twice the local cores when it runs locally
+
+Every shuffle of the stage, the streaming micro-batches included, SHALL use the
+profile's shuffle parallelism. A stage SHALL spread its row-wise Python work (such
+as Silver's conform step) over all its executor cores.
 
 Every driver and executor container's memory limit SHALL cover its JVM heap plus
 the declared overhead. A stage's capacity SHALL grow by adding executors, without
@@ -278,3 +284,13 @@ there at build time rather than keep its own.
   (`make spark-manifests`)
 - **THEN** only `deploy/app/spark/<stage>.yaml` changes, it matches the profile, and
   the next DAG image build (`make airflow-reload`) submits that same manifest
+
+#### Scenario: SCN-ORC-07.5 — Shuffle parallelism follows the profile
+- **WHEN** Silver runs with a profile of 2 executors of 1 core each, after a full
+  refresh
+- **THEN** its shuffle stages, the streaming fact merges included, run 4 tasks rather
+  than Spark's default 200, and conforming a fact batch runs on both executors
+
+#### Scenario: SCN-ORC-07.6 — Explicit override
+- **WHEN** a profile sets `shuffle_partitions: 16`
+- **THEN** the stage's shuffles use 16 partitions

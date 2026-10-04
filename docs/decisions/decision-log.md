@@ -726,7 +726,7 @@ followed but that had no ADR.
 
 ### ADR-0036 — Spark parallelism from the stage profile; shared Gold aggregates; no compacted topics
 - **Status:** Accepted (2026-10-03) — change `silver-performance-and-customer-topic`
-  (implemented; not yet archived)
+  (archived 2026-10-04)
 - **Context:** `make silver` took about 4 minutes and `make gold` about 3 for 150
   agreements and ~35K events per tenant. Spark's default 200 shuffle partitions made
   every streaming micro-batch run hundreds of near-empty tasks (Structured Streaming
