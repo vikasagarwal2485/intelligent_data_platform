@@ -25,4 +25,16 @@ ml/artifacts/
 
 # Local infra / secrets
 .env
+.env.*
+!.env.example
 *.local.yaml
+
+# Operator workstation files
+.DS_Store
+.idea/
+.vscode/
+.ruff_cache/
+.cache/
+spark-warehouse/
+derby.log
+metastore_db/

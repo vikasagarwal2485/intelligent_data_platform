@@ -10,25 +10,26 @@ and Kubernetes-native (local minikube, production AWS EKS).
 
 ## Source data (ground truth)
 
-Reference records live in [`data_samples/`](../../data_samples): one TM Forum Open
+Reference records live in [`data_samples/`](../data_samples/): one TM Forum Open
 API v5 resource per landing file type (Individual, Organization, Customer,
 BillingAccount, Agreement, Product, AppliedCustomerBillingRate, TopupBalance,
-ProductUsage). The landing adapter maps them to the canonical entities (`parties`,
-`accounts`, `agreements`, `products`, voice/data usage, recharges, fees) with the
-profile in `config/tmf/profiles/`; everything downstream uses the canonical model.
+ProductUsage). Silver maps their events to the canonical entities (`parties`,
+`customers`, `billing_accounts`, `agreements`, `products`, voice/data usage,
+recharges, fees) with the profile in `config/tmf/profiles/`; everything downstream
+uses the canonical model.
 
 ## Tech stack & standing choices (see decisions/decision-log.md)
 
 | Concern | Choice |
 |---|---|
-| Language / prototype engine | Python 3.11, pandas, scikit-learn (unit-testable without a cluster) |
-| Production engines (target) | Spark (batch), Flink (real-time, deferred), Apache Iceberg |
+| Language / engines | Python 3.11 and JDK 17 baseline; Spark for Silver/Gold, pandas/scikit-learn for bounded ML |
+| Lake | Apache Iceberg for Bronze/Silver/Gold; Flink real-time execution is deferred |
 | Object store | MinIO (local) / AWS S3 (prod); one bucket per layer: `idp-bronze`/`idp-silver`/`idp-gold` |
-| Streaming | Apache Kafka (open source, Strimzi operator) + Apicurio Schema Registry (Avro) |
-| Catalog | Nessie (Iceberg) |
+| Streaming | Apache Kafka (open source, Strimzi operator) + Apicurio Schema Registry (TM Forum JSON Schema wire contracts) |
+| Catalog | SQL/JDBC Iceberg catalog: SQLite locally, PostgreSQL in the cluster; Nessie provisioned but not active |
 | Query | Trino |
 | Serving DB | TimescaleDB |
-| Identity / RBAC | Keycloak (OIDC) + OPA |
+| Identity / RBAC | Keycloak OIDC for scoring API tenant claims; Trino read-only analytics identity; Kubernetes RBAC |
 | Orchestration | Apache Airflow |
 | Experiment/registry | MLflow |
 | Observability | Prometheus + Grafana |
@@ -40,7 +41,8 @@ profile in `config/tmf/profiles/`; everything downstream uses the canonical mode
 
 - Package lives in `src/idp/` (installed via `pip install -e .`). Sub-packages:
   `common` (config, tenancy, pii, storage), `synthetic`, `ingestion`,
-  `curation`, `features`, `ml`, `streaming`, `serving`; plus `pipeline.py`
+  `transforms` (Spark Silver/Gold/score/publish), `ml`, `streaming`, `serving`,
+  `mcp`; plus `pipeline.py`
   (stage functions) and `cli.py` (`idp` entrypoint).
 - Every dataset carries a leading `tenant_id` partition column — the isolation
   boundary. All lake reads must be tenant-scoped.
@@ -49,7 +51,8 @@ profile in `config/tmf/profiles/`; everything downstream uses the canonical mode
   per tenant so they still join.
 - Each medallion stage is an **independent function** that reads its input layer
   and writes its output layer — no cross-stage chaining inside one job.
-  `to_bronze` / `to_silver` / `to_gold` / `train`; `run()` only *composes* them
+  `to_bronze` / `to_silver` / `to_gold` / `train` / `to_scores` / `publish_serving`;
+  `run()` only *composes* them
   locally for dev/testing.
 - Config is `config/platform.yaml` with env overrides (`IDP_*`); S3 vs local is
   driven by `IDP_S3_ENDPOINT`.
@@ -57,10 +60,11 @@ profile in `config/tmf/profiles/`; everything downstream uses the canonical mode
 ## Commands
 
 ```bash
-make install      # venv + editable install + dev deps
+make install PYTHON=python3.11  # venv + editable install + dev deps (JDK 17)
+make check        # workspace/config/dependency checks
 make test         # pytest (must stay green after every phase)
-make run          # local compose: generate -> bronze -> silver -> train -> gold
-idp produce|consume|silver|gold|publish|train|serve   # individual stages
+make run          # local pipeline: generate -> bronze -> silver -> labels -> gold -> train -> score
+.venv/bin/idp --help            # individual stage commands
 ```
 
 `idp publish` materializes Gold into TimescaleDB (`gold.*`, indexed by
@@ -74,4 +78,8 @@ Deployment: `make mk-up`, `make image`, `kubectl apply -k deploy/platform/overla
 1. All tasks in the phase's `tasks.md` are checked.
 2. Every scenario in the capability specs the phase touches is satisfiable.
 3. `make test` is green; new behavior has tests.
-4. No decision in `decisions/decision-log.md` is violated.
+4. No current decision in `decisions/decision-log.md` is violated.
+
+Phases 0–15 are archived under `openspec/changes/archive/`; use the
+[specification guide](README.md) for the current change workflow and
+[operator runbook](../internal/runbook.md) for setup and verification details.

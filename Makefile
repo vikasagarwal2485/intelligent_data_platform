@@ -1,8 +1,13 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
-VENV := .venv
+PYTHON ?= python3
+VENV ?= .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
+# Spark workers must use the same Python as the driver, even without activating
+# the venv. A bare PY=python (CI) is resolved through that runner's PATH.
+export PYSPARK_PYTHON ?= $(if $(findstring /,$(PY)),$(abspath $(PY)),$(PY))
+export PYSPARK_DRIVER_PYTHON ?= $(PYSPARK_PYTHON)
 NAMESPACE_PLATFORM := idp-platform
 TENANTS := tenant-a tenant-b
 # MinIO client (mc): run it INSIDE the already-running MinIO server pod, which
@@ -24,13 +29,19 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 $(VENV): ## Create the virtualenv
-	python3 -m venv $(VENV)
+	$(PYTHON) -m venv $(VENV)
 
 .PHONY: install
 install: $(VENV) ## Install the package and dev dependencies (needs a JDK 11/17 for Spark)
 	@java -version >/dev/null 2>&1 || { echo "ERROR: a JDK 11/17 is required (Silver/Gold run on Spark). Install e.g. Temurin 17 and set JAVA_HOME."; exit 1; }
 	$(PIP) install -q --upgrade pip
 	$(PIP) install -q -e ".[dev]"
+
+.PHONY: check
+check: ## Check dependencies, Python syntax, config syntax, shell scripts and workspace consistency
+	$(PY) -m pip check
+	$(PY) -m compileall -q src pipelines tests scripts docs/gen_traceability.py
+	$(PY) scripts/check_workspace.py
 
 .PHONY: test
 test: ## Run the test suite
@@ -61,7 +72,7 @@ TRINO_TEST_ENV := IDP_CATALOG_TYPE=sql IDP_CATALOG_NAME=lake \
 	IDP_TRINO_HOST=127.0.0.1 IDP_TRINO_PORT=18080
 .PHONY: trino-stack
 trino-stack: ## Start the compose Trino test stack (Trino + Postgres + MinIO) and wait until healthy
-	$(TRINO_COMPOSE) up -d --wait
+	$(TRINO_COMPOSE) up -d --wait --wait-timeout 300
 
 .PHONY: trino-stack-down
 trino-stack-down: ## Stop the compose Trino test stack and drop its data

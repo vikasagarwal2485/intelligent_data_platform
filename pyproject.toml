@@ -29,7 +29,7 @@ dependencies = [
     "mlflow-skinny==3.14.0",          # model registry client (REQ-ML-04), = the server version
     "boto3>=1.43.3,<1.43.47",         # MLflow S3 artifacts; botocore within aiobotocore's range
     "botocore>=1.43.3,<1.43.47",
-    "mcp>=1.2",
+    "mcp>=1.2,<2",                  # server uses the v1 FastMCP API
     # Single transformation engine for Silver/Gold (REQ-ORC-05); matches the
     # Spark 3.5 runtime. Needs a JDK 11/17 on the host (the image bundles a JRE).
     "pyspark==3.5.3",

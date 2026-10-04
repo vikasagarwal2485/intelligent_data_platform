@@ -1,82 +1,61 @@
-# Intelligent Data Platform — OpenSpec
+# Documentation and OpenSpec guide
 
-This directory is an [OpenSpec](https://github.com/Fission-AI/OpenSpec)-format
-specification of the Intelligent Data Platform, structured so an AI coding agent
-(e.g. Claude Code) can implement the platform **phase by phase, sequentially and
-autonomously**.
+The repository keeps current requirements in `openspec/` and explanatory documents
+in `docs/`. Start with the [product and deployment guide](../README.md),
+[repository instructions](../AGENTS.md) and [operator memory](../internal/README.md).
 
-It complements the two prose documents:
-- [`../architecture_and_implementation_plan.md`](../architecture_and_implementation_plan.md) — the reviewed architecture & plan
-- [`../../README.md`](../../README.md) — the current step-by-step guide
+## Sources
 
-## Layout
+| Location | Purpose |
+|---|---|
+| [architecture_and_implementation_plan.md](architecture_and_implementation_plan.md) | Reviewed architecture and original plan; some target designs are superseded |
+| [project.md](project.md) | Current project context and conventions |
+| [decisions/decision-log.md](decisions/decision-log.md) | Accepted ADRs; later entries amend earlier choices |
+| [../openspec/specs/](../openspec/specs/) | Current capability requirements and testable scenarios |
+| [../openspec/changes/](../openspec/changes/) | Active changes; inspect before starting new work |
+| [../openspec/changes/archive/](../openspec/changes/archive/) | Completed proposals and task history |
+| [roadmap.md](roadmap.md) | Historical phases 0–15, already archived |
+| [traceability.md](traceability.md) | Generated requirement → scenario → phase → code mapping |
+| [triggering.md](triggering.md) | Current manual and Airflow Spark stage triggers |
+| [../RELEASE_NOTES.md](../RELEASE_NOTES.md) | Unreleased work and development baseline notes |
 
-```
-docs/openspec/
-  project.md            # project context: mission, stack, conventions, commands
-  roadmap.md            # the ordered list of phases (which change to implement next)
-  specs/                # TARGET capability specs = the definition of done
-    <capability>/spec.md    #   Requirements (SHALL) + Scenarios (WHEN/THEN)
-  changes/              # one change proposal PER PHASE, implemented in order
-    phase-N-<slug>/
-      proposal.md            #   Why / What Changes / Impact / Spec Deltas
-      tasks.md               #   the actionable, checkable implementation checklist
-  decisions/
-    decision-log.md     # Architecture Decision Records (ADR log)
-```
+## Change workflow
 
-## How an agent should use this (the loop)
+1. Read the relevant capability spec and current ADRs. Inspect the code and tests
+   to establish the actual behavior. Use `openspec list --json` if the CLI is
+   installed; the files under `openspec/changes/` remain directly readable.
+2. For a substantial behavior change, create a proposal, spec deltas and tasks in
+   `openspec/changes/<change>/` using the existing OpenSpec tooling. Do not restart
+   archived phases. Housekeeping can follow the existing requirements directly.
+3. Implement the scoped tasks and update their checkboxes with completed work.
+   Preserve tenant isolation, privacy, stage boundaries and contract traceability.
+4. Run `make check`, the relevant tests and required integrations. Every touched
+   requirement's scenarios must be satisfied before claiming the change complete.
+5. Update current specs and the ADR log when the behavior or decision changes,
+   then archive the completed change under `openspec/changes/archive/`.
+6. Regenerate traceability after spec/proposal edits; update release notes and the
+   operator-memory handoff with evidence and remaining limits.
 
-1. Read [`project.md`](project.md) once for context and conventions.
-2. Read [`roadmap.md`](roadmap.md); pick the **lowest-numbered phase not yet done**.
-3. Open that phase's `changes/phase-N-<slug>/proposal.md` (why + what) and
-   `tasks.md` (the checklist).
-4. Implement the tasks in order. After each task, tick it in `tasks.md`
-   (`- [ ]` → `- [x]`).
-5. A phase is **done** when every scenario in the capability specs it touches
-   (listed under the proposal's *Spec Deltas*) is satisfied and `make test`
-   passes. Then move to the next phase.
-6. Consult [`decisions/decision-log.md`](decisions/decision-log.md) before making
-   any architectural choice — the ADRs are binding constraints.
+## Requirement conventions
 
-## Conventions used in the specs
-
-- **Requirements** use `SHALL` and are testable.
-- Every requirement has ≥1 **Scenario** in `WHEN`/`THEN` (Given/When/Then) form.
-
-### Traceability IDs
-
-Every requirement and scenario carries a **globally unique id** for traceability
-from specs → changes → code → tests.
-
-- **Requirement id:** `REQ-<CAP>-NN` (e.g. `REQ-SLV-02`).
-- **Scenario id:** `SCN-<CAP>-NN.M` (e.g. `SCN-SLV-02.1`), where `NN` is the
-  owning requirement and `M` the scenario index.
-
-Headings embed the id: `### Requirement: REQ-SLV-02 — <title>` /
-`#### Scenario: SCN-SLV-02.1 — <title>`.
-
-Capability codes (`<CAP>`):
+Requirements use `SHALL` and have one or more `WHEN`/`THEN` scenarios. Each has a
+stable ID: `REQ-<CAP>-NN` for requirements and `SCN-<CAP>-NN.M` for scenarios.
+Headings embed those IDs; proposals cite the requirements they implement.
 
 | Code | Capability | Code | Capability |
 |---|---|---|---|
-| `FND` | foundation | `ML` | ml-models |
-| `SYN` | synthetic-data | `SRV` | serving-api |
-| `BRZ` | bronze-ingestion | `STR` | streaming-kafka |
-| `SLV` | silver-curation | `PLT` | platform-deployment |
-| `GLD` | gold-features | `ORC` | orchestration |
-| `MCP` | mcp-analytics | | |
+| FND | foundation | ML | ml-models |
+| SYN | synthetic-data | SRV | serving-api |
+| BRZ | bronze-ingestion | STR | streaming-kafka |
+| SLV | silver-curation | PLT | platform-deployment |
+| GLD | gold-features | ORC | orchestration |
+| MCP | mcp-analytics | | |
 
-Each `changes/phase-N/proposal.md` **What Changes** item cites the `REQ-*` id(s)
-it implements, so every implementation task traces back to a spec requirement and
-its scenarios.
-
-### Traceability matrix
-
-[`traceability.md`](traceability.md) is a generated, at-a-glance view mapping
-**Requirement → Scenarios → Phase → Code**. Regenerate it after editing any spec
-or proposal:
+Regenerate the matrix from the repository root:
 
 ```bash
-python docs/openspec/gen_traceability.py
+python docs/gen_traceability.py
 ```
+
+The generator retains historical code references and marks removed paths. It
+includes active and archived phase proposals; it does not replace scenario tests.

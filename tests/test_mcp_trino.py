@@ -19,6 +19,7 @@ fetched) and the read-only identity.
 from __future__ import annotations
 
 import math
+import os
 from typing import Any
 
 import numpy as np
@@ -41,15 +42,21 @@ LAYERS = ("bronze", "silver", "gold")
 BIG = 10_000                       # anomaly `limit` for set comparisons (no truncation)
 
 
+def _unavailable(message: str) -> None:
+    if os.environ.get("IDP_REQUIRE_TRINO_TESTS") == "1":
+        pytest.fail(message, pytrace=False)
+    pytest.skip(message)
+
+
 def _stack_cfg():
     cfg = load_config()
     if not (cfg.trino["port"] == STACK["trino"] and STACK["catalog"] in cfg.catalog["uri"]
             and cfg.s3.get("endpoint") == STACK["s3"] and cfg.catalog.get("name") == "lake"):
-        pytest.skip("needs the compose Trino stack: run `make mcp-trino-test`")
+        _unavailable("needs the compose Trino stack: run `make mcp-trino-test`")
     try:
         sql.query(cfg, "SELECT 1 AS tenant_id")
     except sql.LakeReadError as e:
-        pytest.skip(f"compose Trino not reachable ({e}); `make trino-stack` starts it")
+        _unavailable(f"compose Trino not reachable ({e}); `make trino-stack` starts it")
     return cfg
 
 
@@ -319,7 +326,9 @@ def test_the_analytics_identity_is_read_only(lake):
     for stmt in ("INSERT INTO silver.dim_subscriber (tenant_id) VALUES ('x')",
                  "DELETE FROM gold.credit_scores WHERE tenant_id = 'tenant_a'",
                  "CREATE TABLE silver.x (a int)",
-                 "SELECT count(*) AS tenant_id FROM bronze.parties"):
+                 # The fixture seeds raw Bronze; use an existing table so this
+                 # checks permissions rather than TABLE_NOT_FOUND.
+                 "SELECT count(*) AS tenant_id FROM bronze.tmf_party"):
         with pytest.raises(sql.LakeReadError, match="access denied"):
             sql.query(lake, stmt)
 

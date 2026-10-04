@@ -14,3 +14,10 @@ pipelines
 *.egg-info
 .pytest_cache
 *.parquet
+internal
+AGENTS.md
+.github
+.claude
+.env
+.env.*
+**/.DS_Store

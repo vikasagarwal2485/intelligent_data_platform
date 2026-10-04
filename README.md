@@ -1,5 +1,12 @@
 # Intelligent Data Platform
 
+Developer entry points: [release notes](RELEASE_NOTES.md),
+[repository instructions](AGENTS.md), [operator memory](internal/README.md),
+and [specification guide](docs/README.md). For a workspace matching CI, use Python
+3.11 and JDK 17, then `make install PYTHON=python3.11`, `make check` and `make test`.
+The [CI workflow](.github/workflows/ci.yml) also exercises real PostgreSQL publish
+and the disposable Trino integration stack.
+
 ## Table of Contents
 1. [Introduction](#1-introduction)
    - [1.1 What this project is](#11-what-this-project-is)
@@ -325,8 +332,14 @@ deploy/                      # split by owning team (ADR-0018)
     spark/                   #     the Spark stages' SparkApplications (the one copy; `make
                              #     spark-manifests`), also baked into the Airflow DAG image
 pipelines/airflow/dags/      # Airflow DAGs for the batch pipeline (Spark manifests come from deploy/app/spark/)
-tests/                       # 63 pytest tests across every layer
-docs/                        # architecture & implementation plan
+tests/                       # pytest coverage across every layer, including golden fixtures
+docs/                        # architecture, decisions, specification guide and traceability
+openspec/                    # current capability specs, active changes and archived history
+internal/                    # persistent operator memory: map, decisions, runbook and handoff
+AGENTS.md                    # repository-specific coding and operating instructions
+RELEASE_NOTES.md             # unreleased changes and development baseline notes
+scripts/check_workspace.py   # metadata, configuration, shell and onboarding checks
+.github/workflows/ci.yml      # workspace, default/PostgreSQL and Trino CI jobs
 Makefile                     # all workflows (run `make help`)
 Dockerfile                   # scoring-api / jobs image (idp package)
 ```

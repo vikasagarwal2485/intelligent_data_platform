@@ -8,10 +8,9 @@ A telecom data-lakehouse prototype implementing the medallion architecture
 
 See ``docs/architecture_and_implementation_plan.md`` for the full design.
 
-The prototype uses pandas as the compute engine so the full pipeline is unit
-testable without a Spark/Kafka cluster. The production engines (Spark, Flink,
-Kafka, Iceberg) are deployed via ``deploy/`` and documented in the plan; the
-Python modules here encode the *same* canonical logic.
+Silver and Gold use Spark in local tests and in Kubernetes. Bronze, Silver and
+Gold are Iceberg tables; pandas and scikit-learn serve the bounded ML workloads.
+See ``docs/decisions/decision-log.md`` for the current architecture decisions.
 """
 
 __version__ = "0.1.0"
