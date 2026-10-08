@@ -1,10 +1,9 @@
-"""Multi-tenancy & data-isolation helpers (plan section 1.5).
+"""Multi-tenancy & data-isolation helpers.
 
-In production, isolation is enforced physically (per-tenant Kafka ACLs, S3
-prefixes, Iceberg namespaces, Trino+OPA row policies). In this prototype the
-same contract is enforced in code: every dataset carries a ``tenant_id`` column
-and all reads must go through :func:`scope_to_tenant`, which guarantees a caller
-can never see another tenant's rows.
+Every dataset carries ``tenant_id`` as its leading partition column, and reads
+go through :func:`scope_to_tenant`, which guarantees a caller never sees another
+tenant's rows. Physical controls beyond that (per-tenant Kafka ACLs, bucket
+prefixes, row-level policies in Trino) are not deployed; see ADR-0005.
 """
 from __future__ import annotations
 

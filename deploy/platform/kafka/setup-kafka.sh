@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # One-shot: deploy the Kafka cluster + Schema Registry, then create topics and
-# register Avro schemas (plan section 3). Run AFTER `make platform-services` (which installs
-# the Strimzi operator).
+# register each topic's wire contract, its TM Forum event JSON Schema
+# (register-schemas.sh). Run AFTER `make platform-services` (which installs the
+# Strimzi operator).
 #
-# Usage:  bash deploy/kafka/setup-kafka.sh [namespace]
+# Usage:  bash deploy/platform/kafka/setup-kafka.sh [namespace]
 set -euo pipefail
 
 NS="${1:-idp-platform}"
@@ -94,7 +95,7 @@ bash "${HERE}/create-topics.sh" "${NS}"
 echo "==> 4/5 Wait for Schema Registry"
 kubectl -n "${NS}" rollout status deploy/apicurio-registry --timeout=300s
 
-echo "==> 5/5 Register Avro schemas"
+echo "==> 5/5 Register the topics' TM Forum JSON Schemas"
 bash "${HERE}/register-schemas.sh" "${NS}"
 
 echo "==> Done."

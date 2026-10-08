@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Create per-tenant Kafka topics as Strimzi KafkaTopic CRs (plan 3.1).
+# Create per-tenant Kafka topics as Strimzi KafkaTopic CRs.
 # The Strimzi Topic Operator reconciles these into real Kafka topics.
 #
-# Usage:  bash deploy/kafka/create-topics.sh [namespace]
+# Usage:  bash deploy/platform/kafka/create-topics.sh [namespace]
 set -euo pipefail
 
 NS="${1:-idp-platform}"

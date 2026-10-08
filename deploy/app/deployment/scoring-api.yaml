@@ -1,4 +1,4 @@
-# The FastAPI scoring service (plan 5.6 / 6.6). Stateless; serves the model
+# The FastAPI scoring service. Stateless; serves the model
 # registry's `champion` versions (MLflow, IDP_MLFLOW_TRACKING_URI below; artifacts in
 # s3://idp-ml/mlflow via the IDP_S3_* env) and re-checks the champion every
 # mlflow.refresh_seconds, so a newly promoted model is served without a restart.

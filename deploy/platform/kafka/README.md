@@ -1,6 +1,6 @@
 # Kafka topics & schema registration
 
-Step-by-step for standing up the streaming layer (plan section 3): an Apache
+Step-by-step for standing up the streaming layer: an Apache
 Kafka cluster (Strimzi), per-tenant topics carrying TM Forum create events, and an
 Apicurio Schema Registry holding each topic's TMF JSON Schema (the wire contract).
 The Avro contracts in [`config/avro/`](../../../config/avro) describe the canonical
@@ -8,7 +8,7 @@ records Silver conforms to (`canonical/`) and Silver's tables (`silver/`), not t
 wire.
 
 ```
-deploy/kafka/
+deploy/platform/kafka/
   kafka-cluster.yaml     # Strimzi Kafka (KRaft, 1 node) + KafkaNodePool + entityOperator
   schema-registry.yaml   # Apicurio Registry (Confluent-compatible API)
   create-topics.sh       # KafkaTopic CRs for each tenant x TMF resource
@@ -56,7 +56,7 @@ deploy/kafka/
 
 ## TL;DR
 ```bash
-make kafka      # = bash deploy/kafka/setup-kafka.sh idp-platform
+make kafka      # = bash deploy/platform/kafka/setup-kafka.sh idp-platform
 ```
 This deploys the cluster + registry, waits for readiness, creates the topics and
 registers the schemas. The detailed steps below explain what it does.
@@ -65,7 +65,7 @@ registers the schemas. The detailed steps below explain what it does.
 
 ## Step 1 — Deploy the Kafka cluster
 ```bash
-kubectl apply -n idp-platform -f deploy/kafka/kafka-cluster.yaml
+kubectl apply -n idp-platform -f deploy/platform/kafka/kafka-cluster.yaml
 kubectl -n idp-platform wait kafka/idp-kafka --for=condition=Ready --timeout=600s
 ```
 - Creates a single-node KRaft Kafka named `idp-kafka` with the **Topic Operator**
@@ -91,7 +91,7 @@ kubectl -n idp-platform wait kafka/idp-kafka --for=condition=Ready --timeout=600
 
 ## Step 2 — Create the topics
 ```bash
-make topics      # or: bash deploy/kafka/create-topics.sh idp-platform
+make topics      # or: bash deploy/platform/kafka/create-topics.sh idp-platform
 ```
 Creates one `KafkaTopic` per **tenant × TM Forum resource**, named
 `t.<tenant>.<resource>`. Each carries the resource's TMF create events
@@ -126,7 +126,7 @@ kubectl -n idp-platform exec -it idp-kafka-dual-role-0 -- \
 
 ## Step 3 — Deploy the Schema Registry
 ```bash
-kubectl apply -n idp-platform -f deploy/kafka/schema-registry.yaml
+kubectl apply -n idp-platform -f deploy/platform/kafka/schema-registry.yaml
 kubectl -n idp-platform rollout status deploy/apicurio-registry
 ```
 Apicurio exposes a **Confluent-compatible** API at `/apis/ccompat/v7`, so any
@@ -185,7 +185,7 @@ partitions/configs, produce/consume test messages, and view registered schemas.
 
 Payloads are plain UTF-8 JSON TMF create events. A NiFi or other producer can
 validate them against the `<topic>-value` subject (schema type JSON) through the
-registry URL. The `BACKWARD` compatibility mode (plan section 3) lets schemas
+registry URL. The `BACKWARD` compatibility mode lets schemas
 evolve safely.
 
 ## Message retention & on-demand purge

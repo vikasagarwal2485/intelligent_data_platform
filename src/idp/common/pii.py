@@ -1,4 +1,4 @@
-"""GDPR PII handling (plan section 1.5).
+"""GDPR PII handling.
 
 Implements deterministic, per-tenant-salted tokenization so PII (MSISDN, IMSI,
 IMEI, phone, email) can be used as stable join keys in the lakehouse without

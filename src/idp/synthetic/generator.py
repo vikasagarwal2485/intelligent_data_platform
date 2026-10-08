@@ -1,4 +1,4 @@
-"""Synthetic data generator (plan section 3.0).
+"""Synthetic data generator.
 
 Produces referentially-consistent canonical records (parties, customers, billing
 accounts, agreements, products, plus voice/data usage, recharge and fee-charge

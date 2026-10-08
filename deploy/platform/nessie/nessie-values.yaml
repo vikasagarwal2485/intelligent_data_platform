@@ -5,8 +5,8 @@
 #    external database -> the pod crashes on startup without one;
 #  * the default memory limit can be too small for the Quarkus JVM -> OOM.
 #
-# This pins an in-memory version store (fine for a prototype; catalog metadata
-# is not persisted across restarts) and gives it enough memory.
+# This pins an in-memory version store (Nessie catalogues none of the lake's
+# tables, ADR-0028, so nothing is lost on restart) and gives it enough memory.
 #
 # Apply/upgrade:
 #   helm upgrade --install nessie nessie/nessie -n idp-platform -f deploy/nessie-values.yaml

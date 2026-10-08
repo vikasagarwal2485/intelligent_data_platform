@@ -1,4 +1,5 @@
-# RBAC roles aligned to the personas in plan 1.5. In production these bind to
+# RBAC roles for the platform personas (credit and fraud data scientists,
+# analysts). In production these bind to
 # Keycloak OIDC groups (tenant_id + role claims). Here they are namespace-scoped
 # Roles so a tenant's data scientists can only act within that tenant namespace.
 apiVersion: rbac.authorization.k8s.io/v1

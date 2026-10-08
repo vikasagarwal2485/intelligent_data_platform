@@ -1,4 +1,4 @@
-"""Gold feature engineering: Silver -> credit/fraud feature tables, on Spark (plan 4).
+"""Gold feature engineering: Silver -> credit/fraud feature tables, on Spark.
 
 Pure DataFrame functions. Each feature table is keyed by ``(tenant_id,
 service_id)`` — one row per subscriber in ``dim_subscriber`` who granted analytics
@@ -60,7 +60,7 @@ def _count_if(cond: Any) -> Any:
 
 
 def recharge_aggregates(recharge: Any, windows, ref: int | None = None) -> Any:
-    """Per-subscriber recharge ability/reliability aggregates (plan 4.2). ``ref`` is
+    """Per-subscriber recharge ability/reliability aggregates. ``ref`` is
     the reference time (read from the table when not given)."""
     from pyspark.sql import functions as F
 
@@ -86,7 +86,7 @@ def recharge_aggregates(recharge: Any, windows, ref: int | None = None) -> Any:
 
 
 def usage_aggregates(usage: Any, windows, ref: int | None = None) -> Any:
-    """Per-subscriber usage/spend and velocity aggregates (plan 4.2/4.3). ``ref`` is
+    """Per-subscriber usage/spend and velocity aggregates. ``ref`` is
     the reference time (read from the table when not given)."""
     from pyspark.sql import functions as F
 
@@ -180,7 +180,7 @@ def _select(df: Any, features: list[str]) -> Any:
 
 def build_credit_features(silver: dict[str, Any], windows=(30, 90),
                           shared: dict[str, Any] | None = None) -> Any:
-    """Credit feature table (plan 4.2): recharge ability/reliability, spend, tenure, fees.
+    """Credit feature table: recharge ability/reliability, spend, tenure, fees.
 
     Only subscribers with analytics consent get a row (REQ-FND-05). ``shared`` are
     the run's :func:`shared_aggregates` (built here when not given).
@@ -205,7 +205,7 @@ def build_credit_features(silver: dict[str, Any], windows=(30, 90),
 
 def build_fraud_features(silver: dict[str, Any], windows=(30, 90),
                          shared: dict[str, Any] | None = None) -> Any:
-    """Fraud feature table (plan 4.3): velocity, traffic asymmetry, roaming, recharge anomalies.
+    """Fraud feature table: velocity, traffic asymmetry, roaming, recharge anomalies.
 
     Only subscribers with analytics consent get a row (REQ-FND-05). ``shared`` are
     the run's :func:`shared_aggregates` (built here when not given).

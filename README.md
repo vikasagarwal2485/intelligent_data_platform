@@ -46,7 +46,7 @@ layers with the same code: a **batch** path (local, Spark `local[*]`) and a
 Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) into the
 **`idp-platform`** namespace.
 
-| Service | Purpose | Status in prototype |
+| Service | Purpose | Status |
 |---|---|---|
 | **MinIO** | S3-compatible object store; holds the lake (`idp-bronze` / `idp-silver` / `idp-gold`) | **Active** |
 | **Apache Kafka** (Strimzi) | Event streaming backbone for the ingestion path | **Active** (streaming mode) |
@@ -146,9 +146,9 @@ scoring API loads the same champions for on-demand calls.
 
 ### 1.5 Logical architecture
 
-The layers and the components that implement them. This is the design of
-[`docs/architecture_and_implementation_plan.md`](docs/architecture_and_implementation_plan.md)
-§1.2 as built; the table after the diagram lists where the build differs from the plan.
+The layers and the components that implement them. The table after the diagram
+lists where the build departs from the original design choices; the decision log
+(`docs/decisions/decision-log.md`) records why.
 
 ```mermaid
 flowchart TB
@@ -218,7 +218,7 @@ flowchart TB
     KAFKA & API -.metrics.-> MON
 ```
 
-| Plan (§1.2) | As built |
+| Original design choice | As built |
 |---|---|
 | Apache NiFi lands, routes and validates files | `idp produce --from-landing` validates the TM Forum landing files and publishes them; a rejected file stops the run |
 | Avro contracts in the Schema Registry | The wire contract is each topic's TMF JSON Schema in Apicurio; the canonical Avro contracts are enforced by Silver's conform step (ADR-0031, ADR-0032) |
@@ -325,8 +325,8 @@ deploy/                      # split by owning team (ADR-0018)
     spark/                   #     the Spark stages' SparkApplications (the one copy; `make
                              #     spark-manifests`), also baked into the Airflow DAG image
 pipelines/airflow/dags/      # Airflow DAGs for the batch pipeline (Spark manifests come from deploy/app/spark/)
-tests/                       # 63 pytest tests across every layer
-docs/                        # architecture & implementation plan
+tests/                       # pytest suite across every layer
+docs/                        # decision log (ADRs), project context, roadmap, traceability
 Makefile                     # all workflows (run `make help`)
 Dockerfile                   # scoring-api / jobs image (idp package)
 ```
@@ -446,8 +446,8 @@ Mac through minikube is unreliable), and both stop at Bronze.
   Iceberg Bronze tables on MinIO (Bronze only; Silver conforms them, and Gold is
   a separate stage).
 
-**Or stream through the landing zone** (source files → landing → Kafka → Bronze,
-the path the architecture plan describes for NiFi):
+**Or stream through the landing zone** (source files → landing → Kafka → Bronze;
+the landing zone and its checks stand in for a file-ingestion tool such as NiFi):
 ```bash
 make stream-from-landing   # generate -> s3://idp-landing -> produce --from-landing -> consume
 ```
@@ -614,9 +614,8 @@ make minio-reset                                # clean re-run: recreate the buc
   ConfigMaps once (`airflow variables delete idp_silver_engine` / `idp_gold_engine`
   in the scheduler; `kubectl -n idp-app delete configmap idp-silver-spark
   idp-gold-spark`) — see [`deploy/README.md`](deploy/README.md).
-- **Full step-by-step (both):** [`docs/triggering.md`](docs/triggering.md).
 - EKS: `deploy/platform/overlays/aws` (ECR, IRSA, S3, External Secrets) via Argo CD; the
-  stages use the same Iceberg JDBC catalog (on RDS Postgres). See plan §2B.
+  stages use the same Iceberg JDBC catalog (on RDS Postgres).
 
 ---
 
@@ -845,7 +844,7 @@ already been merged into that fact.
 |---|---|
 | `metadata` | the stream's id |
 | `sources/0/offsets/0` | where the stream **started**: the first Bronze snapshot it saw, `{"snapshot_id": 323716817858676295, "position": 0}` |
-| `offsets/<n>` | the end point of batch `n`: the Spark settings, then `{"snapshot_id": 323716817858676295, "position": 2}`. That's the current snapshot of `bronze.recharge_events`; `position` 2 means both of its files have been read |
+| `offsets/<n>` | the end point of batch `n`: the Spark settings, then `{"snapshot_id": 323716817858676295, "position": 2}`. That's the current snapshot of `bronze.tmf_topup_balance`; `position` 2 means both of its files have been read |
 | `commits/<n>` | written only **after** batch `n`'s `MERGE` committed. An `offsets/<n>` without `commits/<n>` means the batch failed, and the next run redoes it (exactly once) |
 
 On the next `idp silver`, each stream resumes after its last committed offset and
@@ -1014,8 +1013,8 @@ can't silently score as 0.
 (`idp publish`, stage 4) mirrors the Gold tables into **TimescaleDB**
 (`serving/timescale.py`), replacing each table and indexing it by
 `(tenant_id, service_id)`. Dashboards/APIs then read a ready-made score with a
-single indexed lookup instead of recomputing — the plan's Gold serving layer
-(Q4/Q6). The `GET /serving/...` endpoint above reads from it.
+single indexed lookup instead of recomputing — the Gold serving layer
+(ADR-0002). The `GET /serving/...` endpoint above reads from it.
 
 **Two kinds of inference call.** *Inference* is running a trained model on a
 subscriber's features to get a score. The platform offers it two ways:

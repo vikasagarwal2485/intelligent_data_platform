@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/telecom-statement/1.0/credit-profile.schema.json",
+  "title": "Telecom Statement 1.0: credit profile (CreditChecking, one-time)",
+  "description": "What a lender needs to underwrite: the subscriber's latest profile, plan, recharges, operator services, payment methods, and for postpaid the invoices, payments and debt collection, over the consented date range (6 to 12 months). Monthly aggregates only: no individual usage or recharge events, no counterparties, contacts, locations or content, and no identity attributes.",
+
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "statementType": { "const": "CREDIT_PROFILE" },
+        "consent": {
+          "properties": {
+            "purposeCode": { "const": "CREDIT_UNDERWRITING" },
+            "dpvPurpose": { "const": "dpv:CreditChecking" },
+            "fetchType": { "const": "ONETIME" }
+          }
+        },
+        "body": { "$ref": "#/$defs/body" }
+      }
+    },
+    {
+      "description": "Prepaid numbers carry recharges and no postpaid block; postpaid numbers the reverse.",
+      "if": { "properties": { "subject": { "properties": { "connectionType": { "const": "PREPAID" } } } } },
+      "then": { "properties": { "body": { "properties": {
+        "recharges": { "type": "object" },
+        "postpaid": { "$ref": "common.schema.json#/$defs/notApplicable" } } } } },
+      "else": { "properties": { "body": { "properties": {
+        "recharges": { "$ref": "common.schema.json#/$defs/notApplicable" },
+        "postpaid": { "type": "object" } } } } }
+    }
+  ],
+  "unevaluatedProperties": false,
+
+  "$defs": {
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "plan", "recharges", "services", "paymentMethods", "postpaid", "summary", "monthly"],
+      "properties": {
+        "profile": { "$ref": "#/$defs/profile" },
+        "plan": { "$ref": "#/$defs/plan" },
+        "recharges": {
+          "oneOf": [
+            { "$ref": "#/$defs/recharges" },
+            { "$ref": "common.schema.json#/$defs/notApplicable" }
+          ]
+        },
+        "services": { "$ref": "#/$defs/services" },
+        "paymentMethods": { "$ref": "#/$defs/paymentMethods" },
+        "postpaid": {
+          "oneOf": [
+            { "$ref": "#/$defs/postpaid" },
+            { "$ref": "common.schema.json#/$defs/notApplicable" }
+          ]
+        },
+        "summary": { "$ref": "#/$defs/summary" },
+        "monthly": {
+          "description": "One entry per calendar month of the data range, oldest first, so the lender can derive its own features.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "items": { "$ref": "#/$defs/month" }
+        }
+      }
+    },
+
+    "profile": {
+      "description": "The subscriber's profile as of `dataAsOf`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numberStatus", "subscriberSince", "tenureMonths", "connectionTypeHistory", "kycStatus", "simType"],
+      "properties": {
+        "numberStatus": { "$ref": "common.schema.json#/$defs/numberStatus" },
+        "subscriberSince": {
+          "description": "The month this subscriber (not the number) was activated on it. A recycled number starts again.",
+          "$ref": "common.schema.json#/$defs/month"
+        },
+        "tenureMonths": { "$ref": "common.schema.json#/$defs/count" },
+        "connectionTypeHistory": {
+          "description": "Prepaid/postpaid periods since activation, oldest first; the last is the current one.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["connectionType", "since"],
+            "properties": {
+              "connectionType": { "$ref": "common.schema.json#/$defs/connectionType" },
+              "since": { "$ref": "common.schema.json#/$defs/month" }
+            }
+          }
+        },
+        "kycStatus": {
+          "description": "Whether the subscriber's KYC is valid under DoT rules. The method and the attributes are never shared here (see the fraud-signals statement for matching).",
+          "enum": ["VERIFIED", "REVERIFICATION_DUE", "NOT_VERIFIED"]
+        },
+        "simType": { "enum": ["PHYSICAL", "ESIM"] },
+        "deviceCategory": {
+          "description": "Optional. The category of the device currently in use, from the network's device identity. Never the model, IMEI or price.",
+          "enum": ["SMARTPHONE", "FEATURE_PHONE", "DATA_DEVICE", "UNKNOWN"]
+        }
+      }
+    },
+
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "changesInWindow"],
+      "properties": {
+        "current": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "priceInr", "since"],
+          "properties": {
+            "category": {
+              "enum": ["UNLIMITED_BUNDLE", "DATA_ONLY", "VOICE_ONLY", "VALIDITY_ONLY", "POSTPAID_INDIVIDUAL", "POSTPAID_FAMILY", "POSTPAID_BUSINESS", "OTHER"]
+            },
+            "priceInr": {
+              "description": "The plan's list price per validity period (prepaid) or billing cycle (postpaid), tax included.",
+              "$ref": "common.schema.json#/$defs/amountInr"
+            },
+            "validityDays": {
+              "description": "Prepaid only: the plan's validity in days.",
+              "type": "integer", "minimum": 1, "maximum": 366
+            },
+            "dataAllowance": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type"],
+              "properties": {
+                "type": { "enum": ["DAILY", "PER_PERIOD", "UNLIMITED", "NONE"] },
+                "gb": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            },
+            "sharedPlanRole": {
+              "description": "Family or business plans: whether this number pays for the plan (PRIMARY) or is an add-on member paid for by another (MEMBER).",
+              "enum": ["NONE", "PRIMARY", "MEMBER"]
+            },
+            "since": { "$ref": "common.schema.json#/$defs/month" }
+          }
+        },
+        "changesInWindow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["upgrades", "downgrades"],
+          "properties": {
+            "upgrades": {
+              "description": "Moves to a plan with a higher price per 30 days.",
+              "$ref": "common.schema.json#/$defs/count"
+            },
+            "downgrades": {
+              "description": "Moves to a plan with a lower price per 30 days.",
+              "$ref": "common.schema.json#/$defs/count"
+            }
+          }
+        }
+      }
+    },
+
+    "recharges": {
+      "description": "Prepaid recharges over the data range. A recharge is a paid top-up, plan or add-on pack. Excluded: operator-funded bonuses, promotional credit, talk-time advances (see services.operatorCredit) and refunded recharges.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "totalAmountInr", "medianAmountInr", "monthsWithRecharge", "renewedBeforeExpiryRate", "lapseDaysTotal", "maxLapseDays"],
+      "properties": {
+        "count": { "$ref": "common.schema.json#/$defs/count" },
+        "totalAmountInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+        "medianAmountInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+        "monthsWithRecharge": { "$ref": "common.schema.json#/$defs/count" },
+        "renewedBeforeExpiryRate": {
+          "description": "Of the plan validity periods that ended in the window, the share renewed before or on the expiry day.",
+          "$ref": "common.schema.json#/$defs/share"
+        },
+        "lapseDaysTotal": {
+          "description": "Days in the window without a valid plan.",
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "maxLapseDays": {
+          "description": "The longest run of consecutive lapse days.",
+          "$ref": "common.schema.json#/$defs/count"
+        }
+      }
+    },
+
+    "services": {
+      "description": "Operator services active at `dataAsOf`, and the subscriber's record with operator credit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "operatorCredit"],
+      "properties": {
+        "active": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["category", "since"],
+            "properties": {
+              "category": {
+                "description": "Categories only: never the content, the OTT titles or the destinations.",
+                "enum": ["DATA_ADDON", "OTT_BUNDLE", "INTERNATIONAL_ROAMING", "INTERNATIONAL_CALLING", "FIXED_BROADBAND", "DTH_TV", "DEVICE_PROTECTION", "DEVICE_INSTALLMENT", "FAMILY_ADDON", "OTHER"]
+              },
+              "since": { "$ref": "common.schema.json#/$defs/month" }
+            }
+          }
+        },
+        "operatorCredit": {
+          "description": "Credit the operator itself extended in the window: talk-time/data advances (prepaid) and device installments.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["advances", "deviceInstallments"],
+          "properties": {
+            "advances": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["taken", "repaidOnNextRecharge", "outstandingInr"],
+                  "properties": {
+                    "taken": { "$ref": "common.schema.json#/$defs/count" },
+                    "repaidOnNextRecharge": {
+                      "description": "Of the advances taken, how many were recovered from the next recharge.",
+                      "$ref": "common.schema.json#/$defs/count"
+                    },
+                    "outstandingInr": { "$ref": "common.schema.json#/$defs/amountInr" }
+                  }
+                },
+                { "$ref": "common.schema.json#/$defs/notApplicable" }
+              ]
+            },
+            "deviceInstallments": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["active", "installmentsDue", "installmentsPaidOnTime", "maxDaysPastDue"],
+                  "properties": {
+                    "active": { "type": "boolean" },
+                    "installmentsDue": { "$ref": "common.schema.json#/$defs/count" },
+                    "installmentsPaidOnTime": { "$ref": "common.schema.json#/$defs/count" },
+                    "maxDaysPastDue": { "$ref": "common.schema.json#/$defs/count" }
+                  }
+                },
+                { "$ref": "common.schema.json#/$defs/notApplicable" }
+              ]
+            }
+          }
+        }
+      }
+    },
+
+    "paymentMethods": {
+      "description": "How the subscriber paid for recharges or bills in the window. Channels only: never the payer, instrument, card, account or VPA.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channelMix", "autopay"],
+      "properties": {
+        "channelMix": { "$ref": "common.schema.json#/$defs/channelMix" },
+        "autopay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["active"],
+          "properties": {
+            "active": { "type": "boolean" },
+            "since": { "$ref": "common.schema.json#/$defs/month" },
+            "failedDebitsInWindow": {
+              "description": "Mandate debits that failed (e.g. insufficient funds) in the window. A strong liquidity signal.",
+              "$ref": "common.schema.json#/$defs/count"
+            }
+          },
+          "if": { "properties": { "active": { "const": true } } },
+          "then": { "required": ["since", "failedDebitsInWindow"] }
+        }
+      }
+    },
+
+    "postpaid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creditLimitBand", "invoices", "payments", "debtCollection"],
+      "properties": {
+        "creditLimitBand": {
+          "description": "The operator's postpaid credit limit, as a band: it is the operator's own credit decision.",
+          "enum": ["L1_UNDER_500", "L2_500_1000", "L3_1000_2500", "L4_2500_5000", "L5_OVER_5000"]
+        },
+        "invoices": {
+          "description": "Every invoice with a billing month in the data range, oldest first.",
+          "type": "array",
+          "maxItems": 24,
+          "items": { "$ref": "common.schema.json#/$defs/invoice" }
+        },
+        "payments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "totalAmountInr", "paidByDueDateRate", "maxDaysPastDue"],
+          "properties": {
+            "count": { "$ref": "common.schema.json#/$defs/count" },
+            "totalAmountInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+            "paidByDueDateRate": {
+              "description": "Of the window's invoices whose due date is on or before `dataAsOf` (excluding DISPUTED and WAIVED), the share paid in full by the due date.",
+              "$ref": "common.schema.json#/$defs/share"
+            },
+            "maxDaysPastDue": { "$ref": "common.schema.json#/$defs/count" },
+            "partialPayments": {
+              "description": "Payments that settled less than the invoice due at the time.",
+              "$ref": "common.schema.json#/$defs/count"
+            }
+          }
+        },
+        "debtCollection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currentStage", "highestStageInWindow", "outstandingInr", "oldestUnpaidBucket", "writtenOffInr", "openDisputes"],
+          "properties": {
+            "currentStage": { "$ref": "common.schema.json#/$defs/collectionStage" },
+            "highestStageInWindow": { "$ref": "common.schema.json#/$defs/collectionStage" },
+            "outstandingInr": {
+              "description": "Overdue amount at `dataAsOf`, excluding amounts under dispute.",
+              "$ref": "common.schema.json#/$defs/amountInr"
+            },
+            "oldestUnpaidBucket": { "$ref": "common.schema.json#/$defs/dpdBucket" },
+            "writtenOffInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+            "openDisputes": { "$ref": "common.schema.json#/$defs/count" }
+          }
+        }
+      }
+    },
+
+    "summary": {
+      "description": "Features defined by the standard, so every TIP computes them identically. Derivable from `monthly`; provided so lenders don't each re-derive them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windowMonths", "activeMonths", "spend", "usage"],
+      "properties": {
+        "windowMonths": { "type": "integer", "minimum": 1, "maximum": 24 },
+        "activeMonths": {
+          "description": "Months with at least one day of chargeable activity (outgoing voice, SMS or data).",
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "spend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["avgMonthlyInr", "volatilityCv", "trend"],
+          "properties": {
+            "avgMonthlyInr": {
+              "description": "Mean monthly spend: recharges (prepaid) or invoice amounts (postpaid).",
+              "$ref": "common.schema.json#/$defs/amountInr"
+            },
+            "volatilityCv": {
+              "description": "Coefficient of variation of monthly spend (population standard deviation / mean); 0 when the mean is 0.",
+              "type": "number", "minimum": 0
+            },
+            "trend": {
+              "description": "The least-squares slope of monthly spend as a share of mean spend: RISING above +5% per month, FALLING below -5%, STABLE otherwise.",
+              "enum": ["RISING", "STABLE", "FALLING"]
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["avgActiveDaysPerMonth"],
+          "properties": {
+            "avgActiveDaysPerMonth": { "type": "number", "minimum": 0, "maximum": 31 }
+          }
+        }
+      }
+    },
+
+    "month": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["month", "spendInr", "activeDays", "dataBand", "voiceBand"],
+      "properties": {
+        "month": { "$ref": "common.schema.json#/$defs/month" },
+        "spendInr": {
+          "description": "Recharges in the month (prepaid) or the month's invoice amount (postpaid).",
+          "$ref": "common.schema.json#/$defs/amountInr"
+        },
+        "rechargeCount": { "$ref": "common.schema.json#/$defs/count" },
+        "validDays": {
+          "description": "Prepaid: days in the month with a valid plan.",
+          "type": "integer", "minimum": 0, "maximum": 31
+        },
+        "activeDays": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "dataBand": { "$ref": "common.schema.json#/$defs/dataBand" },
+        "voiceBand": { "$ref": "common.schema.json#/$defs/voiceBand" }
+      }
+    }
+  }
+}

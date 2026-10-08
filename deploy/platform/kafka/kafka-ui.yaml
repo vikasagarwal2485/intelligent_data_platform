@@ -3,7 +3,7 @@
 # Wired to the Strimzi cluster's internal plain listener and Apicurio's
 # Confluent-compatible API.
 #
-# Apply:   kubectl apply -n idp-platform -f deploy/kafka/kafka-ui.yaml
+# Apply:   kubectl apply -n idp-platform -f deploy/platform/kafka/kafka-ui.yaml
 # Access:  kubectl -n idp-platform port-forward svc/kafka-ui 8080:8080
 #          open http://localhost:8080
 apiVersion: apps/v1

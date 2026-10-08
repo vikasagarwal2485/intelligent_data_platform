@@ -1,4 +1,4 @@
-"""Source-side ingestion (plan section 3.2): the file landing zone of TM Forum
+"""Source-side ingestion: the file landing zone of TM Forum
 Open API resources (``idp generate`` / ``idp produce --from-landing``) and the
 profile-driven TMF adapter (``idp.ingestion.tmf``).
 

@@ -1,4 +1,4 @@
-"""Medallion pipeline stages (plan sections 3-6).
+"""Medallion pipeline stages.
 
 Each stage is an INDEPENDENT step that reads its input layer and writes its
 output layer, so the concerns stay separated (no consumer->silver->gold chaining):

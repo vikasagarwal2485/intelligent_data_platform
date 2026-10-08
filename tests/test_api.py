@@ -1,4 +1,4 @@
-"""Tests for the FastAPI scoring service (plan 5.6 / 6.6)."""
+"""Tests for the FastAPI scoring service."""
 from __future__ import annotations
 
 import pytest

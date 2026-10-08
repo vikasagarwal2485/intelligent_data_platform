@@ -1,5 +1,5 @@
-# Keycloak (identity / RBAC, plan 1.5) using the official quay.io image in dev
-# mode (H2, start-dev) - free to pull, fine for a local prototype. For EKS,
+# Keycloak (identity / RBAC) using the official quay.io image in dev
+# mode (H2, start-dev) - free to pull, suited to the local cluster. For EKS,
 # switch to a production chart with an external DB and TLS.
 #
 # The realm `idp` (REQ-SRV-03) is imported at every start from the ConfigMap

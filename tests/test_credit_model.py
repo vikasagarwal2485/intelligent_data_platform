@@ -1,4 +1,4 @@
-"""Tests for the credit-limit model (plan 5)."""
+"""Tests for the credit-limit model."""
 from __future__ import annotations
 
 import numpy as np

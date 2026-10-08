@@ -319,7 +319,9 @@ def test_the_analytics_identity_is_read_only(lake):
     for stmt in ("INSERT INTO silver.dim_subscriber (tenant_id) VALUES ('x')",
                  "DELETE FROM gold.credit_scores WHERE tenant_id = 'tenant_a'",
                  "CREATE TABLE silver.x (a int)",
-                 "SELECT count(*) AS tenant_id FROM bronze.parties"):
+                 # an existing raw Bronze table: a missing one reads as "not written
+                 # yet" (empty), which wouldn't exercise the access rule
+                 "SELECT count(*) AS tenant_id FROM bronze.tmf_party"):
         with pytest.raises(sql.LakeReadError, match="access denied"):
             sql.query(lake, stmt)
 

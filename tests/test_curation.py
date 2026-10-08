@@ -1,4 +1,4 @@
-"""Tests for Silver curation (plan 3.3)."""
+"""Tests for Silver curation."""
 from __future__ import annotations
 
 from idp.common.tenancy import TENANT_COLUMN

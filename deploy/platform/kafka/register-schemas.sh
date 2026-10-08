@@ -7,7 +7,7 @@
 # The Avro schemas in config/avro describe canonical records and Silver tables, not the wire,
 # so they aren't registered (REQ-STR-03).
 #
-# Usage:  bash deploy/kafka/register-schemas.sh [namespace]
+# Usage:  bash deploy/platform/kafka/register-schemas.sh [namespace]
 set -euo pipefail
 
 NS="${1:-idp-platform}"

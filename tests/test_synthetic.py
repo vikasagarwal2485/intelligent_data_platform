@@ -1,4 +1,4 @@
-"""Tests for the synthetic data generator (plan 3.0)."""
+"""Tests for the synthetic data generator."""
 from __future__ import annotations
 
 from idp.synthetic.generator import generate, generate_for_tenants

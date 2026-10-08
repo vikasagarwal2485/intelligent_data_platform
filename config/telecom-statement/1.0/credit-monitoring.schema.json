@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/telecom-statement/1.0/credit-monitoring.schema.json",
+  "title": "Telecom Statement 1.0: credit monitoring (CreditChecking, periodic)",
+  "description": "What changed during a live loan or credit line, fetched periodically under a consent that ends with the loan. Each statement covers the window since the previous fetch: dated events from a closed list, and a few indicators against a fixed baseline. Under RBI's fair-practices rules on collection, no field helps the lender reach or pressure the borrower: no alternative contacts, location or reachability.",
+
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "statementType": { "const": "CREDIT_MONITORING" },
+        "consent": {
+          "properties": {
+            "purposeCode": { "const": "CREDIT_MONITORING" },
+            "dpvPurpose": { "const": "dpv:CreditChecking" },
+            "fetchType": { "const": "PERIODIC" }
+          }
+        },
+        "body": { "$ref": "#/$defs/body" }
+      }
+    },
+    {
+      "description": "Prepaid numbers report recharge indicators and no postpaid snapshot; postpaid numbers the reverse.",
+      "if": { "properties": { "subject": { "properties": { "connectionType": { "const": "PREPAID" } } } } },
+      "then": { "properties": { "body": { "properties": {
+        "indicators": { "required": ["rechargeLapseDays"] },
+        "postpaid": { "$ref": "common.schema.json#/$defs/notApplicable" } } } } },
+      "else": { "properties": { "body": { "properties": {
+        "postpaid": { "type": "object" } } } } }
+    }
+  ],
+  "unevaluatedProperties": false,
+
+  "$defs": {
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window", "sequence", "numberStatus", "events", "indicators", "postpaid"],
+      "properties": {
+        "window": {
+          "description": "The period this statement covers: from the day after the previous statement's window to `dataAsOf`.",
+          "$ref": "common.schema.json#/$defs/dateRange"
+        },
+        "sequence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fetchNumber"],
+          "properties": {
+            "fetchNumber": {
+              "description": "1 for the first fetch under the consent, then consecutive. A gap means a statement was missed.",
+              "type": "integer", "minimum": 1
+            },
+            "previousStatementId": { "$ref": "common.schema.json#/$defs/identifier" }
+          },
+          "if": { "properties": { "fetchNumber": { "minimum": 2 } } },
+          "then": { "required": ["previousStatementId"] }
+        },
+        "numberStatus": { "$ref": "common.schema.json#/$defs/numberStatus" },
+        "events": {
+          "description": "Events in the window, oldest first. An empty list means nothing reportable happened.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/event" }
+        },
+        "indicators": { "$ref": "#/$defs/indicators" },
+        "postpaid": {
+          "oneOf": [
+            { "$ref": "#/$defs/postpaidSnapshot" },
+            { "$ref": "common.schema.json#/$defs/notApplicable" }
+          ]
+        }
+      }
+    },
+
+    "indicators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spendVsBaseline", "activeDays", "planChange"],
+      "properties": {
+        "spendVsBaseline": {
+          "description": "(Spend in the window, scaled to 30 days) / (the baseline's median monthly spend) - 1. The baseline is the 6 calendar months before the consent started, fixed for the consent's life. -1 means no spend; null when the baseline is 0.",
+          "type": ["number", "null"],
+          "minimum": -1
+        },
+        "activeDays": {
+          "description": "Days in the window with chargeable activity (outgoing voice, SMS or data).",
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "rechargeLapseDays": {
+          "description": "Prepaid: days in the window without a valid plan.",
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "planChange": {
+          "description": "The net plan movement over the window, by price per 30 days.",
+          "enum": ["NONE", "UPGRADE", "DOWNGRADE"]
+        }
+      }
+    },
+
+    "postpaidSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latestInvoice", "collectionStage", "outstandingInr", "oldestUnpaidBucket"],
+      "properties": {
+        "latestInvoice": { "$ref": "common.schema.json#/$defs/invoice" },
+        "collectionStage": { "$ref": "common.schema.json#/$defs/collectionStage" },
+        "outstandingInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+        "oldestUnpaidBucket": { "$ref": "common.schema.json#/$defs/dpdBucket" }
+      }
+    },
+
+    "event": {
+      "description": "A reportable event. The list is closed; adding a type is a minor version of the standard.",
+      "type": "object",
+      "required": ["type", "date"],
+      "properties": {
+        "type": {
+          "enum": ["SIM_CHANGE", "DEVICE_CHANGE", "PORT_OUT_REQUESTED", "PORT_OUT_COMPLETED", "RECHARGE_LAPSE", "CONNECTION_TYPE_CHANGE", "PLAN_DOWNGRADE", "BILL_OVERDUE", "COLLECTION_STAGE_CHANGE", "SUSPENSION", "REACTIVATION", "DISCONNECTION", "AUTOPAY_CANCELLED", "AUTOPAY_DEBIT_FAILED"]
+        },
+        "date": {
+          "description": "The day the event happened (for a lapse, the day it ended or `dataAsOf` if ongoing).",
+          "$ref": "common.schema.json#/$defs/date"
+        }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/eventWithoutDetail" },
+        { "$ref": "#/$defs/rechargeLapse" },
+        { "$ref": "#/$defs/connectionTypeChange" },
+        { "$ref": "#/$defs/planDowngrade" },
+        { "$ref": "#/$defs/billOverdue" },
+        { "$ref": "#/$defs/collectionStageChange" },
+        { "$ref": "#/$defs/suspension" }
+      ]
+    },
+    "eventWithoutDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["SIM_CHANGE", "DEVICE_CHANGE", "PORT_OUT_REQUESTED", "PORT_OUT_COMPLETED", "REACTIVATION", "DISCONNECTION", "AUTOPAY_CANCELLED", "AUTOPAY_DEBIT_FAILED"] },
+        "date": true
+      }
+    },
+    "rechargeLapse": {
+      "description": "A prepaid lapse of more than 3 consecutive days without a valid plan.",
+      "additionalProperties": false,
+      "required": ["days", "ongoing"],
+      "properties": {
+        "type": { "const": "RECHARGE_LAPSE" },
+        "date": true,
+        "days": { "type": "integer", "minimum": 4 },
+        "ongoing": { "type": "boolean" }
+      }
+    },
+    "connectionTypeChange": {
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "type": { "const": "CONNECTION_TYPE_CHANGE" },
+        "date": true,
+        "from": { "$ref": "common.schema.json#/$defs/connectionType" },
+        "to": { "$ref": "common.schema.json#/$defs/connectionType" }
+      }
+    },
+    "planDowngrade": {
+      "additionalProperties": false,
+      "required": ["fromPriceInr", "toPriceInr"],
+      "properties": {
+        "type": { "const": "PLAN_DOWNGRADE" },
+        "date": true,
+        "fromPriceInr": { "$ref": "common.schema.json#/$defs/amountInr" },
+        "toPriceInr": { "$ref": "common.schema.json#/$defs/amountInr" }
+      }
+    },
+    "billOverdue": {
+      "description": "A postpaid invoice entered a new days-past-due bucket.",
+      "additionalProperties": false,
+      "required": ["billingMonth", "dpdBucket", "amountInr"],
+      "properties": {
+        "type": { "const": "BILL_OVERDUE" },
+        "date": true,
+        "billingMonth": { "$ref": "common.schema.json#/$defs/month" },
+        "dpdBucket": { "$ref": "common.schema.json#/$defs/dpdBucket" },
+        "amountInr": { "$ref": "common.schema.json#/$defs/amountInr" }
+      }
+    },
+    "collectionStageChange": {
+      "additionalProperties": false,
+      "required": ["stage"],
+      "properties": {
+        "type": { "const": "COLLECTION_STAGE_CHANGE" },
+        "date": true,
+        "stage": { "$ref": "common.schema.json#/$defs/collectionStage" }
+      }
+    },
+    "suspension": {
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "type": { "const": "SUSPENSION" },
+        "date": true,
+        "reason": { "enum": ["NON_PAYMENT", "CUSTOMER_REQUEST", "KYC_REVERIFICATION", "REGULATORY", "OTHER"] }
+      }
+    }
+  }
+}

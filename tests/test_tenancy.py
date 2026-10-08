@@ -1,4 +1,4 @@
-"""Tests for multi-tenancy / data isolation (plan 1.5)."""
+"""Tests for multi-tenancy / data isolation."""
 from __future__ import annotations
 
 import pandas as pd

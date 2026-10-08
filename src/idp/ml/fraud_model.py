@@ -1,4 +1,4 @@
-"""Fraud detection model (plan section 6).
+"""Fraud detection model.
 
 Layered hybrid (batch-first per reviewer decision):
 

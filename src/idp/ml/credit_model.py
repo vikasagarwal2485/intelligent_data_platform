@@ -1,4 +1,4 @@
-"""Alternative credit-limit model (plan section 5).
+"""Alternative credit-limit model.
 
 Two-stage design:
 
@@ -6,12 +6,12 @@ Two-stage design:
   used before default labels exist.
 * **Stage 1 - PD model** (:class:`CreditLimitModel`): a gradient-boosted
   probability-of-default classifier (sklearn ``HistGradientBoostingClassifier``,
-  a drop-in for LightGBM/XGBoost from the plan) with a calibrated probability.
+  standing in for LightGBM/XGBoost).
 * **Stage 2 - limit sizing** (:meth:`CreditLimitModel.recommend_limit`):
   ``affordability x risk_multiplier(PD)`` clipped to policy bands.
 
 A logistic-regression scorecard is trained alongside as the interpretable
-regulatory baseline (plan 5.3).
+regulatory baseline.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def heuristic_limit(
     min_limit: float = 5.0,
     max_limit: float = 500.0,
 ) -> pd.Series:
-    """Stage-0 affordability heuristic (plan 5.2).
+    """Stage-0 affordability heuristic.
 
     ``limit0 = k * avg_recharge * tenure_factor * success_rate * segment_factor``.
     """

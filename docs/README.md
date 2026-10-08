@@ -5,9 +5,8 @@ specification of the Intelligent Data Platform, structured so an AI coding agent
 (e.g. Claude Code) can implement the platform **phase by phase, sequentially and
 autonomously**.
 
-It complements the two prose documents:
-- [`../architecture_and_implementation_plan.md`](../architecture_and_implementation_plan.md) — the reviewed architecture & plan
-- [`../../README.md`](../../README.md) — the current step-by-step guide
+It complements the top-level [`README.md`](../README.md): the architecture,
+deployment and step-by-step guide.
 
 ## Layout
 

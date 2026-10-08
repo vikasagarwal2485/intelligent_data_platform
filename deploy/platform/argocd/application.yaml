@@ -1,4 +1,4 @@
-# Argo CD GitOps applications (plan 2B). Two Applications mirror the deploy split:
+# Argo CD GitOps applications. Two Applications mirror the deploy split:
 # the platform team owns the base (namespaces/RBAC/isolation); the app team owns
 # the scoring-api workload. Platform base is in an earlier sync-wave so its
 # namespaces exist before the app is applied.

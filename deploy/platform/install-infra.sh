@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the platform infrastructure into the idp-platform namespace (plan 2A).
+# Install the platform infrastructure into the idp-platform namespace.
 #
 # Adds the required Helm repositories first (this is what was missing when you
 # hit "repo <x> not found"), then installs each component.

@@ -1,4 +1,4 @@
-"""FastAPI scoring service (plan 5.6 / 6.6).
+"""FastAPI scoring service.
 
 Exposes on-demand credit-limit and fraud scoring and the precomputed serving
 lookup. With ``auth.enabled`` (every cluster deployment), each endpoint except

@@ -139,8 +139,8 @@ the join produces no rows. When the store holds more than one label for a
 subscriber, training SHALL use exactly one of them, so the join never fans out
 into duplicate training rows. Which stored label is used is not guaranteed; a
 single current label per subscriber is the labels store's responsibility
-(REQ-ML-08). In this prototype the labels are
-regenerated from the synthetic generator, so they SHALL be seeded with the same
+(REQ-ML-08). While the labels come from the synthetic generator (standing in
+for an outcomes feed), they are regenerated from it, so they SHALL be seeded with the same
 synthetic parameters (subscribers, days, seed) as the data that produced Gold.
 (A local in-memory path is retained for cluster-free dev/tests.)
 

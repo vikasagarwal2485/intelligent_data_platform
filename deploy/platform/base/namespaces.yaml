@@ -1,7 +1,7 @@
 # Namespaces:
 #  * idp-platform : shared platform services (Kafka, MinIO, Trino, Nessie, ...)
 #  * idp-app      : application workloads (scoring API, streaming jobs)
-#  * idp-tenant-* : per-tenant compute isolation (plan 1.5)
+#  * idp-tenant-* : per-tenant compute isolation
 apiVersion: v1
 kind: Namespace
 metadata:

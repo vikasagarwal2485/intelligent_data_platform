@@ -29,10 +29,10 @@ followed but that had no ADR.
   stays the Gold serving store (`idp publish`, ADR-0029).
 - **Context:** Silver is analytical & huge; Gold serving needs low-latency lookups.
 - **Decision:** Silver = Apache Iceberg on object storage (ACID, schema/partition
-  evolution, time-travel). Gold serving = TimescaleDB. Prototype uses plain
+  evolution, time-travel). Gold serving = TimescaleDB. The first implementation used plain
   Parquet on MinIO/S3 as an Iceberg stand-in.
 - **Consequences:** Nessie catalog required (ADR-0011); production Silver/Gold
-  jobs write Iceberg; prototype code writes Parquet with the same partitioning.
+  jobs write Iceberg; the first implementation wrote Parquet with the same partitioning.
 
 ### ADR-0003 — Apache Kafka (open source) via Strimzi
 - **Status:** Accepted
@@ -136,7 +136,7 @@ followed but that had no ADR.
   ADR-0035); Airflow runs them as four DAGs (ADR-0026). `idp run` composes them
   locally.
 
-### ADR-0010 — Prototype in pandas/scikit-learn; document the production engines
+### ADR-0010 — Initial implementation in pandas/scikit-learn; document the production engines
 - **Status:** Superseded by ADR-0027 (2026-09-26)
 - **Context:** The platform must be unit-testable without a cluster while staying
   faithful to the production design.
@@ -150,7 +150,7 @@ followed but that had no ADR.
   Iceberg JDBC catalog. Nessie stays deployed but catalogues nothing.
 - **Context:** Iceberg needs a catalog; options include Hive, Glue, Polaris, Nessie.
 - **Decision:** Nessie (git-like, branchable) — reviewer decision.
-- **Consequences:** Deploy Nessie (in-memory store for prototype); production uses
+- **Consequences:** Deploy Nessie (in-memory store locally); production uses
   a persistent store. *Note (ADR-0028):* the lake's tables are catalogued in an
   Iceberg JDBC catalog, not Nessie, because Nessie's REST catalog keeps only a
   table's current snapshot.
@@ -218,7 +218,7 @@ followed but that had no ADR.
   AWS overlays of the platform base and the scoring-api. The one compose file, `deploy/dev/trino-compose.yaml`,
   is a test stack for the MCP integration tests (ADR-0030), not a deployment.
 
-### ADR-0017 — Avoid Bitnami charts for the prototype
+### ADR-0017 — Avoid Bitnami charts for the platform services
 - **Status:** Accepted
 - **Context:** Bitnami removed free image tags (2025-08), breaking installs.
 - **Decision:** Use non-Bitnami sources with freely pullable images (official
@@ -287,7 +287,7 @@ followed but that had no ADR.
   (`idp mcp`), the conventional surface for `mcp` clients / Claude Desktop. An
   in-cluster streamable-HTTP Deployment is a later follow-up.
 - **Consequences:** Tools are unit-testable without a cluster (same pandas path as
-  the rest of the prototype); Trino is not a runtime dependency of the analytics
+  the rest of the code base at the time); Trino is not a runtime dependency of the analytics
   surface. Very large tenants would eventually want push-down SQL (deferred).
 
 ### ADR-0022 — Synthetic fee-charge data is additive to the generator
@@ -390,7 +390,7 @@ followed but that had no ADR.
   Bronze is appended through `pyiceberg` (ADR-0028), publish loads over Spark JDBC
   (ADR-0029), the MCP tools query Trino (ADR-0030), and scoring runs pandas per Spark
   partition (ADR-0029).
-- **Context:** ADR-0010 put the Silver/Gold logic in pandas so the prototype was
+- **Context:** ADR-0010 put the Silver/Gold logic in pandas so the code base was
   testable without a cluster, with PySpark jobs as the "production" port. That
   left every business rule implemented twice (`curation/silver.py` +
   `features/*` vs `pipelines/spark/*_job.py`), kept in step only by a parity test,

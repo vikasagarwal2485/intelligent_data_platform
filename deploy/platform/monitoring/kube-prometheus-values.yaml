@@ -47,6 +47,6 @@ nodeExporter:
 kube-state-metrics:
   enabled: true
 
-# Trim components not needed for the prototype (keeps the footprint minikube-sized).
+# Trim components the local cluster doesn't need (keeps the footprint minikube-sized).
 alertmanager:
   enabled: false

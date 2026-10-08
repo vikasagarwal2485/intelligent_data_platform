@@ -1,0 +1,83 @@
+{
+  "schema": "in.telecom.statement/1.0",
+  "statementType": "CREDIT_PROFILE",
+  "statementId": "ts-01J9Z4M2Q7",
+  "provider": { "tipId": "TIP-OP1", "certifiedSchemaVersions": ["1.0"] },
+  "consent": {
+    "consentId": "cns-8d41c2a9",
+    "purposeCode": "CREDIT_UNDERWRITING",
+    "dpvPurpose": "dpv:CreditChecking",
+    "fetchType": "ONETIME",
+    "dataRange": { "from": "2026-04-01", "to": "2026-09-30" },
+    "dataLife": "P30D"
+  },
+  "subject": {
+    "linkRef": "lnk-55a0e9b1",
+    "msisdnMasked": "XXXXXX4321",
+    "subscriberType": "INDIVIDUAL",
+    "connectionType": "PREPAID"
+  },
+  "generatedAt": "2026-10-04T09:12:00+05:30",
+  "dataAsOf": "2026-10-03T23:59:59+05:30",
+  "body": {
+    "profile": {
+      "numberStatus": "ACTIVE",
+      "subscriberSince": "2019-04",
+      "tenureMonths": 90,
+      "connectionTypeHistory": [{ "connectionType": "PREPAID", "since": "2019-04" }],
+      "kycStatus": "VERIFIED",
+      "simType": "PHYSICAL",
+      "deviceCategory": "SMARTPHONE"
+    },
+    "plan": {
+      "current": {
+        "category": "UNLIMITED_BUNDLE",
+        "priceInr": 349,
+        "validityDays": 28,
+        "dataAllowance": { "type": "DAILY", "gb": 2 },
+        "sharedPlanRole": "NONE",
+        "since": "2025-11"
+      },
+      "changesInWindow": { "upgrades": 0, "downgrades": 0 }
+    },
+    "recharges": {
+      "count": 7,
+      "totalAmountInr": 2492,
+      "medianAmountInr": 349,
+      "monthsWithRecharge": 6,
+      "renewedBeforeExpiryRate": 0.86,
+      "lapseDaysTotal": 3,
+      "maxLapseDays": 2
+    },
+    "services": {
+      "active": [
+        { "category": "OTT_BUNDLE", "since": "2025-11" },
+        { "category": "DATA_ADDON", "since": "2026-09" }
+      ],
+      "operatorCredit": {
+        "advances": { "taken": 2, "repaidOnNextRecharge": 2, "outstandingInr": 0 },
+        "deviceInstallments": "NOT_APPLICABLE"
+      }
+    },
+    "paymentMethods": {
+      "channelMix": { "UPI": 0.72, "WALLET": 0.14, "RETAIL_CASH": 0.14 },
+      "autopay": { "active": false }
+    },
+    "postpaid": "NOT_APPLICABLE",
+    "summary": {
+      "windowMonths": 6,
+      "activeMonths": 6,
+      "spend": { "avgMonthlyInr": 415.33, "volatilityCv": 0.12, "trend": "STABLE" },
+      "usage": { "avgActiveDaysPerMonth": 29.5 }
+    },
+    "monthly": [
+      { "month": "2026-04", "spendInr": 349, "rechargeCount": 1, "validDays": 30, "activeDays": 30, "dataBand": "D4_20_50GB", "voiceBand": "V3_300_1000MIN" },
+      { "month": "2026-05", "spendInr": 349, "rechargeCount": 1, "validDays": 31, "activeDays": 31, "dataBand": "D4_20_50GB", "voiceBand": "V3_300_1000MIN" },
+      { "month": "2026-06", "spendInr": 349, "rechargeCount": 1, "validDays": 28, "activeDays": 28, "dataBand": "D4_20_50GB", "voiceBand": "V3_300_1000MIN" },
+      { "month": "2026-07", "spendInr": 349, "rechargeCount": 1, "validDays": 31, "activeDays": 30, "dataBand": "D4_20_50GB", "voiceBand": "V2_100_300MIN" },
+      { "month": "2026-08", "spendInr": 449, "rechargeCount": 1, "validDays": 30, "activeDays": 29, "dataBand": "D5_50_100GB", "voiceBand": "V3_300_1000MIN" },
+      { "month": "2026-09", "spendInr": 647, "rechargeCount": 2, "validDays": 29, "activeDays": 29, "dataBand": "D5_50_100GB", "voiceBand": "V3_300_1000MIN" }
+    ]
+  },
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlRJUC1PUDEtMjAyNi0wMSJ9..Qm9ndXNTaWduYXR1cmVGb3JFeGFtcGxlT25seQ"
+}

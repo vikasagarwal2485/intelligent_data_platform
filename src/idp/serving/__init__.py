@@ -1,4 +1,4 @@
-"""Model serving (plan sections 5.6 / 6.6)."""
+"""Model serving."""
 from idp.serving.api import create_app
 
 __all__ = ["create_app"]

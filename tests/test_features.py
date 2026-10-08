@@ -1,4 +1,4 @@
-"""Tests for feature engineering (plan 4) — the Gold feature tables built by the
+"""Tests for feature engineering — the Gold feature tables built by the
 Spark Gold stage (conftest `lake`)."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Model feature contract (plan section 4).
+"""Model feature contract.
 
 The ordered feature columns shared by three layers: the Gold feature tables
 (written by ``idp.transforms.features``) are keyed by ``(tenant_id, service_id)``

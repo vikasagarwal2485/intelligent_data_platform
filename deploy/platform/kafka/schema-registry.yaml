@@ -1,8 +1,8 @@
-# Apicurio Registry (open-source schema registry, plan section 3) in in-memory
+# Apicurio Registry (open-source schema registry) in in-memory
 # mode. Exposes a Confluent-compatible API at /apis/ccompat/v7 so standard
 # Schema-Registry clients (and our register-schemas.sh) work unchanged.
-# In-memory storage is fine for a prototype; use the SQL/Kafka storage variant
-# for persistence in production.
+# In-memory storage suits the local cluster: `make schemas` re-registers the
+# subjects after a restart. Use the SQL/Kafka storage variant in production.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

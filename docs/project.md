@@ -13,22 +13,25 @@ and Kubernetes-native (local minikube, production AWS EKS).
 Reference records live in [`data_samples/`](../../data_samples): one TM Forum Open
 API v5 resource per landing file type (Individual, Organization, Customer,
 BillingAccount, Agreement, Product, AppliedCustomerBillingRate, TopupBalance,
-ProductUsage). The landing adapter maps them to the canonical entities (`parties`,
-`accounts`, `agreements`, `products`, voice/data usage, recharges, fees) with the
-profile in `config/tmf/profiles/`; everything downstream uses the canonical model.
+ProductUsage). They travel as TM Forum events through Kafka and land unchanged in
+raw Bronze; Silver's conform step maps them to the canonical entities (`parties`,
+`customers`, `billing_accounts`, `agreements`, `products`, voice/data usage,
+recharges, fees) with the profile in `config/tmf/profiles/`, and everything
+downstream uses the canonical model.
 
 ## Tech stack & standing choices (see decisions/decision-log.md)
 
 | Concern | Choice |
 |---|---|
-| Language / prototype engine | Python 3.11, pandas, scikit-learn (unit-testable without a cluster) |
-| Production engines (target) | Spark (batch), Flink (real-time, deferred), Apache Iceberg |
-| Object store | MinIO (local) / AWS S3 (prod); one bucket per layer: `idp-bronze`/`idp-silver`/`idp-gold` |
-| Streaming | Apache Kafka (open source, Strimzi operator) + Apicurio Schema Registry (Avro) |
-| Catalog | Nessie (Iceberg) |
+| Language | Python 3.11 |
+| Data engine | Apache Spark 3.5 (Silver, Gold, score, publish, train), `local[*]` in dev/CI, Spark Operator applications in the cluster; Flink real-time deferred |
+| Table format | Apache Iceberg for Bronze, Silver and Gold |
+| Object store | MinIO (local) / AWS S3 (prod); one bucket per layer (`idp-bronze`/`idp-silver`/`idp-gold`) plus `idp-landing` and `idp-ml` |
+| Streaming | Apache Kafka (open source, Strimzi operator) + Apicurio Schema Registry (TM Forum JSON Schemas) |
+| Catalog | Iceberg JDBC catalog (the `iceberg` database on TimescaleDB; SQLite in dev/CI) |
 | Query | Trino |
 | Serving DB | TimescaleDB |
-| Identity / RBAC | Keycloak (OIDC) + OPA |
+| Identity / RBAC | Keycloak (OIDC) for the scoring API; Trino file-based access control for analytics |
 | Orchestration | Apache Airflow |
 | Experiment/registry | MLflow |
 | Observability | Prometheus + Grafana |
@@ -39,9 +42,10 @@ profile in `config/tmf/profiles/`; everything downstream uses the canonical mode
 ## Repository conventions
 
 - Package lives in `src/idp/` (installed via `pip install -e .`). Sub-packages:
-  `common` (config, tenancy, pii, storage), `synthetic`, `ingestion`,
-  `curation`, `features`, `ml`, `streaming`, `serving`; plus `pipeline.py`
-  (stage functions) and `cli.py` (`idp` entrypoint).
+  `common` (config, tenancy, pii, storage, catalog, contracts), `synthetic`,
+  `ingestion` (TMF landing, raw events), `transforms` (Spark Silver/Gold),
+  `ml`, `streaming`, `serving`, `mcp`; plus `pipeline.py` (stage functions) and
+  `cli.py` (`idp` entrypoint).
 - Every dataset carries a leading `tenant_id` partition column — the isolation
   boundary. All lake reads must be tenant-scoped.
 - PII (MSISDN/IMSI/IMEI/phone/email/other-party) is tokenized with a

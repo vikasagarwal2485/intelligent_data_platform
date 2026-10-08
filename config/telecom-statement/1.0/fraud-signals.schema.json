@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/telecom-statement/1.0/fraud-signals.schema.json",
+  "title": "Telecom Statement 1.0: fraud signals (FraudPreventionAndDetection)",
+  "description": "Point-in-time identity and account-takeover signals for onboarding, payee changes, high-value payments and logins. Field meanings follow GSMA CAMARA (KYC Match, KYC Tenure, SIM Swap, Device Swap, Call Forwarding Signal, Device Roaming Status), so a TIP can serve the same answers as Open Gateway APIs. Identity is checked by matching the claims the TIU sends; the operator's stored name, date of birth, address and Aadhaar data are never returned. Recency is given in bands, never timestamps. Valid for minutes, not days.",
+
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "properties": {
+        "statementType": { "const": "FRAUD_SIGNALS" },
+        "consent": {
+          "properties": {
+            "purposeCode": { "const": "IDENTITY_AND_FRAUD_CHECK" },
+            "dpvPurpose": { "enum": ["dpv:FraudPreventionAndDetection", "dpv:IdentityVerification"] },
+            "fetchType": { "const": "ONETIME" },
+            "dataLife": {
+              "description": "At most 24 hours: the signals go stale quickly.",
+              "pattern": "^PT([1-9]|1[0-9]|2[0-4])H$|^PT[0-9]+M$|^P1D$"
+            }
+          }
+        },
+        "body": { "$ref": "#/$defs/body" }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+
+  "$defs": {
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validUntil", "numberStatus", "kycTenure", "kycMethod", "simChange", "deviceChange", "portIn", "portOut", "callForwarding", "connectionsUnderSameIdentity", "regulatoryFlags"],
+      "properties": {
+        "validUntil": {
+          "description": "After this moment the TIU must not rely on the signals and should request a new statement.",
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "numberStatus": { "$ref": "common.schema.json#/$defs/numberStatus" },
+        "kycTenure": { "$ref": "#/$defs/kycTenure" },
+        "kycMatch": { "$ref": "#/$defs/kycMatch" },
+        "kycMethod": {
+          "description": "How the current subscriber's KYC was done. The category only: never the document, the Aadhaar number or eKYC attributes (Aadhaar Act).",
+          "enum": ["AADHAAR_EKYC", "DIGITAL_KYC", "DOCUMENT_IN_PERSON", "CORPORATE_AUTHORIZED", "NOT_AVAILABLE"]
+        },
+        "simChange": {
+          "description": "CAMARA SIM Swap: the last time the SIM or eSIM profile bound to the number changed (replacement, swap or new eSIM download).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["latestWithin", "changesInLast90d"],
+          "properties": {
+            "latestWithin": { "$ref": "common.schema.json#/$defs/recency" },
+            "changesInLast90d": { "$ref": "common.schema.json#/$defs/count" },
+            "simType": { "enum": ["PHYSICAL", "ESIM"] }
+          }
+        },
+        "deviceChange": {
+          "description": "CAMARA Device Swap: the last time the device (IMEI) using the SIM changed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["latestWithin", "changesInLast90d"],
+          "properties": {
+            "latestWithin": { "$ref": "common.schema.json#/$defs/recency" },
+            "changesInLast90d": { "$ref": "common.schema.json#/$defs/count" }
+          }
+        },
+        "portIn": {
+          "description": "When the number was last ported in to this operator (NEVER: it was never ported).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["latestWithin"],
+          "properties": { "latestWithin": { "$ref": "common.schema.json#/$defs/recency" } }
+        },
+        "portOut": {
+          "description": "Whether a port-out request (a UPC, the unique porting code) is pending.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestPending"],
+          "properties": {
+            "requestPending": { "type": "boolean" },
+            "requestedWithin": { "$ref": "common.schema.json#/$defs/recency" }
+          },
+          "if": { "properties": { "requestPending": { "const": true } } },
+          "then": { "required": ["requestedWithin"] }
+        },
+        "callForwarding": {
+          "description": "CAMARA Call Forwarding Signal: forwarding is a common way to intercept OTP calls. Whether it is on, never the forwarded-to number.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unconditionalActive", "conditionalActive"],
+          "properties": {
+            "unconditionalActive": { "type": "boolean" },
+            "conditionalActive": {
+              "description": "Forwarding when busy, unanswered or unreachable.",
+              "type": "boolean"
+            },
+            "lastChangedWithin": { "$ref": "common.schema.json#/$defs/recency" }
+          }
+        },
+        "roaming": {
+          "description": "Optional. CAMARA Device Roaming Status, without the country.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "enum": ["NOT_ROAMING", "DOMESTIC", "INTERNATIONAL", "UNKNOWN"] } }
+        },
+        "connectionsUnderSameIdentity": {
+          "description": "Active connections, across all operators, registered to the same identity document as this subscriber, as known to the DoT. Many connections are a mule-account signal. NOT_PROVIDED where the regulator hasn't permitted sharing it.",
+          "enum": ["C1", "C2_3", "C4_6", "C7_9", "OVER_9", "NOT_PROVIDED"]
+        },
+        "regulatoryFlags": {
+          "description": "DoT's own indicators, relayed only where DoT permits it, so lenders don't receive conflicting values from two sources.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mnrlListed", "financialFraudRiskIndicator"],
+          "properties": {
+            "mnrlListed": {
+              "description": "The number is on DoT's Mobile Number Revocation List (disconnected, e.g. for failed re-verification or cyber-fraud).",
+              "enum": ["YES", "NO", "NOT_PROVIDED"]
+            },
+            "financialFraudRiskIndicator": {
+              "description": "DoT's Financial Fraud Risk Indicator for the number.",
+              "enum": ["NOT_FLAGGED", "MEDIUM", "HIGH", "VERY_HIGH", "NOT_PROVIDED"]
+            }
+          }
+        }
+      }
+    },
+
+    "kycTenure": {
+      "description": "CAMARA KYC Tenure: how long the number has belonged to the current subscriber.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subscriberSince", "tenureMonths", "numberReassignedWithin"],
+      "properties": {
+        "subscriberSince": { "$ref": "common.schema.json#/$defs/month" },
+        "tenureMonths": { "$ref": "common.schema.json#/$defs/count" },
+        "numberReassignedWithin": {
+          "description": "When the number was last reassigned to a new subscriber after disconnection (NEVER: first subscriber).",
+          "$ref": "common.schema.json#/$defs/recency"
+        }
+      }
+    },
+
+    "kycMatch": {
+      "description": "Present when the TIU sent identity claims. CAMARA KYC Match: each claim is compared with the operator's KYC record, and only the result is returned.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["givenName", "familyName", "dateOfBirth", "postalCode"],
+      "properties": {
+        "givenName": { "$ref": "#/$defs/matchResult" },
+        "familyName": { "$ref": "#/$defs/matchResult" },
+        "dateOfBirth": { "$ref": "#/$defs/matchResult" },
+        "postalCode": { "$ref": "#/$defs/matchResult" },
+        "nameMatchScore": {
+          "description": "Similarity of the full name (0-100), by the standard's normative algorithm (transliteration-aware, case- and spacing-insensitive).",
+          "type": "integer", "minimum": 0, "maximum": 100
+        }
+      },
+      "minProperties": 1
+    },
+    "matchResult": {
+      "description": "NOT_PROVIDED: the TIU sent no claim for it. NOT_AVAILABLE: the operator has no value to compare.",
+      "enum": ["MATCH", "NO_MATCH", "NOT_PROVIDED", "NOT_AVAILABLE"]
+    }
+  }
+}

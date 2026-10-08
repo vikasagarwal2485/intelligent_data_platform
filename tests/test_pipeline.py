@@ -1,4 +1,4 @@
-"""End-to-end pipeline test (plan 3-6).
+"""End-to-end pipeline test.
 
 The pipeline is expensive, so it is executed once per session via a fixture and
 the individual tests assert on the shared result.

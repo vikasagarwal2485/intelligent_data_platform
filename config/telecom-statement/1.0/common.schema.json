@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/telecom-statement/1.0/common.schema.json",
+  "title": "Telecom Statement 1.0: common definitions",
+  "description": "The envelope and shared types of every telecom statement. A statement is produced by a Telecom Information Provider (TIP, the operator) for a Telecom Information User (TIU, a regulated fintech) under a customer's consent, delivered through a consent manager that cannot read it. Every object is closed (additionalProperties false); operator-specific data goes only in `extensions`.",
+
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "description": "Fields common to every statement type. Each statement schema adds `statementType`, the allowed consent purpose and its own `body`.",
+      "required": ["schema", "statementType", "statementId", "provider", "consent", "subject", "generatedAt", "dataAsOf", "body", "signature"],
+      "properties": {
+        "schema": {
+          "description": "Schema identifier and version. Minor versions only add optional fields; a major version may change meaning.",
+          "type": "string",
+          "pattern": "^in\\.telecom\\.statement/1\\.[0-9]+$"
+        },
+        "statementType": { "enum": ["CREDIT_PROFILE", "FRAUD_SIGNALS", "CREDIT_MONITORING"] },
+        "statementId": { "$ref": "#/$defs/identifier" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "consent": { "$ref": "#/$defs/consent" },
+        "subject": { "$ref": "#/$defs/subject" },
+        "generatedAt": { "$ref": "#/$defs/timestamp" },
+        "dataAsOf": {
+          "description": "The latest point in time the data reflects (the operator's data cut-off), not when the statement was generated.",
+          "$ref": "#/$defs/timestamp"
+        },
+        "body": { "type": "object" },
+        "extensions": {
+          "description": "Operator-specific fields. A TIU MAY ignore them; no core decision field may depend on them.",
+          "type": "object",
+          "propertyNames": { "pattern": "^x-[a-z0-9]+(-[a-z0-9]+)*$" }
+        },
+        "signature": {
+          "description": "Detached JWS (RFC 7515, compact serialization with an empty payload) over the canonical JSON (RFC 8785) of the statement without this field, signed with the TIP's certified key.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+$"
+        }
+      }
+    },
+
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"
+    },
+
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tipId", "certifiedSchemaVersions"],
+      "properties": {
+        "tipId": {
+          "description": "The operator's identifier in the ecosystem registry.",
+          "type": "string",
+          "pattern": "^TIP-[A-Z0-9]{2,16}$"
+        },
+        "certifiedSchemaVersions": {
+          "description": "Schema versions this TIP is certified for.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^1\\.[0-9]+$" }
+        }
+      }
+    },
+
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consentId", "purposeCode", "dpvPurpose", "fetchType", "dataRange", "dataLife"],
+      "properties": {
+        "consentId": { "$ref": "#/$defs/identifier" },
+        "purposeCode": {
+          "description": "The ecosystem's purpose code. Each statement type allows only its own purposes.",
+          "enum": ["CREDIT_UNDERWRITING", "IDENTITY_AND_FRAUD_CHECK", "CREDIT_MONITORING"]
+        },
+        "dpvPurpose": {
+          "description": "The same purpose in the W3C Data Privacy Vocabulary, as GSMA CAMARA uses it.",
+          "enum": ["dpv:CreditChecking", "dpv:FraudPreventionAndDetection", "dpv:IdentityVerification"]
+        },
+        "fetchType": { "enum": ["ONETIME", "PERIODIC"] },
+        "frequency": {
+          "description": "For PERIODIC consents: the most often the TIU may fetch, as an ISO 8601 duration.",
+          "type": "string",
+          "pattern": "^P(\\d+[DWM])$"
+        },
+        "consentExpiry": {
+          "description": "For PERIODIC consents: the last moment a fetch is allowed (typically the loan's maturity).",
+          "$ref": "#/$defs/timestamp"
+        },
+        "dataRange": { "$ref": "#/$defs/dateRange" },
+        "dataLife": {
+          "description": "How long the TIU may keep the statement after receiving it (ISO 8601 duration); it must delete it afterwards.",
+          "type": "string",
+          "pattern": "^P(\\d+[DWMY])$|^PT\\d+[HM]$"
+        }
+      },
+      "if": { "properties": { "fetchType": { "const": "PERIODIC" } } },
+      "then": { "required": ["frequency", "consentExpiry"] }
+    },
+
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linkRef", "msisdnMasked", "subscriberType", "connectionType"],
+      "properties": {
+        "linkRef": {
+          "description": "Opaque reference created when the customer linked this number to the consent manager by OTP. Never the MSISDN.",
+          "$ref": "#/$defs/identifier"
+        },
+        "msisdnMasked": {
+          "description": "The number with all but the last 4 digits masked, for display only.",
+          "type": "string",
+          "pattern": "^X{6}[0-9]{4}$"
+        },
+        "subscriberType": { "enum": ["INDIVIDUAL", "ORGANIZATION"] },
+        "connectionType": { "$ref": "#/$defs/connectionType" }
+      }
+    },
+
+    "connectionType": { "enum": ["PREPAID", "POSTPAID"] },
+
+    "numberStatus": {
+      "description": "ACTIVE: in service. SUSPENDED: outgoing or all service barred (e.g. for non-payment or by request). DISCONNECTED: terminated, not yet reassigned. PORTED_OUT: moved to another operator.",
+      "enum": ["ACTIVE", "SUSPENDED", "DISCONNECTED", "PORTED_OUT"]
+    },
+
+    "notApplicable": {
+      "description": "The block doesn't apply to this subscriber (e.g. invoices for a prepaid number).",
+      "const": "NOT_APPLICABLE"
+    },
+    "notAvailable": {
+      "description": "The block applies, but the TIP can't provide it. Not the same as zero.",
+      "const": "NOT_AVAILABLE"
+    },
+
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "[+-][0-9]{2}:[0-9]{2}$|Z$" },
+    "date": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "month": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+    "dateRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": { "from": { "$ref": "#/$defs/date" }, "to": { "$ref": "#/$defs/date" } }
+    },
+
+    "amountInr": {
+      "description": "An amount in Indian rupees, tax included, to the paisa.",
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01
+    },
+    "share": { "description": "A fraction between 0 and 1.", "type": "number", "minimum": 0, "maximum": 1 },
+    "count": { "type": "integer", "minimum": 0 },
+
+    "dataBand": {
+      "description": "Mobile data used in a month.",
+      "enum": ["D0_NONE", "D1_UNDER_1GB", "D2_1_5GB", "D3_5_20GB", "D4_20_50GB", "D5_50_100GB", "D6_OVER_100GB"]
+    },
+    "voiceBand": {
+      "description": "Voice minutes (outgoing plus incoming) in a month. Never counterparties or call counts per contact.",
+      "enum": ["V0_NONE", "V1_UNDER_100MIN", "V2_100_300MIN", "V3_300_1000MIN", "V4_1000_3000MIN", "V5_OVER_3000MIN"]
+    },
+    "recency": {
+      "description": "How recently an event last happened, relative to `dataAsOf`. Bands, not timestamps: the decision needs only recent or not, and bands are identical across operators. NEVER: not since the subscriber's activation.",
+      "enum": ["WITHIN_1H", "WITHIN_24H", "WITHIN_72H", "WITHIN_7D", "WITHIN_30D", "WITHIN_90D", "WITHIN_365D", "NONE_IN_365D", "NEVER"]
+    },
+    "dpdBucket": {
+      "description": "Days past the due date of the oldest unpaid amount.",
+      "enum": ["CURRENT", "DPD_1_30", "DPD_31_60", "DPD_61_90", "DPD_OVER_90"]
+    },
+    "collectionStage": {
+      "description": "The operator's debt-collection stage for unpaid postpaid charges, in escalating order. REMINDER: payment reminders only. DUNNING: formal overdue notices. OUTGOING_BARRED: outgoing service barred. SUSPENDED: all service barred. DISCONNECTED: terminated for non-payment. EXTERNAL_AGENCY: debt assigned to a collection agency. WRITTEN_OFF: the operator wrote the debt off.",
+      "enum": ["NONE", "REMINDER", "DUNNING", "OUTGOING_BARRED", "SUSPENDED", "DISCONNECTED", "EXTERNAL_AGENCY", "WRITTEN_OFF"]
+    },
+    "invoice": {
+      "description": "One postpaid invoice (TM Forum TMF678 CustomerBill) with how it was settled (TMF670 Payment). Amounts include taxes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billingMonth", "issuedOn", "dueOn", "amountInr", "paidAmountInr", "status", "daysPastDue"],
+      "properties": {
+        "billingMonth": { "$ref": "#/$defs/month" },
+        "issuedOn": { "$ref": "#/$defs/date" },
+        "dueOn": { "$ref": "#/$defs/date" },
+        "amountInr": { "$ref": "#/$defs/amountInr" },
+        "paidAmountInr": { "$ref": "#/$defs/amountInr" },
+        "paidInFullOn": {
+          "description": "The date the invoice was fully paid; absent while any amount is unpaid.",
+          "$ref": "#/$defs/date"
+        },
+        "status": {
+          "description": "PAID_ON_TIME: paid in full by the due date. PAID_LATE: paid in full after it. PARTIALLY_PAID / UNPAID: an amount is still due. DISPUTED: under a billing dispute raised by the customer, and not counted as overdue. WAIVED: cancelled by the operator.",
+          "enum": ["PAID_ON_TIME", "PAID_LATE", "PARTIALLY_PAID", "UNPAID", "DISPUTED", "WAIVED"]
+        },
+        "daysPastDue": {
+          "description": "Days between the due date and full payment, or `dataAsOf` while unpaid; 0 when paid on time, disputed or waived.",
+          "$ref": "#/$defs/count"
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "enum": ["PAID_ON_TIME", "PAID_LATE"] } } },
+          "then": { "required": ["paidInFullOn"] } },
+        { "if": { "properties": { "status": { "const": "PAID_ON_TIME" } } },
+          "then": { "properties": { "daysPastDue": { "const": 0 } } } }
+      ]
+    },
+    "paymentChannel": {
+      "description": "How a recharge or bill was paid. AUTOPAY: a standing mandate (UPI AutoPay, e-NACH, card standing instruction).",
+      "enum": ["UPI", "CARD", "NET_BANKING", "WALLET", "AUTOPAY", "RETAIL_CASH", "OPERATOR_STORE", "OTHER"]
+    },
+    "channelMix": {
+      "description": "Share of the amount paid through each channel over the window. The shares add up to 1 (a rounding tolerance of 0.01 is allowed). Never the payer's identity, instrument or account.",
+      "type": "object",
+      "additionalProperties": false,
+      "propertyNames": { "$ref": "#/$defs/paymentChannel" },
+      "patternProperties": { ".*": { "$ref": "#/$defs/share" } },
+      "minProperties": 1
+    }
+  }
+}

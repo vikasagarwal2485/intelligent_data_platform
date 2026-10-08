@@ -1,11 +1,11 @@
-# Intelligent Data Platform - prototype configuration
-# See docs/architecture_and_implementation_plan.md
+# Intelligent Data Platform - configuration (local defaults; IDP_* environment
+# variables override them in the cluster)
 
 platform:
   name: intelligent-data-platform
   environment: local            # local (minikube) | aws (eks)
 
-# Multi-tenancy (see plan section 1.5). Every record is stamped with tenant_id and
+# Multi-tenancy. Every record is stamped with tenant_id and
 # physically isolated by a leading partition column.
 tenants:
   - id: tenant_a
@@ -17,7 +17,7 @@ tenants:
     region: eu-central-1
     pii_salt: "salt-b-CHANGE-ME"
 
-# Lake storage layout (s3://... in prod, local dirs in prototype)
+# Lake storage layout (local dirs; s3://<prefix>-<layer> buckets when s3.enabled)
 storage:
   root: "data/lake"
   landing: "data/landing"
@@ -125,11 +125,11 @@ synthetic:
   fraud_rate: 0.10             # fraction of subscribers exhibiting fraud
   default_rate: 0.12           # fraction defaulting on extended credit
 
-# Feature engineering lookback windows (days) - see plan section 4
+# Feature engineering lookback windows (days)
 features:
   windows: [7, 30, 90]
 
-# Credit model policy (see plan section 5)
+# Credit model policy
 # Offline training (REQ-ML-09): fit on at most train_max_rows labelled rows, a
 # stratified random sample per (tenant, label class) with a fixed seed, so training
 # memory doesn't grow with the subscriber base.
@@ -178,7 +178,7 @@ credit:
   max_limit: 500.0
   min_auc: 0.55                # promotion gate: a new version becomes `champion` only if hold-out AUC >= this
 
-# Fraud model (see plan section 6)
+# Fraud model
 fraud:
   anomaly_contamination: 0.05
   min_pr_auc_lift: 1.5         # promotion gate: hold-out PR-AUC >= this x the hold-out fraud rate

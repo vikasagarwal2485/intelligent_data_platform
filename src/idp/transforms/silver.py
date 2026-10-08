@@ -1,4 +1,4 @@
-"""Silver curation: conformed records -> canonical Silver tables, on Spark (plan 3.3).
+"""Silver curation: conformed records -> canonical Silver tables, on Spark.
 
 Pure DataFrame functions (no I/O). Their inputs are the canonical records Silver's
 conform step produced from the raw Bronze events (``transforms.conform``,
@@ -14,7 +14,7 @@ the facts.
 * ``fact_recharge``       - recharge events
 * ``fact_fee_charge``     - product fee charges, enriched from products (REQ-SLV-05)
 
-Curation steps (plan 3.3): ``tenant_id`` carried on every table, id
+Curation steps: ``tenant_id`` carried on every table, id
 canonicalization (strip ``UUID(...)``), money normalization (net + tax -> gross),
 per-tenant salted PII tokenization (REQ-FND-03), and de-duplication on natural keys.
 """

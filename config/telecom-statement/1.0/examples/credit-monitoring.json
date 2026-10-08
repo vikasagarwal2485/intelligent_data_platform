@@ -1,0 +1,48 @@
+{
+  "schema": "in.telecom.statement/1.0",
+  "statementType": "CREDIT_MONITORING",
+  "statementId": "ts-01JA2K7P5D",
+  "provider": { "tipId": "TIP-OP2", "certifiedSchemaVersions": ["1.0"] },
+  "consent": {
+    "consentId": "cns-c47e10aa",
+    "purposeCode": "CREDIT_MONITORING",
+    "dpvPurpose": "dpv:CreditChecking",
+    "fetchType": "PERIODIC",
+    "frequency": "P1M",
+    "consentExpiry": "2027-12-31T23:59:59+05:30",
+    "dataRange": { "from": "2026-01-01", "to": "2027-12-31" },
+    "dataLife": "P90D"
+  },
+  "subject": {
+    "linkRef": "lnk-2b71c3e5",
+    "msisdnMasked": "XXXXXX1190",
+    "subscriberType": "INDIVIDUAL",
+    "connectionType": "POSTPAID"
+  },
+  "generatedAt": "2026-10-04T06:00:00+05:30",
+  "dataAsOf": "2026-10-03T23:59:59+05:30",
+  "body": {
+    "window": { "from": "2026-09-04", "to": "2026-10-03" },
+    "sequence": { "fetchNumber": 9, "previousStatementId": "ts-01J8T3W6N2" },
+    "numberStatus": "ACTIVE",
+    "events": [
+      { "type": "AUTOPAY_DEBIT_FAILED", "date": "2026-09-18" },
+      { "type": "BILL_OVERDUE", "date": "2026-09-21", "billingMonth": "2026-08", "dpdBucket": "DPD_1_30", "amountInr": 824.82 },
+      { "type": "COLLECTION_STAGE_CHANGE", "date": "2026-09-22", "stage": "REMINDER" },
+      { "type": "COLLECTION_STAGE_CHANGE", "date": "2026-09-27", "stage": "NONE" },
+      { "type": "SIM_CHANGE", "date": "2026-09-29" }
+    ],
+    "indicators": {
+      "spendVsBaseline": -0.04,
+      "activeDays": 30,
+      "planChange": "NONE"
+    },
+    "postpaid": {
+      "latestInvoice": { "billingMonth": "2026-09", "issuedOn": "2026-10-02", "dueOn": "2026-10-20", "amountInr": 824.82, "paidAmountInr": 0, "status": "UNPAID", "daysPastDue": 0 },
+      "collectionStage": "NONE",
+      "outstandingInr": 0,
+      "oldestUnpaidBucket": "CURRENT"
+    }
+  },
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlRJUC1PUDItMjAyNi0wMSJ9..Qm9ndXNTaWduYXR1cmVGb3JFeGFtcGxlT25seQ"
+}

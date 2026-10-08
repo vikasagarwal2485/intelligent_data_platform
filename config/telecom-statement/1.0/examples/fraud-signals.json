@@ -1,0 +1,44 @@
+{
+  "schema": "in.telecom.statement/1.0",
+  "statementType": "FRAUD_SIGNALS",
+  "statementId": "ts-01J9Z6A1V0",
+  "provider": { "tipId": "TIP-OP1", "certifiedSchemaVersions": ["1.0"] },
+  "consent": {
+    "consentId": "cns-3a90f6b2",
+    "purposeCode": "IDENTITY_AND_FRAUD_CHECK",
+    "dpvPurpose": "dpv:FraudPreventionAndDetection",
+    "fetchType": "ONETIME",
+    "dataRange": { "from": "2026-10-04", "to": "2026-10-04" },
+    "dataLife": "PT24H"
+  },
+  "subject": {
+    "linkRef": "lnk-55a0e9b1",
+    "msisdnMasked": "XXXXXX4321",
+    "subscriberType": "INDIVIDUAL",
+    "connectionType": "PREPAID"
+  },
+  "generatedAt": "2026-10-04T11:02:10+05:30",
+  "dataAsOf": "2026-10-04T11:02:09+05:30",
+  "body": {
+    "validUntil": "2026-10-04T11:17:10+05:30",
+    "numberStatus": "ACTIVE",
+    "kycTenure": { "subscriberSince": "2019-04", "tenureMonths": 90, "numberReassignedWithin": "NEVER" },
+    "kycMatch": {
+      "givenName": "MATCH",
+      "familyName": "MATCH",
+      "dateOfBirth": "MATCH",
+      "postalCode": "NO_MATCH",
+      "nameMatchScore": 94
+    },
+    "kycMethod": "AADHAAR_EKYC",
+    "simChange": { "latestWithin": "WITHIN_24H", "changesInLast90d": 1, "simType": "ESIM" },
+    "deviceChange": { "latestWithin": "WITHIN_24H", "changesInLast90d": 1 },
+    "portIn": { "latestWithin": "NEVER" },
+    "portOut": { "requestPending": false },
+    "callForwarding": { "unconditionalActive": true, "conditionalActive": false, "lastChangedWithin": "WITHIN_24H" },
+    "roaming": { "status": "NOT_ROAMING" },
+    "connectionsUnderSameIdentity": "C2_3",
+    "regulatoryFlags": { "mnrlListed": "NO", "financialFraudRiskIndicator": "NOT_FLAGGED" }
+  },
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlRJUC1PUDEtMjAyNi0wMSJ9..Qm9ndXNTaWduYXR1cmVGb3JFeGFtcGxlT25seQ"
+}

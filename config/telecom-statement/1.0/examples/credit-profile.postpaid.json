@@ -1,0 +1,97 @@
+{
+  "schema": "in.telecom.statement/1.0",
+  "statementType": "CREDIT_PROFILE",
+  "statementId": "ts-01J9Z5R8K3",
+  "provider": { "tipId": "TIP-OP2", "certifiedSchemaVersions": ["1.0"] },
+  "consent": {
+    "consentId": "cns-1f7b03de",
+    "purposeCode": "CREDIT_UNDERWRITING",
+    "dpvPurpose": "dpv:CreditChecking",
+    "fetchType": "ONETIME",
+    "dataRange": { "from": "2026-04-01", "to": "2026-09-30" },
+    "dataLife": "P30D"
+  },
+  "subject": {
+    "linkRef": "lnk-9c2e7f40",
+    "msisdnMasked": "XXXXXX8807",
+    "subscriberType": "INDIVIDUAL",
+    "connectionType": "POSTPAID"
+  },
+  "generatedAt": "2026-10-04T09:15:00+05:30",
+  "dataAsOf": "2026-10-03T23:59:59+05:30",
+  "body": {
+    "profile": {
+      "numberStatus": "ACTIVE",
+      "subscriberSince": "2021-02",
+      "tenureMonths": 68,
+      "connectionTypeHistory": [
+        { "connectionType": "PREPAID", "since": "2021-02" },
+        { "connectionType": "POSTPAID", "since": "2023-07" }
+      ],
+      "kycStatus": "VERIFIED",
+      "simType": "ESIM",
+      "deviceCategory": "SMARTPHONE"
+    },
+    "plan": {
+      "current": {
+        "category": "POSTPAID_FAMILY",
+        "priceInr": 699,
+        "dataAllowance": { "type": "PER_PERIOD", "gb": 150 },
+        "sharedPlanRole": "PRIMARY",
+        "since": "2024-03"
+      },
+      "changesInWindow": { "upgrades": 0, "downgrades": 0 }
+    },
+    "recharges": "NOT_APPLICABLE",
+    "services": {
+      "active": [
+        { "category": "FAMILY_ADDON", "since": "2024-03" },
+        { "category": "OTT_BUNDLE", "since": "2024-03" },
+        { "category": "DEVICE_INSTALLMENT", "since": "2025-12" }
+      ],
+      "operatorCredit": {
+        "advances": "NOT_APPLICABLE",
+        "deviceInstallments": { "active": true, "installmentsDue": 10, "installmentsPaidOnTime": 9, "maxDaysPastDue": 12 }
+      }
+    },
+    "paymentMethods": {
+      "channelMix": { "AUTOPAY": 0.83, "UPI": 0.17 },
+      "autopay": { "active": true, "since": "2024-03", "failedDebitsInWindow": 1 }
+    },
+    "postpaid": {
+      "creditLimitBand": "L3_1000_2500",
+      "invoices": [
+        { "billingMonth": "2026-04", "issuedOn": "2026-05-02", "dueOn": "2026-05-20", "amountInr": 824.82, "paidAmountInr": 824.82, "paidInFullOn": "2026-05-18", "status": "PAID_ON_TIME", "daysPastDue": 0 },
+        { "billingMonth": "2026-05", "issuedOn": "2026-06-02", "dueOn": "2026-06-20", "amountInr": 824.82, "paidAmountInr": 824.82, "paidInFullOn": "2026-06-18", "status": "PAID_ON_TIME", "daysPastDue": 0 },
+        { "billingMonth": "2026-06", "issuedOn": "2026-07-02", "dueOn": "2026-07-20", "amountInr": 901.52, "paidAmountInr": 901.52, "paidInFullOn": "2026-08-01", "status": "PAID_LATE", "daysPastDue": 12 },
+        { "billingMonth": "2026-07", "issuedOn": "2026-08-02", "dueOn": "2026-08-20", "amountInr": 824.82, "paidAmountInr": 824.82, "paidInFullOn": "2026-08-18", "status": "PAID_ON_TIME", "daysPastDue": 0 },
+        { "billingMonth": "2026-08", "issuedOn": "2026-09-02", "dueOn": "2026-09-20", "amountInr": 824.82, "paidAmountInr": 824.82, "paidInFullOn": "2026-09-18", "status": "PAID_ON_TIME", "daysPastDue": 0 },
+        { "billingMonth": "2026-09", "issuedOn": "2026-10-02", "dueOn": "2026-10-20", "amountInr": 824.82, "paidAmountInr": 0, "status": "UNPAID", "daysPastDue": 0 }
+      ],
+      "payments": { "count": 5, "totalAmountInr": 4200.80, "paidByDueDateRate": 0.8, "maxDaysPastDue": 12, "partialPayments": 0 },
+      "debtCollection": {
+        "currentStage": "NONE",
+        "highestStageInWindow": "REMINDER",
+        "outstandingInr": 0,
+        "oldestUnpaidBucket": "CURRENT",
+        "writtenOffInr": 0,
+        "openDisputes": 0
+      }
+    },
+    "summary": {
+      "windowMonths": 6,
+      "activeMonths": 6,
+      "spend": { "avgMonthlyInr": 837.6, "volatilityCv": 0.03, "trend": "STABLE" },
+      "usage": { "avgActiveDaysPerMonth": 30.2 }
+    },
+    "monthly": [
+      { "month": "2026-04", "spendInr": 824.82, "activeDays": 30, "dataBand": "D5_50_100GB", "voiceBand": "V4_1000_3000MIN" },
+      { "month": "2026-05", "spendInr": 824.82, "activeDays": 31, "dataBand": "D5_50_100GB", "voiceBand": "V4_1000_3000MIN" },
+      { "month": "2026-06", "spendInr": 901.52, "activeDays": 30, "dataBand": "D6_OVER_100GB", "voiceBand": "V4_1000_3000MIN" },
+      { "month": "2026-07", "spendInr": 824.82, "activeDays": 31, "dataBand": "D5_50_100GB", "voiceBand": "V3_300_1000MIN" },
+      { "month": "2026-08", "spendInr": 824.82, "activeDays": 30, "dataBand": "D5_50_100GB", "voiceBand": "V4_1000_3000MIN" },
+      { "month": "2026-09", "spendInr": 824.82, "activeDays": 29, "dataBand": "D5_50_100GB", "voiceBand": "V4_1000_3000MIN" }
+    ]
+  },
+  "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlRJUC1PUDItMjAyNi0wMSJ9..Qm9ndXNTaWduYXR1cmVGb3JFeGFtcGxlT25seQ"
+}

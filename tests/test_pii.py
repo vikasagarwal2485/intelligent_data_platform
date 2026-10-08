@@ -1,4 +1,4 @@
-"""Tests for GDPR PII handling (plan 1.5)."""
+"""Tests for GDPR PII handling."""
 from __future__ import annotations
 
 import pandas as pd
