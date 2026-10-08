@@ -29,7 +29,7 @@ dependencies = [
     "mlflow-skinny==3.14.0",          # model registry client (REQ-ML-04), = the server version
     "boto3>=1.43.3,<1.43.47",         # MLflow S3 artifacts; botocore within aiobotocore's range
     "botocore>=1.43.3,<1.43.47",
-    "mcp>=1.2",
+    "mcp>=1.2,<2",                    # MCP analytics server; mcp 2 renamed FastMCP to MCPServer (server.py uses v1)
     # Single transformation engine for Silver/Gold (REQ-ORC-05); matches the
     # Spark 3.5 runtime. Needs a JDK 11/17 on the host (the image bundles a JRE).
     "pyspark==3.5.3",
@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "httpx>=0.27", "alembic>=1.13"]   # alembic: MLflow's sqlite registry in tests
+dev = ["pytest>=7.4", "httpx>=0.27", "alembic>=1.13", "jsonschema>=4.18"]   # alembic: MLflow's sqlite registry in tests; jsonschema: the Telecom Statement 2020-12 schemas
 # SHAP-based adverse-action reason codes. Optional/heavy: when absent the credit
 # model falls back to interpretable logistic-scorecard contributions.
 explain = ["shap>=0.44"]

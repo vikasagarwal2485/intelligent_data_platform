@@ -10,7 +10,7 @@ kafka-python>=2.0
 s3fs>=2023.12
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
-mcp>=1.2
+mcp>=1.2,<2          # mcp 2 renamed FastMCP to MCPServer (src/idp/mcp/server.py uses v1)
 pyspark==3.5.3
 pyiceberg[sql-sqlite,sql-postgres,pyarrow,s3fs,pyiceberg-core]==0.12.0
 trino==0.340.0
