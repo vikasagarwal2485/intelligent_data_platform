@@ -58,9 +58,12 @@ TRINO_COMPOSE := docker compose -f deploy/dev/trino-compose.yaml
 TRINO_TEST_ENV := IDP_CATALOG_TYPE=sql IDP_CATALOG_NAME=lake \
 	IDP_CATALOG_URI=postgresql+psycopg2://postgres:idp-dev-password@127.0.0.1:15432/iceberg \
 	IDP_S3_ENDPOINT=http://127.0.0.1:19000 IDP_S3_ACCESS_KEY=minioadmin IDP_S3_SECRET_KEY=minioadmin123 \
-	IDP_TRINO_HOST=127.0.0.1 IDP_TRINO_PORT=18080
+	IDP_TRINO_HOST=127.0.0.1 IDP_TRINO_PORT=18443 IDP_TRINO_CA_CERT=$(abspath deploy/dev/trino/.secrets/tls.crt)
+TRINO_TEST_SECRETS := deploy/dev/trino/.secrets
+
 .PHONY: trino-stack
-trino-stack: ## Start the compose Trino test stack (Trino + Postgres + MinIO) and wait until healthy
+trino-stack: ## Start the compose Trino test stack (Trino + Postgres + MinIO; HTTPS + JWT auth) and wait until healthy
+	$(PY) deploy/platform/trino/make_secrets.py $(TRINO_TEST_SECRETS) --test-jwt --name localhost --name 127.0.0.1 --name trino
 	$(TRINO_COMPOSE) up -d --wait
 
 .PHONY: trino-stack-down
@@ -69,14 +72,35 @@ trino-stack-down: ## Stop the compose Trino test stack and drop its data
 
 .PHONY: mcp-trino-test
 mcp-trino-test: trino-stack ## Run the MCP tools' Trino integration tests (parity with the pandas reference; pytest -m trino)
-	$(TRINO_TEST_ENV) $(PY) -m pytest -m trino tests/test_mcp_trino.py
+	$(TRINO_TEST_ENV) $(PY) -m pytest -m trino tests/test_mcp_trino.py tests/test_tenant_isolation.py
 
 .PHONY: mcp-smoke
-mcp-smoke: ## Call every MCP tool for each tenant against the configured Trino (run 'make trino-api' first)
-	$(PY) -m idp.mcp.smoke
+# The MCP server's identity for TENANT: its Keycloak MCP client (dev secret unless
+# IDP_KC_SECRET_IDP_MCP_<TENANT> is set), the token endpoint behind `make keycloak-api`,
+# and the certificate that verifies Trino behind `make trino-api` (REQ-MCP-06).
+MCP_TENANT := $(or $(TENANT),tenant_a)
+MCP_CLIENT := idp-mcp-$(MCP_TENANT)
+MCP_SECRET_VAR := IDP_KC_SECRET_$(shell printf '%s' '$(MCP_CLIENT)' | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
+MCP_SECRET = $(or $($(MCP_SECRET_VAR)),mcp-$(subst _,-,$(MCP_TENANT))-dev-secret)
+MCP_TOKEN_URL := http://127.0.0.1:18180/realms/idp/protocol/openid-connect/token
+TRINO_CA_CERT := $(abspath deploy/platform/trino/.secrets/tls.crt)
+MCP_ENV = IDP_MCP_TOKEN_URL=$(MCP_TOKEN_URL) IDP_MCP_CLIENT_ID=$(MCP_CLIENT) \
+	IDP_MCP_CLIENT_SECRET=$(MCP_SECRET) IDP_TRINO_CA_CERT=$(TRINO_CA_CERT)
+
+.PHONY: trino-rls-bench trino-rls-bench-stack
+trino-rls-bench: ## Row-filter cost (REQ-TEN-05): MCP tool queries as TENANT's principal vs admin, 60 alternating runs, budget p50 x1.10 (needs make trino-api + keycloak-api)
+	@TRINO_ADMIN_PASSWORD=$$(kubectl -n $(NAMESPACE_PLATFORM) get secret trino-passwords -o jsonpath='{.data.TRINO_ADMIN_PASSWORD}' | base64 -d) \
+	  $(MCP_ENV) $(PY) -m idp.mcp.bench
+
+trino-rls-bench-stack: ## The same check against the compose test stack (make trino-stack; build its lake with make mcp-trino-test)
+	@TRINO_ADMIN_PASSWORD=$$(sed -n 's/^TRINO_ADMIN_PASSWORD=//p' $(TRINO_TEST_SECRETS)/passwords.env) \
+	  $(TRINO_TEST_ENV) $(PY) -m idp.mcp.bench --test-signer $(TRINO_TEST_SECRETS) --tenant $(MCP_TENANT)
+
+mcp-smoke: ## Call every MCP tool as TENANT's MCP identity (default tenant_a) and check other tenants are refused (needs make trino-api + keycloak-api)
+	$(MCP_ENV) $(PY) -m idp.mcp.smoke
 
 .PHONY: mcp-config
-mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_desktop_config.json)
+mcp-config: ## Print the Claude Desktop MCP server config for TENANT (default tenant_a; paste into claude_desktop_config.json)
 	@printf '%s\n' \
 	  '{' \
 	  '  "mcpServers": {' \
@@ -86,15 +110,20 @@ mcp-config: ## Print the Claude Desktop MCP server config (paste into claude_des
 	  '      "env": {' \
 	  '        "IDP_TRINO_HOST": "127.0.0.1",' \
 	  '        "IDP_TRINO_PORT": "8085",' \
-	  '        "IDP_TRINO_USER": "idp-mcp"' \
+	  '        "IDP_TRINO_CA_CERT": "$(TRINO_CA_CERT)",' \
+	  '        "IDP_MCP_TOKEN_URL": "$(MCP_TOKEN_URL)",' \
+	  '        "IDP_MCP_CLIENT_ID": "$(MCP_CLIENT)",' \
+	  '        "IDP_MCP_CLIENT_SECRET": "$(MCP_SECRET)"' \
 	  '      }' \
 	  '    }' \
 	  '  }' \
 	  '}'
 	@echo ""
-	@echo "# The tools query the lake through Trino as the read-only 'idp-mcp' user; they"
-	@echo "# need no lake or MinIO credentials. Prereqs: 'make install' (installs mcp), and"
-	@echo "# keep 'make trino-api' running (forwards 127.0.0.1:8085) while Claude uses it."
+	@echo "# This server answers for $(MCP_TENANT) only: Keycloak issues its client a token for"
+	@echo "# mcp@$(MCP_TENANT), and Trino row-filters every query to that tenant. It needs no"
+	@echo "# lake or MinIO credentials. Prereqs: 'make install' (installs mcp), 'make trino-certs'"
+	@echo "# (the CA above), and keep 'make trino-api' (127.0.0.1:8085) and 'make keycloak-api'"
+	@echo "# (127.0.0.1:18180) running while Claude uses it. Another tenant: TENANT=<id>."
 	@echo "# Paste into (create if missing), then fully quit (Cmd-Q) and reopen Claude Desktop:"
 	@echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
 	@echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
@@ -132,8 +161,13 @@ strimzi-fix: ## Relax Strimzi operator probes + raise memory (fixes probe failur
 trino-fix: ## Re-apply tuned Trino values (auto-recovers a stuck Helm release)
 	bash deploy/platform/trino-tune.sh idp-platform
 
+.PHONY: keycloak-realm
+keycloak-realm: ## Render deploy/platform/keycloak/idp-realm.json from its base + the configured tenants (groups, scoring + MCP clients)
+	$(PY) -m idp.cli keycloak-realm
+
 .PHONY: keycloak
 keycloak: ## Apply Keycloak with the `idp` realm (ConfigMap from deploy/platform/keycloak/idp-realm.json) and restart it to re-import
+	$(PY) -m idp.cli keycloak-realm --check   # the realm must match the configured tenants: run `make keycloak-realm`
 	kubectl create configmap keycloak-realm -n idp-platform \
 	  --from-file=idp-realm.json=deploy/platform/keycloak/idp-realm.json --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -n idp-platform -f deploy/platform/keycloak/keycloak.yaml
@@ -143,8 +177,8 @@ keycloak: ## Apply Keycloak with the `idp` realm (ConfigMap from deploy/platform
 
 TENANT ?= tenant_a
 .PHONY: keycloak-token
-keycloak-token: ## Print a dev access token for TENANT (default tenant_a): TOKEN=$$(make -s keycloak-token TENANT=tenant_b)
-	@bash deploy/platform/keycloak/token.sh $(TENANT) idp-platform
+keycloak-token: ## Print a dev access token for TENANT (default tenant_a); KIND=scoring|mcp|user (user: DEV_USER=alice): TOKEN=$$(make -s keycloak-token TENANT=tenant_b KIND=mcp)
+	@KIND=$(or $(KIND),scoring) bash deploy/platform/keycloak/token.sh $(TENANT) idp-platform
 
 .PHONY: mlflow
 mlflow: ## Install/upgrade the MLflow model registry (pinned chart; creates its `mlflow` DB in TimescaleDB)
@@ -190,9 +224,8 @@ lake-table-rows: ## Show a lake table's rows via Trino (read-only; Bronze holds 
 	@case "$(TENANT)" in *[!a-z0-9_]*) echo "TENANT must be a tenant id like tenant_a" >&2; exit 1;; esac
 	@case "$(COLUMNS)" in "*") ;; *[!a-z0-9_,]*|"") echo "COLUMNS must be * or comma-separated column names" >&2; exit 1;; esac
 	@case "$(FORMAT)" in ALIGNED|VERTICAL|CSV|CSV_HEADER|TSV|TSV_HEADER|JSON) ;; *) echo "FORMAT must be ALIGNED, VERTICAL, CSV(_HEADER), TSV(_HEADER) or JSON" >&2; exit 1;; esac
-	@kubectl -n $(NAMESPACE_PLATFORM) exec deploy/trino-coordinator -- trino --user admin \
-	  --output-format $(FORMAT) \
-	  --execute "SELECT $(COLUMNS) FROM lake.$(TABLE)$(if $(TENANT), WHERE tenant_id = '$(TENANT)',) LIMIT $(ROWS_LIMIT)"
+	@bash deploy/platform/trino/cli.sh $(NAMESPACE_PLATFORM) $(FORMAT) \
+	  "SELECT $(COLUMNS) FROM lake.$(TABLE)$(if $(TENANT), WHERE tenant_id = '$(TENANT)',) LIMIT $(ROWS_LIMIT)"
 
 .PHONY: lake-catalog-psql
 lake-catalog-psql: ## Open a psql shell on the Iceberg catalog database (`iceberg`): tables iceberg_tables, iceberg_namespace_properties
@@ -291,10 +324,19 @@ serve-cluster: ## Port-forward the cluster's scoring API to 127.0.0.1:18000 (aut
 	kubectl -n idp-app rollout status deploy/scoring-api --timeout=120s
 	kubectl -n idp-app port-forward svc/scoring-api $(CLUSTER_API_PORT):80
 
+.PHONY: trino-certs
+trino-certs: ## Create Trino's TLS, service-user password and shared-secret Secrets (idempotent; ROTATE=1 regenerates, then make trino-fix)
+	bash deploy/platform/trino/certs.sh $(NAMESPACE_PLATFORM) $(PY)
+
+.PHONY: keycloak-api
+keycloak-api: ## Port-forward Keycloak to 127.0.0.1:18180 (the host MCP server's token endpoint)
+	@echo "Keycloak on http://127.0.0.1:18180  (keep this running while the MCP server answers)"
+	kubectl -n idp-platform port-forward svc/keycloak 18180:8080
+
 .PHONY: trino-api
-trino-api: ## Port-forward Trino to 127.0.0.1:8085 (for the host MCP server's analytics queries)
-	@echo "Trino on http://127.0.0.1:8085  (keep this running while the MCP server answers)"
-	kubectl -n idp-platform port-forward svc/trino 8085:8080
+trino-api: ## Port-forward Trino's HTTPS port to 127.0.0.1:8085 (for the host MCP server; trusts deploy/platform/trino/.secrets/tls.crt)
+	@echo "Trino on https://127.0.0.1:8085  (keep this running while the MCP server answers)"
+	kubectl -n idp-platform port-forward svc/trino 8085:8443
 
 .PHONY: minio-api
 minio-api: ## Port-forward the MinIO S3 API to 127.0.0.1:9000 (for the host MCP server to read Silver)
