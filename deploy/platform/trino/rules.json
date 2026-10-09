@@ -1,16 +1,23 @@
 {
   "catalogs": [
     {"user": "admin", "allow": "all"},
-    {"user": "idp-mcp", "catalog": "lake", "allow": "read-only"},
+    {"user": "[a-z0-9._-]+@[a-z0-9_]+", "catalog": "lake", "allow": "read-only"},
     {"allow": "none"}
   ],
   "schemas": [
     {"user": "admin", "owner": true},
-    {"user": "idp-mcp", "catalog": "lake", "schema": "silver|gold", "owner": false}
+    {"user": "[a-z0-9._-]+@[a-z0-9_]+", "catalog": "lake", "schema": "silver|gold", "owner": false}
   ],
   "tables": [
     {"user": "admin", "privileges": ["SELECT", "INSERT", "DELETE", "UPDATE", "OWNERSHIP"]},
-    {"user": "idp-mcp", "catalog": "lake", "schema": "silver|gold", "privileges": ["SELECT"]},
+    {"user": "[a-z0-9._-]+@[a-z0-9_]+", "catalog": "lake", "schema": "silver|gold",
+     "table": ".*\\$.*", "privileges": []},
+    {"user": "[a-z0-9._-]+@[a-z0-9_]+", "catalog": "lake", "schema": "silver|gold",
+     "privileges": ["SELECT"],
+     "filter": "tenant_id = regexp_extract(current_user, '@([a-z0-9_]+)$', 1)"},
     {"privileges": []}
+  ],
+  "impersonation": [
+    {"original_user": "superset", "new_user": "[a-z0-9._-]+@[a-z0-9_]+"}
   ]
 }

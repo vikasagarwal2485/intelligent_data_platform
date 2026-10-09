@@ -87,7 +87,7 @@ def test_missing_model_returns_503(tmp_path):
 def test_serving_lookup_503_when_store_disabled(monkeypatch):
     monkeypatch.delenv("IDP_TS_HOST", raising=False)
     client = TestClient(create_app())
-    assert client.get("/serving/credit_scores/tenant_a/tok_x").status_code == 503
+    assert client.get("/serving/credit_scores/tok_x", headers={"X-Tenant-Id": "tenant_a"}).status_code == 503
 
 
 def test_serving_lookup_404_for_unknown_table_or_row(monkeypatch):
@@ -96,8 +96,9 @@ def test_serving_lookup_404_for_unknown_table_or_row(monkeypatch):
     monkeypatch.setenv("IDP_TS_HOST", "localhost")
     monkeypatch.setattr(timescale, "read_score", lambda *a, **k: None)
     client = TestClient(create_app())
-    assert client.get("/serving/labels/tenant_a/tok_x").status_code == 404
-    assert client.get("/serving/credit_scores/tenant_a/tok_missing").status_code == 404
+    h = {"X-Tenant-Id": "tenant_a"}
+    assert client.get("/serving/labels/tok_x", headers=h).status_code == 404
+    assert client.get("/serving/credit_scores/tok_missing", headers=h).status_code == 404
 
 
 def test_serving_lookup_returns_published_row(monkeypatch):
@@ -106,8 +107,23 @@ def test_serving_lookup_returns_published_row(monkeypatch):
     row = {"tenant_id": "tenant_a", "service_id": "tok_x", "recommended_limit": 42.0}
     monkeypatch.setenv("IDP_TS_HOST", "localhost")
     monkeypatch.setattr(timescale, "read_score", lambda *a, **k: row)
-    resp = TestClient(create_app()).get("/serving/credit_scores/tenant_a/tok_x")
+    seen = []
+    monkeypatch.setattr(timescale, "read_score", lambda cfg, table, t, s: seen.append((table, t, s)) or row)
+    resp = TestClient(create_app()).get("/serving/credit_scores/tok_x", headers={"X-Tenant-Id": "tenant_a"})
     assert resp.status_code == 200 and resp.json() == row
+    assert seen == [("credit_scores", "tenant_a", "tok_x")]
+
+
+def test_serving_lookup_needs_the_tenant_header_without_auth(monkeypatch):
+    # auth off (dev, tests): the X-Tenant-Id header is the only source of the tenant
+    monkeypatch.setenv("IDP_TS_HOST", "localhost")
+    resp = TestClient(create_app()).get("/serving/credit_scores/tok_x")
+    assert resp.status_code == 422 and "X-Tenant-Id" in resp.json()["detail"]
+
+
+def test_old_lookup_path_is_gone():
+    # the tenant is no longer a path segment
+    assert TestClient(create_app()).get("/serving/credit_scores/tenant_a/tok_x").status_code == 404
 
 
 def test_deployed_api_reads_the_serving_store_publish_writes():

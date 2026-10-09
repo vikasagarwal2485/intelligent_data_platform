@@ -52,9 +52,9 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **Apache Kafka** (Strimzi) | Event streaming backbone for the ingestion path | **Active** (streaming mode) |
 | **Apicurio Schema Registry** | Each topic's TM Forum JSON Schema (the wire contract), Confluent-compatible API | **Active** (schemas registered) |
 | **Nessie** | Git-like Iceberg catalog | Provisioned (not the lake's catalog: its REST catalog keeps only the current snapshot; ADR-0028) |
-| **Trino** | Distributed SQL over the lake for ad-hoc queries | **Active** (query Silver/Gold) |
+| **Trino** | Distributed SQL over the lake: HTTPS, every request authenticated (Keycloak tokens; passwords for `admin`/`superset`), row-level security per tenant | **Active** (query Silver/Gold; `make trino-certs` + `make trino-fix`) |
 | **TimescaleDB** | Low-latency **Gold serving** store (indexed by `service_id`) | **Active** (`idp publish` mirrors Gold here) |
-| **Keycloak** | OIDC identity: realm `idp` issues the scoring API's tenant-scoped tokens | **Active** (`make keycloak` + `make keycloak-token`) |
+| **Keycloak** | OIDC identity: realm `idp` (rendered from the configured tenants) issues tenant-scoped tokens for the scoring API and, as `<name>@<tenant>` principals, for Trino | **Active** (`make keycloak` + `make keycloak-token`) |
 | **Apache Airflow** | Batch orchestration (schedules the medallion DAG) | **Active** (DAG in `pipelines/airflow`) |
 | **MLflow** | Experiment tracking + model registry (versions, gated `champion` alias) | **Active** (`make mlflow` + `make mlflow-ui`) |
 | **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
@@ -70,7 +70,7 @@ sized by `spark.profiles.<stage>`).
 
 | Application | Kind | Stage | Purpose |
 |---|---|---|---|
-| **scoring-api** (FastAPI) | Deployment + Service | Serving | `POST /credit-limit` and `/fraud-score` (on-demand, the MLflow `champion` models) and `GET /serving/{table}/{tenant}/{service_id}` (precomputed rows from TimescaleDB). Requires a Keycloak token whose `tenant_id` claim scopes every call |
+| **scoring-api** (FastAPI) | Deployment + Service | Serving | `POST /credit-limit` and `/fraud-score` (on-demand, the MLflow `champion` models) and `GET /serving/{table}/{service_id}` (precomputed rows from TimescaleDB). Requires a Keycloak token whose `tenant_id` claim scopes every call; a tenant in the request (`X-Tenant-Id` header, body `tenant_id`) is optional and must match |
 | **idp-generate** | Job | Source | Writes the synthetic source data as TM Forum resource files to `s3://idp-landing` |
 | **idp-produce** | Job | Ingestion | Publishes in-memory synthetic data as TM Forum create events to the `t.<tenant>.<resource>` topics |
 | **idp-produce-from-landing** | Job | Ingestion | Validates the landing files and publishes them as TM Forum create events |
@@ -88,7 +88,8 @@ Outside the cluster:
   `score`, `publish`, `maintain`, `run` (the whole flow locally), `serve`, `mcp`, plus
   helpers (`spark-manifest`, `registry-schemas`, `archive-policy`).
 - **MCP analytics server** (`make mcp`): a stdio server on the operator's host; its
-  tools query Silver and Gold through Trino as a read-only identity (section 4.6).
+  tools query Silver and Gold through Trino as one tenant's identity, which Trino
+  row-filters to that tenant (section 4.6).
 
 ### 1.4 System integration architecture
 
@@ -194,7 +195,7 @@ flowchart TB
         SPK["Spark Operator (SparkApplications)"]
         CAT["Iceberg JDBC catalog<br/>(iceberg DB on TimescaleDB)"]
         TR["Trino lake catalog → MCP analytics server"]
-        GOV["Tenancy & GDPR: tenant_id partitions,<br/>salted tokens, consent, Keycloak OIDC,<br/>Trino read-only identity"]
+        GOV["Tenancy & GDPR: tenant_id partitions,<br/>salted tokens, consent, Keycloak OIDC,<br/>Trino row-level security"]
         MON["Prometheus + Grafana"]
     end
 
@@ -227,7 +228,7 @@ flowchart TB
 | Great Expectations quality gates | Schema, tenant, reference and Avro-contract checks in the conform step, with failures in `silver.quarantine` |
 | Feast feature store (offline Iceberg, online Timescale) | Gold Iceberg feature tables (offline) mirrored to TimescaleDB by `idp publish` (online); the feature contract lives in `common/feature_contract.py` |
 | `subscriber_features_daily`, aggregates/KPIs | One row per subscriber in `credit_features` and `fraud_features`; KPIs come from the MCP tools over Trino |
-| Keycloak + OPA row/column policies | Keycloak OIDC tokens scope the scoring API; Trino file-based access control limits the MCP identity to Silver and Gold reads. OPA isn't deployed |
+| Keycloak + OPA row/column policies | Keycloak tokens carry the tenant to the scoring API and to Trino (`<name>@<tenant>` principals); Trino row-filters every Silver and Gold table to the principal's tenant and denies metadata tables, Bronze and writes (ADR-0038). OPA isn't deployed |
 | Flink real-time scoring | Deferred (ADR-0004): scoring is the batch `idp score` stage plus the on-demand API |
 
 ### 1.6 Deployment architecture
@@ -1001,7 +1002,7 @@ namespace `idp-app`) that computes a score from features using the loaded models
 | `GET /health` | liveness |
 | `POST /credit-limit` | `{pd, affordability_base, recommended_limit}` computed from features |
 | `POST /fraud-score` | `{fraud_proba, anomaly_score, rule_score, fraud_score}` |
-| `GET /serving/{table}/{tenant_id}/{service_id}` | a **precomputed** Gold row from TimescaleDB |
+| `GET /serving/{table}/{service_id}` | a **precomputed** Gold row from TimescaleDB, for the token's tenant (optional `X-Tenant-Id` header, validated) |
 
 The `features` map uses the model's feature names
 (`common/feature_contract.py`). A missing feature is scored as 0; a name outside
@@ -1019,7 +1020,7 @@ single indexed lookup instead of recomputing — the Gold serving layer
 **Two kinds of inference call.** *Inference* is running a trained model on a
 subscriber's features to get a score. The platform offers it two ways:
 
-| | On-demand (`POST /credit-limit`, `POST /fraud-score`) | Precomputed (`GET /serving/{table}/{tenant}/{service_id}`) |
+| | On-demand (`POST /credit-limit`, `POST /fraud-score`) | Precomputed (`GET /serving/{table}/{service_id}`) |
 |---|---|---|
 | When the model runs | at request time, in the API, on the features the caller sends | ahead of time, in `make score`, for every consenting subscriber in Gold |
 | What the call does | loads the champion model (once) and scores the request body | reads the stored row from TimescaleDB with one indexed lookup; no model involved |
@@ -1041,7 +1042,10 @@ keep every run for history. `make score` and `make publish` refresh it (after
 
 ```bash
 TOKEN=$(make -s keycloak-token TENANT=tenant_a)
-curl -s localhost:18000/serving/credit_scores/tenant_a/tok_5bf6544411eb5a3d64d7316d -H "Authorization: Bearer $TOKEN"
+curl -s localhost:18000/serving/credit_scores/tok_5bf6544411eb5a3d64d7316d -H "Authorization: Bearer $TOKEN"
+# the tenant comes from the token; X-Tenant-Id is optional and, if sent, must match it:
+curl -s localhost:18000/serving/credit_scores/tok_5bf6544411eb5a3d64d7316d -H "Authorization: Bearer $TOKEN" \
+  -H "X-Tenant-Id: tenant_a"
 # {"tenant_id":"tenant_a","service_id":"tok_5bf6544411eb5a3d64d7316d","pd":0.2251,
 #  "affordability_base":152.08,"recommended_limit":117.85,"scored_at":"2026-10-03T13:57:29.693354"}
 ```
@@ -1087,19 +1091,22 @@ first thing to check.
 its signature against the realm's keys (JWKS), its issuer, audience
 (`idp-scoring-api`) and expiry, and serves only the token's `tenant_id` claim:
 - no or an invalid token → `401`; a valid token without `tenant_id` → `403`
-- a body or path `tenant_id` that differs from the token's → `403` (the body's
-  `tenant_id` may be omitted; the token decides)
+- the Bearer token is mandatory; the tenant in the request is optional and only
+  checked: a body `tenant_id` (scoring) or an `X-Tenant-Id` header (serving lookup)
+  that differs from the token's → `403`. Omitted, the token decides
 - Keycloak unreachable → `503`, never an unauthenticated pass-through
 
 Models are loaded lazily; scoring endpoints return `503` until models are trained,
 and the serving endpoint returns `503` until TimescaleDB is enabled.
 
 Run locally: `make serve` (auth is off locally, `auth.enabled: false`, so the body's
-`tenant_id` is used) then:
+`tenant_id` or the `X-Tenant-Id` header is used, and required) then:
 ```bash
 curl -s localhost:8000/health
 curl -s -X POST localhost:8000/credit-limit -H 'content-type: application/json' \
   -d '{"tenant_id":"tenant_a","service_id":"tok_demo","features":{"recharge_avg_amount":40,"customer_tenure_days":500,"recharge_success_rate":0.95}}'
+# serving lookup (needs IDP_TS_HOST): with auth off, X-Tenant-Id is required
+curl -s localhost:8000/serving/credit_scores/tok_demo -H "X-Tenant-Id: tenant_a"
 ```
 In the cluster, get a tenant's token first (`deploy/README.md`, "Calling the scoring
 API"):
@@ -1116,20 +1123,31 @@ Inspect the TimescaleDB serving tables: `make timescale-psql`.
 A [Model Context Protocol](https://modelcontextprotocol.io) server exposes the
 curated lake to AI agents (e.g. Claude Desktop) as **seven read-only, tenant-scoped
 analytics tools** — five over the Silver tables, two over the Gold score tables.
-Every tool takes a `tenant_id`, reads only that tenant's data, and returns compact
-aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`, ADR-0030).
+Each server answers for **one tenant**, the one its credentials belong to, and
+returns compact aggregated JSON — never raw PII, never cross-tenant (`src/idp/mcp/`,
+ADR-0030, ADR-0038).
 
 The tools ask **Trino**: its `lake` catalog reads the same Iceberg catalog rows and
 tables the stages commit. Filtering, grouping, sums, histograms and percentiles run
 in Trino over the tenant's partitions (the tenant is always a bound parameter), and
-only the aggregated rows come back to the MCP process. The tools connect as
-`idp-mcp`, a user Trino's access control limits to `SELECT` on `lake.silver` and
-`lake.gold`, so the engine itself refuses writes and Bronze reads.
+only the aggregated rows come back to the MCP process. Two independent layers keep
+tenants apart (REQ-TEN-04):
+
+- **Identity.** The server signs in to Keycloak with its tenant's MCP client
+  (`idp-mcp-<tenant>`, client credentials). The token says `idp_principal =
+  mcp@<tenant>` and `tenant_id = <tenant>`; the tools use that tenant, `tenant_id`
+  is optional, and asking for another tenant is refused before any query.
+- **Storage.** Trino authenticates every request (tokens checked against the realm's
+  keys, over HTTPS only) and row-filters every Silver and Gold table to the
+  principal's tenant, whatever the SQL says. Iceberg metadata tables, Bronze, writes
+  and DDL are denied.
 
 ```
-Claude Desktop --stdio--> idp mcp --SQL (idp-mcp, ?-bound tenant)--> Trino `lake`
-                                                                      |  catalog rows: Postgres `iceberg`
-                                                                      v  data: s3://idp-silver, idp-gold
+Claude Desktop --stdio--> idp mcp --token: mcp@tenant_a--> Keycloak (idp-mcp-tenant_a)
+                             |
+                             +--HTTPS + token, ?-bound tenant--> Trino `lake`: row filter tenant_id = tenant_a
+                                                                  |  catalog rows: Postgres `iceberg`
+                                                                  v  data: s3://idp-silver, idp-gold
 ```
 
 | Tool | Answers |
@@ -1149,29 +1167,32 @@ Claude Desktop --stdio--> idp mcp --SQL (idp-mcp, ?-bound tenant)--> Trino `lake
 
 **Prerequisites.** The `mcp` package (installed by `make install`), a lake with
 Silver (and, for the score tools, Gold) in the cluster (`make stream`, `make silver`,
-and the Gold/Score stages), and Trino deployed with the `lake` catalog
-(`make trino-fix`; it installs `deploy/platform/trino/lake.properties` and the
-access rules in `rules.json`).
+and the Gold/Score stages), Trino's authentication Secrets (`make trino-certs`, once),
+Trino deployed with the `lake` catalog and rules (`make trino-fix`), and Keycloak
+with the rendered realm (`make keycloak`).
 
-**Step 1 — forward Trino to your host** (keep it running in its own terminal):
+**Step 1 — forward Trino and Keycloak to your host** (keep both running, each in
+its own terminal):
 ```bash
-make trino-api        # = kubectl -n idp-platform port-forward svc/trino 8085:8080
+make trino-api        # = kubectl -n idp-platform port-forward svc/trino 8085:8443  (HTTPS)
+make keycloak-api     # = kubectl -n idp-platform port-forward svc/keycloak 18180:8080 (token endpoint)
 ```
 Host port 8085, because `kafka-ui` and the Airflow webserver already forward 8080.
-`config/platform.yaml` (`trino:`) defaults to `127.0.0.1:8085` as `idp-mcp`;
-`IDP_TRINO_HOST`/`PORT`/`USER`/`CATALOG` override it.
+The host trusts Trino's certificate from `deploy/platform/trino/.secrets/tls.crt`
+(written by `make trino-certs`). `IDP_TRINO_HOST`/`PORT`/`CATALOG`/`CA_CERT` and
+`IDP_MCP_TOKEN_URL`/`CLIENT_ID`/`CLIENT_SECRET` override `config/platform.yaml`.
 
-**Step 2 — verify the tools return data:**
+**Step 2 — verify the tools return data, as one tenant:**
 ```bash
-make mcp-smoke        # calls all seven tools for each tenant; non-zero exit on any error
+make mcp-smoke TENANT=tenant_a   # all seven tools as mcp@tenant_a, then checks the other tenants are refused
 ```
 Expected (abridged):
 ```
->> Trino at http://127.0.0.1:8085 as idp-mcp (catalog lake)
+>> Trino at https://127.0.0.1:8085 (catalog lake) as mcp@tenant_a, token from http://127.0.0.1:18180/...
 ok   tenant_a analyze_subscribers_tool: 1645 subscribers (1719 ms)
 ok   tenant_a analyze_usage_events_tool: 345029 usage events (2406 ms)
 ...
-ok   tenant_b analyze_credit_score_tool: 399 scores in 30d (1043 ms)
+ok   tenant_b refused for mcp@tenant_a
 ```
 
 **Step 3 — start the server (stdio):**
@@ -1183,14 +1204,16 @@ used standalone. Three ways to connect:
 
 - **Claude Desktop** — print a ready-made config and paste it in:
   ```bash
-  make mcp-config            # prints the "mcpServers" block (absolute python path + Trino env)
+  make mcp-config TENANT=tenant_a   # the "mcpServers" block: python path, Trino endpoint + CA, the tenant's MCP client
   ```
   Add it to `claude_desktop_config.json` (macOS:
   `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`) and restart
   Claude Desktop. The config needs no lake or MinIO credentials, only the Trino
-  endpoint; `make trino-api` must be running whenever Claude Desktop launches the
-  server. Then ask Claude, e.g. *"Using idp-analytics, what's the roamer split and
-  top products by fee revenue for tenant_a?"*
+  endpoint and the tenant's MCP client; `make trino-api` and `make keycloak-api`
+  must be running whenever Claude Desktop launches the server. One server answers
+  for one tenant; for another, add a second server entry with its `TENANT`. Then
+  ask Claude, e.g. *"Using idp-analytics, what's the roamer split and top products
+  by fee revenue?"*
 - **MCP Inspector** (interactive UI, needs Node/npx):
   ```bash
   .venv/bin/mcp dev src/idp/mcp/server.py
@@ -1200,10 +1223,11 @@ used standalone. Three ways to connect:
   .venv/bin/mcp install src/idp/mcp/server.py --name idp-analytics
   ```
 
-**Errors are results, not exceptions.** A missing or unknown tenant returns the
-tenants that exist and asks the client to ask you which one; an unreachable Trino
-(e.g. `make trino-api` not running) returns an `error` naming the endpoint as
-`source`, never an empty "0".
+**Errors are results, not exceptions.** Another tenant than the server's returns its
+own tenant as `available_tenants` and asks the client to check with you; an
+unreachable Trino (e.g. `make trino-api` not running) or Keycloak (`make
+keycloak-api`) returns an `error` naming that endpoint as `source`, never an empty
+"0".
 
 **Exactness.** The tools reproduce the pandas implementations they replaced, which
 are kept as the test oracle (`tests/mcp_reference.py`): counts, sums, means,
@@ -1212,16 +1236,28 @@ Trino). REQ-MCP-09 would allow ±1% rank error; Trino's `approx_percentile` exce
 that on small or discrete data, so the tools don't use it.
 
 **Integration tests.** `make mcp-trino-test` starts a disposable Trino + Postgres +
-MinIO stack (`deploy/dev/trino-compose.yaml`, offset ports 18080/15432/19000) with
-the cluster's catalog file and rules, builds a two-tenant lake in it through the real
-stages, and compares every tool with the oracle, checks the IO plan's tenant
-constraint and the rows fetched, and checks that `idp-mcp` can't write
-(`pytest -m trino`; the default `pytest` run skips them). `make trino-stack-down`
-removes the stack.
+MinIO stack (`deploy/dev/trino-compose.yaml`, HTTPS on 18443, Postgres 15432, MinIO
+19000) with the cluster's catalog file, rules and authentication; its secrets and a
+test token-signing key are generated into the git-ignored
+`deploy/dev/trino/.secrets`. It builds a two-tenant lake in it through the real
+stages, then:
+- `tests/test_mcp_trino.py` compares every tool with the oracle, as each tenant's
+  principal, and checks the IO plan's tenant constraint, the rows fetched and that
+  the principal can't write;
+- `tests/test_tenant_isolation.py` attacks each layer with the other one removed:
+  the tools' own tenant filters stripped (Trino's row filter must hold), an
+  unfiltered engine (the identity must refuse), forged tokens (no key, unknown
+  key, expired, wrong audience or issuer, no principal), metadata tables,
+  impersonation, and an untagged table.
+
+They run with `pytest -m trino`; the default `pytest` run skips them.
+`make trino-stack-down` removes the stack. `make trino-rls-bench TENANT=<t>`
+(cluster) or `make trino-rls-bench-stack` compares the tools' query times with and
+without the row filter (REQ-TEN-05).
 
 Make targets: `make mcp` (start), `make mcp-smoke` (verify against Trino),
-`make mcp-config` (Claude Desktop config), `make trino-api` (forward Trino),
-`make mcp-trino-test` (integration tests).
+`make mcp-config` (Claude Desktop config), `make trino-api` / `make keycloak-api`
+(forwards), `make mcp-trino-test` (integration and leakage tests).
 
 ---
 

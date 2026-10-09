@@ -7,7 +7,7 @@ from idp.common.config import load_config
 def test_config_exposes_all_sections():
     # SCN-FND-01.1
     cfg = load_config()
-    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "mlflow", "auth", "timescale",
+    for section in ("tenants", "storage", "kafka", "s3", "catalog", "lake", "trino", "mcp", "mlflow", "auth", "timescale",
                     "spark", "synthetic", "features", "credit", "fraud"):
         assert getattr(cfg, section) is not None, section
 
@@ -84,15 +84,32 @@ def test_catalog_name_is_stable_for_shared_catalogs(monkeypatch):
 
 
 def test_trino_defaults_and_env(monkeypatch):
-    # SCN-FND-01.6 — the analytics tools' query engine comes from config/env
-    for var in ("IDP_TRINO_HOST", "IDP_TRINO_PORT", "IDP_TRINO_USER", "IDP_TRINO_CATALOG"):
+    # SCN-FND-01.6 — the analytics tools' query engine comes from config/env, over
+    # HTTPS, with no configured user (the identity comes from the MCP client)
+    for var in ("IDP_TRINO_HOST", "IDP_TRINO_PORT", "IDP_TRINO_CATALOG", "IDP_TRINO_CA_CERT"):
         monkeypatch.delenv(var, raising=False)
     t = load_config().trino
-    assert (t["host"], t["port"], t["user"], t["catalog"]) == ("127.0.0.1", 8085, "idp-mcp", "lake")
+    assert (t["host"], t["port"], t["catalog"], t["http_scheme"]) == ("127.0.0.1", 8085, "lake", "https")
+    assert "user" not in t
+    assert t["ca_cert"].endswith("deploy/platform/trino/.secrets/tls.crt") and t["ca_cert"].startswith("/")
     monkeypatch.setenv("IDP_TRINO_HOST", "trino.idp-platform.svc")
     monkeypatch.setenv("IDP_TRINO_PORT", "8443")
+    monkeypatch.setenv("IDP_TRINO_CA_CERT", "/etc/ssl/trino.crt")
     t = load_config().trino
-    assert (t["host"], t["port"]) == ("trino.idp-platform.svc", 8443)
+    assert (t["host"], t["port"], t["ca_cert"]) == ("trino.idp-platform.svc", 8443, "/etc/ssl/trino.crt")
+
+
+def test_mcp_identity_via_env(monkeypatch):
+    # REQ-FND-01: the MCP client credentials come from the environment; a client id enables it
+    for var in ("IDP_MCP_TOKEN_URL", "IDP_MCP_CLIENT_ID", "IDP_MCP_CLIENT_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    a = load_config().mcp["auth"]
+    assert a["enabled"] is False and a["token_url"].endswith("/realms/idp/protocol/openid-connect/token")
+    monkeypatch.setenv("IDP_MCP_CLIENT_ID", "idp-mcp-tenant_b")
+    monkeypatch.setenv("IDP_MCP_CLIENT_SECRET", "x")
+    monkeypatch.setenv("IDP_MCP_TOKEN_URL", "http://kc:8080/realms/idp/protocol/openid-connect/token")
+    a = load_config().mcp["auth"]
+    assert (a["enabled"], a["client_id"], a["client_secret"]) == (True, "idp-mcp-tenant_b", "x")
 
 
 def test_mlflow_registry_via_env(monkeypatch):

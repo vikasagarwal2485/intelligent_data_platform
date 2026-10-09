@@ -125,15 +125,38 @@ class PlatformConfig:
 
     @property
     def trino(self) -> dict[str, Any]:
-        """SQL query engine for the analytics tools (REQ-MCP-06): Trino's lake catalog."""
+        """SQL query engine for the analytics tools (REQ-MCP-06): Trino's lake catalog,
+        over HTTPS. ``ca_cert`` is the certificate that verifies its endpoint (a
+        relative path is from the repository root; empty: the system trust store).
+        There is no configured user: queries run as the identity of the ``mcp``
+        client credentials (REQ-PLT-11)."""
         t = dict(self.raw.get("trino", {}))
         env = os.environ
         t["host"] = env.get("IDP_TRINO_HOST", t.get("host", "127.0.0.1"))
         t["port"] = int(env.get("IDP_TRINO_PORT", t.get("port", 8085)))
-        t["user"] = env.get("IDP_TRINO_USER", t.get("user", "idp-mcp"))
         t["catalog"] = env.get("IDP_TRINO_CATALOG", t.get("catalog", "lake"))
-        t.setdefault("http_scheme", "http")
+        t.setdefault("http_scheme", "https")
+        ca = env.get("IDP_TRINO_CA_CERT", t.get("ca_cert", "")) or ""
+        if ca and not Path(ca).is_absolute():
+            ca = str(DEFAULT_CONFIG_PATH.parents[1] / ca)
+        t["ca_cert"] = ca
         return t
+
+    @property
+    def mcp(self) -> dict[str, Any]:
+        """The MCP server's identity (REQ-MCP-06): Keycloak client credentials of its
+        tenant's MCP client (``idp-mcp-<tenant>``), whose token carries the tenant and
+        authenticates every Trino query. Enabled when a client id is set
+        (``IDP_MCP_CLIENT_ID``); disabled only for tests with a fake query engine."""
+        a = {"enabled": False, "token_url": "", "client_id": "", "client_secret": "",
+             "refresh_margin_seconds": 30, **(self.raw.get("mcp", {}) or {}).get("auth", {})}
+        env = os.environ
+        a["token_url"] = env.get("IDP_MCP_TOKEN_URL", a["token_url"] or "")
+        a["client_id"] = env.get("IDP_MCP_CLIENT_ID", a["client_id"] or "")
+        a["client_secret"] = env.get("IDP_MCP_CLIENT_SECRET", a["client_secret"] or "")
+        a["enabled"] = bool(a["enabled"] or a["client_id"])
+        a["refresh_margin_seconds"] = int(a["refresh_margin_seconds"])
+        return {"auth": a}
 
     @property
     def timescale(self) -> dict[str, Any]:

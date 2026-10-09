@@ -16,7 +16,10 @@ typed object, and SHALL allow environment variables to override select values:
 - the lake's Iceberg catalog: `IDP_CATALOG_TYPE`, `IDP_CATALOG_URI`,
   `IDP_CATALOG_NAME`
 - the SQL query engine used by the analytics tools: `IDP_TRINO_HOST`,
-  `IDP_TRINO_PORT`, `IDP_TRINO_USER`, `IDP_TRINO_CATALOG`
+  `IDP_TRINO_PORT`, `IDP_TRINO_CATALOG`, `IDP_TRINO_CA_CERT` (the certificate
+  that verifies the engine's HTTPS endpoint)
+- the analytics tools' identity: `IDP_MCP_TOKEN_URL`, `IDP_MCP_CLIENT_ID`,
+  `IDP_MCP_CLIENT_SECRET` (setting the client id enables it)
 - the TimescaleDB serving store: `IDP_TS_HOST`, `IDP_TS_PORT`, `IDP_TS_DB`,
   `IDP_TS_USER`, `IDP_TS_PASSWORD`
 - the Spark runtime: `IDP_SPARK_MASTER`, `IDP_SPARK_DRIVER_MEMORY`
@@ -25,7 +28,7 @@ typed object, and SHALL allow environment variables to override select values:
 #### Scenario: SCN-FND-01.1 — Load config
 - **WHEN** `load_config()` is called with no argument
 - **THEN** it returns a config exposing `tenants`, `storage`, `kafka`, `s3`,
-  `catalog`, `lake`, `trino`, `timescale`, `spark`, `synthetic`, `features`,
+  `catalog`, `lake`, `trino`, `mcp`, `timescale`, `spark`, `synthetic`, `features`,
   `credit`, and `fraud`
 
 #### Scenario: SCN-FND-01.2 — S3 mode via env
@@ -52,7 +55,8 @@ typed object, and SHALL allow environment variables to override select values:
 #### Scenario: SCN-FND-01.6 — Query engine via env
 - **WHEN** the environment sets `IDP_TRINO_HOST` and `IDP_TRINO_PORT`
 - **THEN** `cfg.trino` carries them, and the analytics tools connect to that
-  endpoint as the configured user and catalog
+  endpoint over HTTPS, to the configured catalog, as the identity the `mcp` client
+  credentials obtain (there is no configured Trino user)
 
 #### Scenario: SCN-FND-01.7 — Stable catalog name
 - **WHEN** the catalog is not a local SQLite file and no name is configured

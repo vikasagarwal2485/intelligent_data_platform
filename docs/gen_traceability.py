@@ -32,7 +32,7 @@ CAP_NAMES = {
     "FND": "foundation", "SYN": "synthetic-data", "BRZ": "bronze-ingestion",
     "SLV": "silver-curation", "GLD": "gold-features", "ML": "ml-models",
     "SRV": "serving-api", "STR": "streaming-kafka", "PLT": "platform-deployment",
-    "ORC": "orchestration", "MCP": "mcp-analytics",
+    "ORC": "orchestration", "MCP": "mcp-analytics", "TEN": "tenant-isolation",
 }
 REQ_RE = re.compile(r"^### Requirement:\s+(REQ-([A-Z]+)-\d{2})\s+—\s+(.*)$")
 SCN_RE = re.compile(r"^#### Scenario:\s+(SCN-[A-Z]+-\d{2}\.\d+)\s+—\s+(.*)$")

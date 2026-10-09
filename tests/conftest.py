@@ -18,6 +18,7 @@ os.environ.setdefault("IDP_SPARK_MASTER", "local[2]")
 from idp.common import pii
 from idp.common.config import PlatformConfig, StorageConfig, Tenant
 from idp.synthetic.generator import generate, generate_for_tenants
+from trino_stack import trino_lake  # noqa: F401 - the compose stack's lake (marker `trino`)
 
 SALTS = {"tenant_a": "salt-a", "tenant_b": "salt-b"}
 

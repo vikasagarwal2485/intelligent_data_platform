@@ -10,7 +10,7 @@ and Kubernetes-native (local minikube, production AWS EKS).
 
 ## Source data (ground truth)
 
-Reference records live in [`data_samples/`](../../data_samples): one TM Forum Open
+Reference records live in [`data_samples/`](../data_samples): one TM Forum Open
 API v5 resource per landing file type (Individual, Organization, Customer,
 BillingAccount, Agreement, Product, AppliedCustomerBillingRate, TopupBalance,
 ProductUsage). They travel as TM Forum events through Kafka and land unchanged in
@@ -31,7 +31,7 @@ downstream uses the canonical model.
 | Catalog | Iceberg JDBC catalog (the `iceberg` database on TimescaleDB; SQLite in dev/CI) |
 | Query | Trino |
 | Serving DB | TimescaleDB |
-| Identity / RBAC | Keycloak (OIDC) for the scoring API; Trino file-based access control for analytics |
+| Identity / RBAC | Keycloak (OIDC) tokens carry the tenant to the scoring API and to Trino; Trino row-level security per tenant |
 | Orchestration | Apache Airflow |
 | Experiment/registry | MLflow |
 | Observability | Prometheus + Grafana |

@@ -2,12 +2,15 @@
 
 Seven functions, one per business-question set, that return compact, JSON-able
 aggregates for one tenant. Each asks Trino's ``lake`` catalog through
-``mcp.sql`` as the read-only ``idp-mcp`` identity. The filtering, grouping, sums,
+``mcp.sql`` as the server's tenant identity (its MCP client's token, which Trino
+row-filters to that tenant). The filtering, grouping, sums,
 counts, histograms and rank statistics run in Trino over the tenant's partitions;
 Python only shapes the small grouped results into the output contract. The MCP
 server (``server.py``) registers these as tools; they are equally callable in tests.
 
-* **Tenant.** Every query filters on the tenant as a bound parameter, selects
+* **Tenant.** The server answers only for its identity's tenant (REQ-MCP-06): a
+  tool's ``tenant_id`` defaults to it, and any other tenant is refused before a
+  query. Every query also filters on the tenant as a bound parameter, selects
   ``tenant_id`` among its outputs, and its result passes through the tenant gateway
   (``_scoped``) before use (REQ-FND-06).
 * **SQL text** is built only from code constants (tables, columns, the period
@@ -32,7 +35,8 @@ from trino.exceptions import TrinoUserError
 
 from idp.common.config import PlatformConfig, load_config
 from idp.common.tenancy import TenantIsolationError, require_tenant_column, scope_to_tenant
-from idp.mcp import sql
+from idp.mcp import auth, sql
+from idp.mcp.auth import IdentityError  # noqa: F401 - the tools' error contract
 from idp.mcp.sql import LakeReadError  # noqa: F401 - the tools' error contract
 
 # Silver tables the tools read.
@@ -133,11 +137,24 @@ def _available_tenants(cfg: PlatformConfig) -> list[str]:
         raise
 
 
+def _refusal(tenant_id: str, available: list[str]) -> dict[str, Any]:
+    return {"tenant_id": tenant_id or None,
+            "error": f"tenant_id {tenant_id!r} is missing or unknown",
+            "available_tenants": available,
+            "action_required": "Ask the user which tenant to analyze; do "
+                               "not guess. Then call again with that tenant_id."}
+
+
 def _lake_guard(fn):
     """Validate the tenant and turn lake failures into structured results (never raise).
 
     Keeps the read-only contract and makes the ambiguous cases explicit:
 
+    * **The server's identity** (REQ-MCP-06): with MCP authentication, the tenant
+      is the token's. ``tenant_id`` defaults to it, and any other value gets the
+      refusal below without a query; ``available_tenants`` is at most the token's
+      tenant. An identity provider that can't issue a token -> ``{"error",
+      "source"}`` naming its token endpoint, and no query.
     * **Unreachable or refusing engine** -> ``{"error", "source"}`` (not a
       misleading empty ``0``); ``source`` is the Trino endpoint.
     * **Untagged table** (no ``tenant_id``) -> ``{"error": "tenant isolation
@@ -151,6 +168,18 @@ def _lake_guard(fn):
     def wrapper(tenant_id: str = "", **kwargs):
         cfg = _cfg(kwargs.get("config_path"))
         try:
+            identity = auth.provider(cfg)
+            if identity is not None:
+                own = identity.tenant
+                if tenant_id and str(tenant_id) != own:
+                    return _refusal(tenant_id, [own])         # another tenant: never queried
+                if not sql.tenant_has_data(cfg, own):
+                    return {"tenant_id": own,
+                            "error": "no data for this tenant in the lake (nothing ingested "
+                                     "yet, or the query engine points at another lake)",
+                            "source": sql.endpoint(cfg),
+                            "available_tenants": []}
+                return fn(own, **kwargs)
             tenants = _available_tenants(cfg)
             if not tenants:
                 return {"tenant_id": tenant_id or None,
@@ -159,12 +188,10 @@ def _lake_guard(fn):
                         "source": sql.endpoint(cfg),
                         "available_tenants": []}
             if not tenant_id or str(tenant_id) not in tenants:
-                return {"tenant_id": tenant_id or None,
-                        "error": f"tenant_id {tenant_id!r} is missing or unknown",
-                        "available_tenants": tenants,
-                        "action_required": "Ask the user which tenant to analyze; do "
-                                           "not guess. Then call again with that tenant_id."}
+                return _refusal(tenant_id, tenants)
             return fn(tenant_id, **kwargs)
+        except IdentityError as e:
+            return {"tenant_id": tenant_id or None, "error": str(e), "source": e.source}
         except LakeReadError as e:
             return {"tenant_id": tenant_id or None, "error": str(e),
                     "source": e.source or sql.endpoint(cfg)}

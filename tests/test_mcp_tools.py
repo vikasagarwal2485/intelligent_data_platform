@@ -394,7 +394,7 @@ def test_unreachable_engine_surfaces_error_not_empty(monkeypatch):
     for fn in mcp_tools.TOOLS.values():
         out = fn("tenant_a")
         assert "Connection refused" in out["error"]
-        assert out["source"] == "http://127.0.0.1:8085"
+        assert out["source"] == "https://127.0.0.1:8085"
         assert not ({"subscriber_count", "total_events", "by_window"} & set(out))
 
 
@@ -451,3 +451,97 @@ def test_tool_sql_names_only_code_constants():
     src = inspect.getsource(mcp_tools)
     tables = set(re.findall(r"\b(bronze|silver|gold)\.\{?(\w+)", src))
     assert {layer for layer, _ in tables} <= {"silver", "gold"}
+
+
+# --------------------------------------------------------------------------- #
+# REQ-MCP-06 / REQ-TEN-04 — the tenant comes from the server's identity         #
+# --------------------------------------------------------------------------- #
+class _Identity:
+    source = "http://kc.test/realms/idp/protocol/openid-connect/token"
+
+    def __init__(self, tenant="tenant_a", error=None):
+        self._tenant, self._error = tenant, error
+
+    def token(self):
+        if self._error:
+            raise self._error
+        return "t"
+
+    @property
+    def tenant(self):
+        self.token()
+        return self._tenant
+
+
+@pytest.fixture()
+def identity():
+    from idp.mcp import auth
+
+    def install(tenant="tenant_a", error=None):
+        p = _Identity(tenant, error)
+        auth.use_provider(p)
+        return p
+    yield install
+    auth.use_provider(None)
+
+
+_SUBSCRIBER_ROUTES = (
+    (("LIMIT 1",), pd.DataFrame({"tenant_id": ["tenant_a"]})),
+    (("business_line",), pd.DataFrame({"tenant_id": ["tenant_a", "tenant_b"],
+                                       "business_line": ["consumer", "consumer"],
+                                       "n": [6, 99], "devices": [2, 50]})),
+)
+
+
+def test_tenant_defaults_to_the_identity(engine, identity):
+    # SCN-MCP-06.2: omitted or equal tenant_id -> the token's tenant; no metadata reads
+    identity("tenant_a")
+    fake = engine(*_SUBSCRIBER_ROUTES)
+    for arg in ("", "tenant_a"):
+        out = mcp_tools.analyze_subscribers_tool(arg)
+        assert out["tenant_id"] == "tenant_a" and out["subscriber_count"] == 6
+    assert not any("$partitions" in c[0] for c in fake.calls)
+    assert all(c[1][:1] == ("tenant_a",) for c in fake.calls if c[1])     # every bound tenant is ours
+
+
+def test_other_tenant_is_refused_before_any_query(engine, identity):
+    # SCN-MCP-06.3, SCN-TEN-04.2: the engine here would return tenant_b's rows, but
+    # the identity layer refuses first and nothing is sent
+    identity("tenant_a")
+    fake = engine(*_SUBSCRIBER_ROUTES, tenants=pd.DataFrame({"tenant_id": ["tenant_a", "tenant_b"]}))
+    for fn in mcp_tools.TOOLS.values():
+        for other in ("tenant_b", "x' OR '1'='1"):                     # SCN-MCP-06.6 as well
+            out = fn(other)
+            assert out["available_tenants"] == ["tenant_a"] and "action_required" in out
+    assert fake.calls == []
+
+
+def test_identity_without_data_reports_no_tenants(engine, identity):
+    identity("tenant_c")
+    engine((("LIMIT 1",), pd.DataFrame({"tenant_id": []})))
+    out = mcp_tools.analyze_subscribers_tool()
+    assert out["tenant_id"] == "tenant_c" and out["available_tenants"] == [] and "error" in out
+
+
+def test_unavailable_identity_is_an_error_not_a_query(engine, identity):
+    # SCN-MCP-06.4: the identity provider is the source; no query is sent
+    from idp.mcp.auth import IdentityError
+    p = identity(error=IdentityError("could not reach the identity provider", _Identity.source))
+    fake = engine(*_SUBSCRIBER_ROUTES)
+    for fn in mcp_tools.TOOLS.values():
+        out = fn("tenant_a")
+        assert out["source"] == p.source and "identity provider" in out["error"]
+    assert fake.calls == []
+
+
+def test_listed_tools_take_an_optional_tenant():
+    # SCN-MCP-06.1
+    import asyncio
+    pytest.importorskip("mcp")
+    from idp.mcp.server import build_server
+
+    listed = asyncio.run(build_server().list_tools())
+    assert {t.name for t in listed} == set(mcp_tools.TOOLS)
+    for t in listed:
+        assert "tenant_id" in t.inputSchema["properties"]
+        assert "tenant_id" not in t.inputSchema.get("required", [])

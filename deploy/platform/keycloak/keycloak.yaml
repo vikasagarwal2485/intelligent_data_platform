@@ -2,9 +2,10 @@
 # mode (H2, start-dev) - free to pull, suited to the local cluster. For EKS,
 # switch to a production chart with an external DB and TLS.
 #
-# The realm `idp` (REQ-SRV-03) is imported at every start from the ConfigMap
-# `keycloak-realm` (deploy/platform/keycloak/idp-realm.json): the dev store is
-# in-container H2, so the import re-applies after each restart.
+# The realm `idp` (REQ-SRV-03, REQ-TEN-01) is imported at every start from the
+# ConfigMap `keycloak-realm` (deploy/platform/keycloak/idp-realm.json, rendered from
+# idp-realm.base.json + the configured tenants by `make keycloak-realm`): the dev
+# store is in-container H2, so the import re-applies after each restart.
 # Apply with:  make keycloak   (creates the ConfigMap from the JSON, applies this,
 #                               and restarts the pod so the realm is re-imported)
 apiVersion: apps/v1

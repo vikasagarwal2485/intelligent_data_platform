@@ -22,6 +22,16 @@
 
 server:
   workers: 0          # coordinator-only; removes the worker pods entirely
+  config:
+    # Every request is authenticated (REQ-PLT-11): Keycloak access tokens for tenant
+    # principals (JWT), passwords for the service users admin and superset. Both
+    # need HTTPS; plain HTTP on 8080 serves only the probes (/v1/info).
+    authenticationType: "JWT,PASSWORD"
+    https:
+      enabled: true
+      port: 8443
+      keystore:
+        path: /etc/trino/tls/trino.pem      # key + certificate, from the trino-tls Secret
 
 # Coordinator also executes tasks (needed when workers=0); keep query memory
 # safely below (heap - heap-headroom) so a query can't push the JVM past -Xmx.
@@ -29,6 +39,24 @@ additionalConfigProperties:
   - node-scheduler.include-coordinator=true
   - query.max-memory-per-node=256MB
   - memory.heap-headroom-per-node=192MB
+  # Tokens are verified against the realm's published keys; the user is the token's
+  # idp_principal claim (<name>@<tenant>), which the row filter reads (REQ-TEN-03).
+  - http-server.authentication.jwt.key-file=http://keycloak.idp-platform.svc:8080/realms/idp/protocol/openid-connect/certs
+  - http-server.authentication.jwt.required-issuer=http://keycloak.idp-platform.svc:8080/realms/idp
+  - http-server.authentication.jwt.required-audience=trino
+  - http-server.authentication.jwt.principal-field=idp_principal
+  - internal-communication.shared-secret=${ENV:TRINO_SHARED_SECRET}
+
+# The authentication material, created by `make trino-certs` (deploy/platform/trino/certs.sh):
+auth:
+  passwordAuthSecret: trino-auth           # password.db -> /etc/trino/auth/password/
+secretMounts:
+  - name: trino-tls
+    secretName: trino-tls
+    path: /etc/trino/tls
+envFrom:
+  - secretRef:
+      name: trino-internal                 # TRINO_SHARED_SECRET
 
 # The lake's Iceberg JDBC catalog (REQ-PLT-11): `catalogs.lake` comes from
 # lake.properties. The chart's sample catalogs are dropped.
@@ -52,10 +80,10 @@ env:
   - name: LAKE_S3_SECRET_KEY
     valueFrom: { secretKeyRef: { name: minio, key: rootPassword } }
 
-# File-based access control: the analytics user `idp-mcp` may only SELECT from
-# lake.silver and lake.gold; `admin` may do anything; every other user nothing.
-# Authentication is header-based (X-Trino-User) inside the cluster network in dev;
-# the rules still refuse writes to a spoofed `idp-mcp` (ADR-0030).
+# File-based access control (rules.json): tenant principals (<name>@<tenant>) may
+# only SELECT from lake.silver and lake.gold, row-filtered to their tenant and with
+# Iceberg metadata tables denied; `superset` may only impersonate tenant
+# principals; `admin` may do anything; every other user nothing (REQ-TEN-03).
 accessControl:
   type: configmap
   refreshPeriod: 60s

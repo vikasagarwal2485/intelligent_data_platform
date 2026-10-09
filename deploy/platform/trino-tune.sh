@@ -31,6 +31,13 @@ if helm list -n "${NS}" --pending -q 2>/dev/null | grep -qx trino; then
   fi
 fi
 
+for s in trino-tls trino-auth trino-internal; do
+  if ! kubectl -n "${NS}" get secret "${s}" >/dev/null 2>&1; then
+    echo "ERROR: Secret ${s} is missing: run 'make trino-certs' first (Trino requires authentication)." >&2
+    exit 1
+  fi
+done
+
 echo ">> Installing/upgrading Trino with tuned values"
 # The lake catalog and the access rules are shared with the compose test stack,
 # so they are files, passed as values here.

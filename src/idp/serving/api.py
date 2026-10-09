@@ -3,8 +3,9 @@
 Exposes on-demand credit-limit and fraud scoring and the precomputed serving
 lookup. With ``auth.enabled`` (every cluster deployment), each endpoint except
 ``/health`` needs a Keycloak Bearer token and serves only the token's tenant: a
-``tenant_id`` in the body or path that differs is a 403 (``serving/auth.py``,
-REQ-SRV-03). With auth off (local dev, tests), the request's ``tenant_id`` is used.
+tenant in the request (the body's ``tenant_id``, the lookup's ``X-Tenant-Id``
+header) is optional and a different one is a 403 (``serving/auth.py``, REQ-SRV-03).
+With auth off (local dev, tests), the request's tenant is used and required.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from idp.common.config import load_config
@@ -110,16 +111,20 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         result = model.score(frame, anomaly_range=getattr(model, "anomaly_range", None)).iloc[0].to_dict()
         return result
 
-    @app.get("/serving/{table}/{tenant_id}/{service_id}")
-    def serving_lookup(table: str, tenant_id: str, service_id: str,
+    @app.get("/serving/{table}/{service_id}")
+    def serving_lookup(table: str, service_id: str,
+                       x_tenant_id: str | None = Header(
+                           None, alias="X-Tenant-Id",
+                           description="Optional with auth on (the Bearer token's tenant is used; a "
+                                       "different value is a 403). Required with auth off."),
                        token_tenant: str | None = Depends(current_tenant)) -> dict[str, Any]:
         """Low-latency lookup of a PRECOMPUTED Gold row from TimescaleDB.
 
-        e.g. GET /serving/credit_scores/tenant_a/tok_abc — returns the score the
-        Gold+publish stages materialized, without recomputing from features. With
-        auth on, the path's tenant must be the token's.
+        e.g. GET /serving/credit_scores/tok_abc with ``Authorization: Bearer <token>``
+        — returns the score the Gold+publish stages materialized for the token's
+        tenant, without recomputing from features (REQ-SRV-04).
         """
-        tenant_id = scoped_tenant(tenant_id, token_tenant)
+        tenant_id = scoped_tenant(x_tenant_id, token_tenant, field="X-Tenant-Id")
         if not cfg.timescale.get("enabled"):
             raise HTTPException(503, "serving DB (TimescaleDB) not enabled")
         if table not in ("credit_scores", "fraud_scores", "credit_features", "fraud_features"):

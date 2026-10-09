@@ -78,10 +78,21 @@ lake:
 # IDP_TRINO_PORT, IDP_TRINO_USER, IDP_TRINO_CATALOG.
 trino:
   host: "127.0.0.1"
-  port: 8085            # `make trino-api` forwards the cluster's trino:8080 here (8080 is taken by kafka-ui/airflow)
-  user: "idp-mcp"
+  port: 8085            # `make trino-api` forwards the cluster's trino:8443 here (8080 is taken by kafka-ui/airflow)
   catalog: "lake"
-  http_scheme: "http"
+  http_scheme: "https"  # Trino authenticates every request, over HTTPS only (REQ-PLT-11)
+  ca_cert: "deploy/platform/trino/.secrets/tls.crt"   # written by `make trino-certs`
+
+# The MCP server's identity (REQ-MCP-06): its tenant's Keycloak MCP client. The
+# token's tenant is the only tenant the tools answer for, and Trino row-filters to
+# it (REQ-TEN-03). `make mcp-config TENANT=<t>` prints the environment to set.
+mcp:
+  auth:
+    enabled: false       # on when IDP_MCP_CLIENT_ID is set
+    token_url: "http://127.0.0.1:18180/realms/idp/protocol/openid-connect/token"   # make keycloak-api
+    client_id: ""        # IDP_MCP_CLIENT_ID, e.g. idp-mcp-tenant_a
+    client_secret: ""    # IDP_MCP_CLIENT_SECRET
+    refresh_margin_seconds: 30
 
 timescale:
   enabled: false

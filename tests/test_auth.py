@@ -176,27 +176,40 @@ def test_missing_or_invalid_token_is_401_and_computes_nothing(auth_env, artifact
 
 
 def test_cross_tenant_requests_are_403(auth_env, artifacts, monkeypatch):
-    # SCN-SRV-03.4 — path and body; no tenant_b data is read
+    # SCN-SRV-03.4 — the X-Tenant-Id header and the body; no tenant_b data is read
     from idp.serving import timescale
     monkeypatch.setenv("IDP_TS_HOST", "localhost")
     monkeypatch.setattr(timescale, "read_score",
                         lambda *a, **k: pytest.fail("must not read another tenant's row"))
     client = _client(artifacts)
     a = _bearer(token("tenant_a"))
-    assert client.get("/serving/credit_scores/tenant_b/tok_x", headers=a).status_code == 403
+    resp = client.get("/serving/credit_scores/tok_x", headers={**a, "X-Tenant-Id": "tenant_b"})
+    assert resp.status_code == 403 and "X-Tenant-Id" in resp.json()["detail"]
     assert client.post("/credit-limit", json={"tenant_id": "tenant_b", **CREDIT}, headers=a).status_code == 403
     assert client.post("/fraud-score", json={"tenant_id": "tenant_b", **FRAUD}, headers=a).status_code == 403
 
 
 def test_own_tenant_lookup_is_served(auth_env, artifacts, monkeypatch):
+    # SCN-SRV-04.1 — X-Tenant-Id is optional: omitted or equal to the token's tenant
     from idp.serving import timescale
     row = {"tenant_id": "tenant_a", "service_id": "tok_x", "recommended_limit": 42.0}
     seen = []
     monkeypatch.setenv("IDP_TS_HOST", "localhost")
     monkeypatch.setattr(timescale, "read_score", lambda cfg, table, t, s: seen.append(t) or row)
-    resp = _client(artifacts).get("/serving/credit_scores/tenant_a/tok_x",
-                                  headers=_bearer(token("tenant_a")))
-    assert resp.status_code == 200 and resp.json() == row and seen == ["tenant_a"]
+    client, a = _client(artifacts), _bearer(token("tenant_a"))
+    for headers in (a, {**a, "X-Tenant-Id": "tenant_a"}):
+        resp = client.get("/serving/credit_scores/tok_x", headers=headers)
+        assert resp.status_code == 200 and resp.json() == row
+    assert seen == ["tenant_a", "tenant_a"]
+
+
+def test_lookup_without_a_token_is_401_even_with_the_header(auth_env, artifacts, monkeypatch):
+    # The header never replaces the token: with auth on, the Bearer token is mandatory
+    from idp.serving import timescale
+    monkeypatch.setenv("IDP_TS_HOST", "localhost")
+    monkeypatch.setattr(timescale, "read_score", lambda *a, **k: pytest.fail("must not read without a token"))
+    resp = _client(artifacts).get("/serving/credit_scores/tok_x", headers={"X-Tenant-Id": "tenant_a"})
+    assert resp.status_code == 401
 
 
 def test_valid_token_scores_for_its_tenant(auth_env, artifacts):

@@ -1,8 +1,10 @@
 """The MCP analytics tools' query layer over Trino (REQ-MCP-06/09).
 
-Every tool asks the lake through Trino's ``lake`` Iceberg catalog as the read-only
-analytics identity (``cfg.trino["user"]``). Aggregation, filtering and ranking run
-inside Trino, and only compact results come back as small pandas frames.
+Every tool asks the lake through Trino's ``lake`` Iceberg catalog over HTTPS, as
+the MCP server's identity: the access token of its tenant's MCP client
+(``mcp.auth``), which Trino verifies and row-filters to that tenant (REQ-TEN-03).
+Aggregation, filtering and ranking run inside Trino, and only compact results come
+back as small pandas frames.
 
 * **Bound parameters only.** Values (the tenant, window bounds, ``limit``,
   ``sensitivity``) are always DB-API ``?`` parameters, which Trino executes as a
@@ -41,16 +43,23 @@ def endpoint(cfg: PlatformConfig) -> str:
 
 
 def connect(cfg: PlatformConfig):
-    """A Trino DB-API connection to the lake catalog as the analytics identity.
+    """A Trino DB-API connection to the lake catalog as the MCP server's identity.
 
-    The session runs in UTC, so periods and day labels match the lake's UTC
-    timestamps."""
+    Each connection carries a current access token (renewed before it expires), and
+    HTTPS is verified with ``trino.ca_cert``. Raises
+    :class:`~idp.mcp.auth.IdentityError` when no token can be obtained. The session
+    runs in UTC, so periods and day labels match the lake's UTC timestamps."""
     import trino
+    from trino.auth import JWTAuthentication
+
+    from idp.mcp import auth
 
     t = cfg.trino
-    return trino.dbapi.connect(host=t["host"], port=int(t["port"]), user=t["user"],
-                               catalog=t["catalog"], http_scheme=t["http_scheme"],
-                               source="idp-mcp", timezone="UTC")
+    identity = auth.provider(cfg)
+    return trino.dbapi.connect(host=t["host"], port=int(t["port"]), catalog=t["catalog"],
+                               http_scheme=t["http_scheme"], source="idp-mcp", timezone="UTC",
+                               auth=JWTAuthentication(identity.token()) if identity else None,
+                               verify=t["ca_cert"] or True)
 
 
 def query(cfg: PlatformConfig, sql: str, params: Sequence[Any] = ()) -> pd.DataFrame:
@@ -88,9 +97,21 @@ def query(cfg: PlatformConfig, sql: str, params: Sequence[Any] = ()) -> pd.DataF
     return pd.DataFrame(rows, columns=cols)
 
 
+# The tenant probe: one row of the caller's tenant, if any.
+TENANT_PROBE = "SELECT tenant_id FROM silver.dim_subscriber WHERE tenant_id = ? LIMIT 1"
+
+
+def tenant_has_data(cfg: PlatformConfig, tenant_id: str) -> bool:
+    """Whether Silver holds any row of ``tenant_id`` (one row, row-filtered by the
+    engine like every query). Used instead of the partition metadata, which tenant
+    identities may not read (REQ-TEN-03)."""
+    return not query(cfg, TENANT_PROBE, [tenant_id]).empty
+
+
 def available_tenants(cfg: PlatformConfig) -> list[str]:
     """Tenants present in Silver, read from ``dim_subscriber``'s partition metadata
-    only (no data files)."""
+    only (no data files). Only without MCP authentication (a fake engine in tests):
+    tenant identities may not read metadata tables."""
     df = query(cfg, 'SELECT DISTINCT "partition".tenant_id AS tenant_id '
                     'FROM silver."dim_subscriber$partitions"')
     if df.empty:

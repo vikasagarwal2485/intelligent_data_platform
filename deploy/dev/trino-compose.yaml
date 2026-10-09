@@ -1,9 +1,11 @@
 # The MCP tools' query stack for integration tests (mcp-over-trino): Trino 480
-# with the cluster's `lake` catalog file and access rules, on a Postgres Iceberg
-# JDBC catalog and MinIO. Host ports are offset from the cluster port-forwards
-# (8080, 5432, 9000) so both can run at once.
+# with the cluster's `lake` catalog file, access rules and authentication (JWT +
+# service-user passwords over HTTPS, REQ-PLT-11), on a Postgres Iceberg JDBC
+# catalog and MinIO. Tokens are verified with a test key pair instead of Keycloak.
+# Host ports are offset from the cluster port-forwards (8085, 5432, 9000) so both
+# can run at once; HTTPS is 18443, plain HTTP (health checks only) 18080.
 #
-#   docker compose -f deploy/dev/trino-compose.yaml up -d --wait
+#   make trino-stack             # generates deploy/dev/trino/.secrets, then up --wait
 #   make mcp-trino-test          # builds a lake into this stack, then pytest -m trino
 #   docker compose -f deploy/dev/trino-compose.yaml down -v
 #
@@ -45,7 +47,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       minio: { condition: service_healthy }
-    ports: ["18080:8080"]
+    ports: ["18080:8080", "18443:8443"]
+    env_file: ./trino/.secrets/shared-secret.env
     environment:
       LAKE_CATALOG_URL: jdbc:postgresql://postgres:5432/iceberg
       LAKE_CATALOG_USER: postgres
@@ -57,6 +60,9 @@ services:
       - ../platform/trino/lake.properties:/etc/trino/catalog/lake.properties:ro
       - ../platform/trino/rules.json:/etc/trino/rules.json:ro
       - ./trino/access-control.properties:/etc/trino/access-control.properties:ro
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/password-authenticator.properties:/etc/trino/password-authenticator.properties:ro
+      - ./trino/.secrets:/etc/trino/auth:ro
     healthcheck:
       test: ["CMD", "/usr/lib/trino/bin/health-check"]
       interval: 5s

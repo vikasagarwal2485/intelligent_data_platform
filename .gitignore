@@ -26,3 +26,7 @@ ml/artifacts/
 # Local infra / secrets
 .env
 *.local.yaml
+
+# Generated Trino test-stack secrets (make trino-stack)
+deploy/dev/trino/.secrets/
+deploy/platform/trino/.secrets/

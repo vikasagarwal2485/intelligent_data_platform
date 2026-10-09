@@ -90,13 +90,15 @@ def tenant_dependency(auth: dict[str, Any]) -> Callable[[Request], str | None]:
     return current_tenant
 
 
-def scoped_tenant(requested: str | None, token_tenant: str | None) -> str:
+def scoped_tenant(requested: str | None, token_tenant: str | None, field: str = "tenant_id") -> str:
     """The tenant a request is served for: the token's, when auth is on (a
-    different ``tenant_id`` in the body or path is a 403); else the request's."""
+    different tenant in the request is a 403, an omitted one means the token's);
+    else the request's, which is then required. ``field`` names where the request
+    carries it (a body field, or the ``X-Tenant-Id`` header) in the error."""
     if token_tenant is None:
         if not requested:
-            raise HTTPException(422, "tenant_id is required")
+            raise HTTPException(422, f"{field} is required")
         return requested
     if requested and requested != token_tenant:
-        raise HTTPException(403, "tenant_id does not match the token's tenant")
+        raise HTTPException(403, f"{field} does not match the token's tenant")
     return token_tenant

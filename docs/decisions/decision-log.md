@@ -80,6 +80,9 @@ followed but that had no ADR.
     stages serve all tenants from `idp-app`, so the namespaces don't isolate the
     pipeline's compute yet.
   - Not implemented: Kafka ACLs (no `KafkaUser`s, ADR-0003) and OPA.
+  - Since ADR-0038 the analytics path has two independent layers: Keycloak tokens
+    carry the tenant to Trino as `<name>@<tenant>` principals, and Trino row-filters
+    every Silver and Gold table to that tenant.
 
 ### ADR-0006 — GDPR PII tokenization (per-tenant salted hash)
 - **Status:** Accepted
@@ -522,7 +525,9 @@ followed but that had no ADR.
     which a model registry replaces later.
 
 ### ADR-0030 — MCP analytics tools query the lake through Trino as a read-only identity
-- **Status:** Accepted (2026-09-29) — supersedes ADR-0021
+- **Status:** Accepted (2026-09-29) — supersedes ADR-0021. The shared `idp-mcp`
+  identity and header authentication are replaced by ADR-0038: per-tenant principals
+  from Keycloak tokens, authenticated over HTTPS, and row-level security.
 - **Context:** ADR-0021's tools read each tenant's tables into pandas in the MCP
   process. After ADR-0028 that meant `pyiceberg` scans with a tenant filter, but still
   the whole tenant slice in memory (694,859 usage rows at 10× volume), and read-only
@@ -686,7 +691,9 @@ followed but that had no ADR.
   latest trained model is used, ungated.
 
 ### ADR-0034 — OIDC tenant authentication on the scoring API (Keycloak)
-- **Status:** Accepted (2026-09-29) — implements ADR-0005's RBAC for the API
+- **Status:** Accepted (2026-09-29) — implements ADR-0005's RBAC for the API. ADR-0038
+  extends the realm to the analytics path (MCP clients, Trino principals) and renders
+  its tenant part from the configured tenants.
 - **Context:** The scoring API trusted the `tenant_id` in each request, so any caller
   could read another tenant's scores.
 - **Decision:**
@@ -761,3 +768,45 @@ followed but that had no ADR.
 - **Consequences:** On-demand scores include the anomaly and equal the precomputed
   `gold.fraud_scores` when the scored population is the training one; when today's
   population differs, the two can differ slightly.
+
+### ADR-0038 — Tenant identity carried to Trino; row-level security; no semantic layer
+- **Status:** Accepted (2026-10-09) — change `tenant-identity-and-trino-rls`; refines
+  ADR-0005, ADR-0030 and ADR-0034
+- **Context:** On the analytics path, tenant isolation was one control: the
+  `WHERE tenant_id = ?` each MCP tool writes. The tenant was a tool argument, and
+  Trino authenticated nobody (`X-Trino-User` alone), so any client on the network
+  could read every tenant as `idp-mcp` or `admin`. The planned consumers are the MCP
+  server (conversational BI) and Apache Superset (reports), both through Trino.
+- **Decision:**
+  - **Identity layer.** Every identity that queries the lake is a tenant principal
+    `<name>@<tenant>`. Keycloak issues it as an `idp_principal` claim next to
+    `tenant_id`: from admin-only user attributes for users, hard-coded on the
+    per-tenant MCP clients (`idp-mcp-<tenant>`, client credentials, audience
+    `trino`). The tenant part of the realm (groups, scoring and MCP clients) is
+    rendered from the configured tenants (`idp keycloak-realm`), and a test keeps
+    the committed realm equal to the rendering.
+  - **Trino authentication.** JWT (the realm's keys; issuer, audience `trino`,
+    principal from `idp_principal`) for tenants, passwords for `admin` and
+    `superset` only, HTTPS only, from Secrets created by `make trino-certs`.
+  - **Storage layer.** One rule for every tenant principal: `SELECT` on
+    `lake.silver|gold` with the row filter `tenant_id = <suffix of current_user>`;
+    Iceberg metadata tables denied (row filters don't apply to them); Bronze, writes
+    and DDL denied. `superset` may only impersonate tenant principals. No per-tenant
+    Trino configuration.
+  - **MCP server.** Its tenant is its token's: `tenant_id` is optional, another
+    tenant is refused before any query, and discovery reads only the caller's
+    tenant (not `$partitions`).
+  - **No semantic layer (Cube).** With Superset and MCP as the only consumers, the
+    metric definitions stay in the MCP tools and in Superset; isolation doesn't
+    depend on them, because Trino enforces it for both.
+- **Consequences:**
+  - A cross-tenant read needs both layers to fail: tests remove each one in turn
+    (`tests/test_tenant_isolation.py`, CI).
+  - **Breaking** for header-only Trino clients; the MCP host needs its tenant's
+    client credentials (`make mcp-config TENANT=…`) and `make keycloak-api`.
+  - One MCP server serves one tenant.
+  - Measured on the compose stack: no consistent cost from the row filter (medians
+    within the noise of the shared machine, partitions still pruned by tenant).
+  - Anyone holding the `superset` password can impersonate any tenant principal:
+    that's the trust boundary of the coming Superset change.
+  - TimescaleDB, MinIO, Kafka and the Iceberg catalog keep shared credentials.

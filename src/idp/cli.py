@@ -14,6 +14,7 @@ Usage (separated medallion stages):
     idp serve      # start the FastAPI scoring service
     idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
     idp registry-schemas  # write each Kafka topic's TMF JSON Schema (wire contract)
+    idp keycloak-realm    # render the Keycloak realm from the configured tenants (--check: compare)
     idp maintain   # compact, expire snapshots, remove orphans on every lake table
     idp mcp        # start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)
 """
@@ -215,6 +216,25 @@ def _cmd_registry_schemas(args: argparse.Namespace) -> None:
     print(f"Wrote {len(TOPIC_RESOURCES)} topic schemas to {out}")
 
 
+def _cmd_keycloak_realm(args: argparse.Namespace) -> int:
+    """Render the Keycloak realm from the configured tenants (REQ-TEN-02). With
+    ``--check``, exit 1 when the committed realm differs from the rendering."""
+    from pathlib import Path
+
+    from idp.identity import realm
+
+    out = Path(args.out) if args.out else realm.REALM_FILE
+    text = realm.dumps(realm.render([t.id for t in load_config(args.config).tenants]))
+    if args.check:
+        same = out.exists() and out.read_text() == text
+        print(f"{out}: " + ("matches the configured tenants" if same else
+                            "differs from the rendering; run `idp keycloak-realm`"))
+        return 0 if same else 1
+    out.write_text(text)
+    print(f"Wrote {out}")
+    return 0
+
+
 def _cmd_spark_manifest(args: argparse.Namespace) -> None:
     """Render a Spark stage's SparkApplication (REQ-PLT-10) from its profile."""
     from idp.transforms.sparkapp import render
@@ -339,6 +359,11 @@ def main(argv: list[str] | None = None) -> int:
                            help="Write each Kafka topic's TMF JSON Schema (the registered wire contract)")
     p_reg.add_argument("--out", required=True, help="Directory to write <suffix>.schema.json into")
     p_reg.set_defaults(func=_cmd_registry_schemas)
+    p_kc = sub.add_parser("keycloak-realm",
+                          help="Render the Keycloak realm (groups, tenant clients) from the configured tenants")
+    p_kc.add_argument("--out", help="File to write (default deploy/platform/keycloak/idp-realm.json)")
+    p_kc.add_argument("--check", action="store_true", help="Only compare; exit 1 if the file differs")
+    p_kc.set_defaults(func=_cmd_keycloak_realm)
 
     p_arch = sub.add_parser("archive-policy", help="Render the Bronze archive rule (S3 lifecycle / MinIO ILM)")
     p_arch.add_argument("--format", choices=("s3", "minio"), default="s3")

@@ -320,7 +320,7 @@ serve-cluster: ## Port-forward the cluster's scoring API to 127.0.0.1:18000 (aut
 	@echo "Cluster scoring API on http://127.0.0.1:$(CLUSTER_API_PORT)  (keep this running; Ctrl-C to stop)"
 	@echo "Every endpoint except /health needs a tenant token:"
 	@echo '  TOKEN=$$(make -s keycloak-token TENANT=tenant_a)'
-	@echo '  curl -s localhost:$(CLUSTER_API_PORT)/serving/credit_scores/tenant_a/<service_id> -H "Authorization: Bearer $$TOKEN"'
+	@echo '  curl -s localhost:$(CLUSTER_API_PORT)/serving/credit_scores/<service_id> -H "Authorization: Bearer $$TOKEN"   # optional: -H "X-Tenant-Id: tenant_a"'
 	kubectl -n idp-app rollout status deploy/scoring-api --timeout=120s
 	kubectl -n idp-app port-forward svc/scoring-api $(CLUSTER_API_PORT):80
 
