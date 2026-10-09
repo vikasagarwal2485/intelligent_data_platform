@@ -3,3 +3,4 @@ pytest>=7.4
 httpx>=0.27
 alembic>=1.13        # MLflow's local sqlite registry in tests
 jsonschema>=4.18     # Telecom Statement schemas (JSON Schema 2020-12 + referencing)
+pytest-split>=0.10,<1   # CI shards the suite by recorded durations (.test_durations)

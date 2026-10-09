@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "httpx>=0.27", "alembic>=1.13", "jsonschema>=4.18"]   # alembic: MLflow's sqlite registry in tests; jsonschema: the Telecom Statement 2020-12 schemas
+dev = ["pytest>=7.4", "httpx>=0.27", "alembic>=1.13", "jsonschema>=4.18", "pytest-split>=0.10,<1"]   # alembic: MLflow's sqlite registry in tests; jsonschema: the Telecom Statement 2020-12 schemas; pytest-split: CI shards
 # SHAP-based adverse-action reason codes. Optional/heavy: when absent the credit
 # model falls back to interpretable logistic-scorecard contributions.
 explain = ["shap>=0.44"]

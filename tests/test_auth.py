@@ -16,10 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from idp.common import storage
 from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
-from idp.ml.credit_model import CreditLimitModel
-from idp.ml.fraud_model import FraudModel
 from idp.serving import auth
 
 ISSUER = "http://keycloak.idp-platform.svc:8080/realms/idp"
@@ -133,15 +130,9 @@ def test_scoped_tenant():
 # The API with auth on (tasks 2.2 / 2.3)                                       #
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def artifacts(credit_labeled, fraud_labeled, tmp_path_factory):
-    """A local model store with trained credit and fraud models."""
-    d = tmp_path_factory.mktemp("ml")
-    cfg = type("C", (), {"s3": {}})()
-    storage.save_model(CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"]),
-                       str(d / "credit_model.joblib"), cfg)
-    storage.save_model(FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"]),
-                       str(d / "fraud_model.joblib"), cfg)
-    return d
+def artifacts(model_artifacts):
+    """A local model store with trained credit and fraud models (shared, conftest)."""
+    return model_artifacts
 
 
 @pytest.fixture()

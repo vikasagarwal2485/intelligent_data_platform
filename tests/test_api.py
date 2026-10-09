@@ -5,21 +5,10 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from idp.common.config import StorageConfig, load_config
 from idp.common.feature_contract import CREDIT_FEATURES, FRAUD_FEATURES
-from idp.pipeline import run
 from idp.serving.api import create_app
 
 
-def _train_models(tmp_path):
-    cfg = load_config()
-    cfg.raw["synthetic"].update({"subscribers_per_tenant": 100, "days": 25, "fraud_rate": 0.15})
-    cfg.storage = StorageConfig(
-        root=str(tmp_path), landing=str(tmp_path / "l"), bronze=str(tmp_path / "b"),
-        silver=str(tmp_path / "s"), gold=str(tmp_path / "g"), ml_artifacts=str(tmp_path / "ml"),
-    )
-    run(cfg, persist=True)
-    return tmp_path / "ml"
 
 
 def test_health():
@@ -27,8 +16,8 @@ def test_health():
     assert client.get("/health").json() == {"status": "ok"}
 
 
-def test_credit_limit_endpoint(tmp_path):
-    art = _train_models(tmp_path)
+def test_credit_limit_endpoint(model_artifacts):
+    art = model_artifacts
     client = TestClient(create_app(artifacts_dir=art))
     payload = {
         "tenant_id": "tenant_a", "service_id": "tok_test",
@@ -41,8 +30,8 @@ def test_credit_limit_endpoint(tmp_path):
     assert body["tenant_id"] == "tenant_a"
 
 
-def test_fraud_score_endpoint(tmp_path):
-    art = _train_models(tmp_path)
+def test_fraud_score_endpoint(model_artifacts):
+    art = model_artifacts
     client = TestClient(create_app(artifacts_dir=art))
     payload = {
         "tenant_id": "tenant_b", "service_id": "tok_test",
@@ -53,10 +42,10 @@ def test_fraud_score_endpoint(tmp_path):
     assert "fraud_score" in resp.json()
 
 
-def test_fraud_score_uses_the_training_range(tmp_path):
+def test_fraud_score_uses_the_training_range(model_artifacts):
     # a single on-demand request gets a real anomaly score, scaled on the training
     # population's range stored with the model (it used to be always 0)
-    art = _train_models(tmp_path)
+    art = model_artifacts
     client = TestClient(create_app(artifacts_dir=art))
     features = {f: 1000.0 for f in FRAUD_FEATURES}                 # far from typical behaviour
     body = client.post("/fraud-score", json={"tenant_id": "tenant_b", "service_id": "tok_x",
@@ -79,9 +68,9 @@ def test_unknown_feature_names_are_rejected(tmp_path):
     assert resp.status_code == 422 and resp.json()["detail"]["unknown_features"] == ["bogus"]
 
 
-def test_missing_features_default_to_zero(tmp_path):
+def test_missing_features_default_to_zero(model_artifacts):
     # SCN-SRV-02.5: a partial feature map is still scored
-    art = _train_models(tmp_path)
+    art = model_artifacts
     client = TestClient(create_app(artifacts_dir=art))
     resp = client.post("/fraud-score", json={"tenant_id": "tenant_b", "service_id": "tok_test",
                                              "features": {"recharge_max": 10.0}})
@@ -140,7 +129,7 @@ def test_deployed_api_reads_the_serving_store_publish_writes():
 
 def test_timescale_off_without_host(monkeypatch):
     # the serving store is enabled by IDP_TS_HOST, never by default
-    from idp.common.config import PlatformConfig, StorageConfig
+    from idp.common.config import PlatformConfig, StorageConfig, load_config
     monkeypatch.delenv("IDP_TS_HOST", raising=False)
     assert load_config().timescale["enabled"] is False
     bare = PlatformConfig(raw={}, tenants=[], storage=StorageConfig("", "", "", "", "", ""))

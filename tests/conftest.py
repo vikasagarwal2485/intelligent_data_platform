@@ -164,3 +164,20 @@ def credit_labeled(credit_features, labels):
 @pytest.fixture(scope="session")
 def fraud_labeled(fraud_features, labels):
     return fraud_features.merge(labels, on=["tenant_id", "service_id"], how="inner")
+
+
+@pytest.fixture(scope="session")
+def model_artifacts(credit_labeled, fraud_labeled, tmp_path_factory):
+    """A local model store with credit and fraud models fitted on the session lake's
+    labelled Gold features: what the API needs, without running a pipeline."""
+    from idp.common import storage
+    from idp.ml.credit_model import CreditLimitModel
+    from idp.ml.fraud_model import FraudModel
+
+    d = tmp_path_factory.mktemp("ml")
+    cfg = type("C", (), {"s3": {}})()
+    storage.save_model(CreditLimitModel().fit(credit_labeled, credit_labeled["will_default"]),
+                       str(d / "credit_model.joblib"), cfg)
+    storage.save_model(FraudModel().fit(fraud_labeled, fraud_labeled["is_fraud"]),
+                       str(d / "fraud_model.joblib"), cfg)
+    return d

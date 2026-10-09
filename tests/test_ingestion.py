@@ -4,8 +4,10 @@ Bronze itself (Iceberg, `pipeline.to_bronze`) is covered by test_bronze_iceberg.
 """
 from __future__ import annotations
 
+import pytest
+
 from idp.ingestion import landing
-from idp.synthetic.generator import ENTITIES
+from idp.synthetic.generator import ENTITIES, generate_for_tenants
 
 
 TMF_FILES = {"individual.json", "organization.json", "customer.json", "billingAccount.json",
@@ -13,20 +15,29 @@ TMF_FILES = {"individual.json", "organization.json", "customer.json", "billingAc
              "productUsage.json"}
 
 
-def test_write_landing_partitions_by_tenant(multi_tenant_dataset, tmp_path):
-    written = landing.write_landing(multi_tenant_dataset, tmp_path)
+@pytest.fixture(scope="module")
+def landing_dataset():
+    """A small two-tenant dataset that still yields every TMF landing file for both
+    tenants (organizations and a month of fee charges included). Writing and
+    validating the files is pure Python, so the size sets these tests' run time."""
+    return generate_for_tenants(["tenant_a", "tenant_b"], subscribers=15, days=31,
+                                fraud_rate=0.2, seed=7)
+
+
+def test_write_landing_partitions_by_tenant(landing_dataset, tmp_path):
+    written = landing.write_landing(landing_dataset, tmp_path)
     assert set(written) <= TMF_FILES and "productUsage.json" in written
     assert (tmp_path / "tenant=tenant_a" / "individual.json").exists()
     assert (tmp_path / "tenant=tenant_b" / "customer.json").exists()
 
 
-def test_landing_files_are_tmf_resources_of_their_tenant(multi_tenant_dataset, tmp_path):
+def test_landing_files_are_tmf_resources_of_their_tenant(landing_dataset, tmp_path):
     # SCN-BRZ-03.1 / 03.5 — TMF resource files, each resource valid and tenant-stamped
     import json
 
     from idp.ingestion.tmf import schemas
 
-    landing.write_landing(multi_tenant_dataset, tmp_path)
+    landing.write_landing(landing_dataset, tmp_path)
     for tenant_id in ("tenant_a", "tenant_b"):
         folder = tmp_path / f"tenant={tenant_id}"
         names = {p.name for p in folder.iterdir()}
@@ -82,11 +93,11 @@ def test_landing_uri_local_and_s3(monkeypatch):
     assert storage.landing_uri(load_config()) == "s3://idp-landing"   # its own bucket, not a lake layer
 
 
-def test_landing_on_object_storage_matches_local(multi_tenant_dataset, tmp_path):
+def test_landing_on_object_storage_matches_local(landing_dataset, tmp_path):
     # SCN-BRZ-03.3 — an fsspec in-memory bucket stands in for s3://idp-landing
     import fsspec
-    landing.write_landing(multi_tenant_dataset, tmp_path)
-    landing.write_landing(multi_tenant_dataset, "memory://idp-landing")
+    landing.write_landing(landing_dataset, tmp_path)
+    landing.write_landing(landing_dataset, "memory://idp-landing")
     mem = fsspec.filesystem("memory")
     local = {p.relative_to(tmp_path).as_posix(): p.read_bytes() for p in tmp_path.rglob("*.json")}
     remote = {p.split("idp-landing/", 1)[1]: mem.cat_file(p) for p in mem.find("/idp-landing")}
@@ -99,13 +110,13 @@ def _read(root, tenants=("tenant_a", "tenant_b")):
     return list(landing.read_landing(root, tenants))
 
 
-def test_read_landing_round_trip_in_publish_order(multi_tenant_dataset, tmp_path):
+def test_read_landing_round_trip_in_publish_order(landing_dataset, tmp_path):
     # SCN-BRZ-05.1 through files: the canonical records, entity by entity, in publish order
     import json
 
     from idp.common.records import to_records
 
-    landing.write_landing(multi_tenant_dataset, tmp_path)
+    landing.write_landing(landing_dataset, tmp_path)
     files = _read(tmp_path)
     assert all(f.reason is None for f in files)
     assert [f.tenant for f in files] == sorted(f.tenant for f in files)          # tenant by tenant
@@ -113,7 +124,7 @@ def test_read_landing_round_trip_in_publish_order(multi_tenant_dataset, tmp_path
         mine = [f for f in files if f.tenant == tenant]
         assert [f.entity for f in mine] == [e for e in ENTITIES if any(m.entity == e for m in mine)]
         for f in mine:
-            df = getattr(multi_tenant_dataset, f.entity)
+            df = getattr(landing_dataset, f.entity)
             assert json.dumps(f.records) == json.dumps(to_records(df[df["tenant_id"] == tenant]))
 
 
@@ -130,8 +141,8 @@ def _write(path, payload):
     path.write_text(payload if isinstance(payload, str) else json.dumps(payload))
 
 
-def test_read_landing_rejects_bad_files_and_keeps_good_ones(multi_tenant_dataset, tmp_path):
-    folder, load = _land(multi_tenant_dataset, tmp_path)
+def test_read_landing_rejects_bad_files_and_keeps_good_ones(landing_dataset, tmp_path):
+    folder, load = _land(landing_dataset, tmp_path)
     topups = load("topupBalance.json")
     topups[0]["tenantId"] = "tenant_b"                                     # SCN-STR-01.4
     _write(folder / "topupBalance.json", topups)
