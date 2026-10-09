@@ -64,6 +64,10 @@ TRINO_TEST_SECRETS := deploy/dev/trino/.secrets
 .PHONY: trino-stack
 trino-stack: ## Start the compose Trino test stack (Trino + Postgres + MinIO; HTTPS + JWT auth) and wait until healthy
 	$(PY) deploy/platform/trino/make_secrets.py $(TRINO_TEST_SECRETS) --test-jwt --name localhost --name 127.0.0.1 --name trino
+	@# Trino runs as uid 1000 in its container and reads its keystore through the bind
+	@# mount: on Linux (CI) a 0600 file owned by the host user is unreadable to it and
+	@# Trino exits at startup. These are throwaway test secrets, so make the key readable.
+	chmod a+r $(TRINO_TEST_SECRETS)/trino.pem
 	$(TRINO_COMPOSE) up -d --wait
 
 .PHONY: trino-stack-down
