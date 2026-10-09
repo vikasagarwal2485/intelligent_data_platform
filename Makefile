@@ -76,7 +76,7 @@ trino-stack-down: ## Stop the compose Trino test stack and drop its data
 
 .PHONY: mcp-trino-test
 mcp-trino-test: trino-stack ## Run the MCP tools' Trino integration tests (parity with the pandas reference; pytest -m trino)
-	$(TRINO_TEST_ENV) $(PY) -m pytest -m trino tests/test_mcp_trino.py tests/test_tenant_isolation.py
+	$(TRINO_TEST_ENV) $(PY) -m pytest -m trino tests/test_mcp_trino.py tests/test_tenant_isolation.py tests/test_bi_roles.py
 
 .PHONY: mcp-smoke
 # The MCP server's identity for TENANT: its Keycloak MCP client (dev secret unless
@@ -178,6 +178,11 @@ keycloak: ## Apply Keycloak with the `idp` realm (ConfigMap from deploy/platform
 	kubectl -n idp-platform scale deploy/keycloak --replicas=1
 	kubectl -n idp-platform rollout restart deploy/keycloak
 	kubectl -n idp-platform rollout status deploy/keycloak --timeout=600s
+	@# Keycloak's dev store is in memory: each restart generates new signing keys, and Trino
+	@# loads the realm's keys (JWKS) at startup, so it must restart too or it rejects every token.
+	@if kubectl -n idp-platform get deploy trino-coordinator >/dev/null 2>&1; then \
+	  kubectl -n idp-platform rollout restart deploy/trino-coordinator && \
+	  kubectl -n idp-platform rollout status deploy/trino-coordinator --timeout=300s; fi
 
 TENANT ?= tenant_a
 .PHONY: keycloak-token
@@ -200,6 +205,42 @@ spark-operator: ## Install/upgrade the Kubeflow Spark Operator (pinned, watches 
 .PHONY: mk-check
 mk-check: ## Check the minikube node container's real memory cap can hold the platform + the largest Spark stage profile (REQ-ORC-07)
 	@bash deploy/platform/mk-check.sh
+
+SUPERSET_OPERATOR_VERSION := 0.3.0
+SUPERSET_TAG = $(shell $(PY) deploy/platform/superset/render.py tag)
+
+.PHONY: superset-image
+superset-image: ## Build the Superset image into minikube (idp/superset:<hash of its inputs>; the tag change triggers migrations)
+	@eval $$(minikube docker-env) && docker build -t idp/superset:$(SUPERSET_TAG) deploy/platform/superset
+	@echo "Built idp/superset:$(SUPERSET_TAG) inside minikube. Now run: make superset"
+
+.PHONY: superset
+superset: ## Install/update Superset via its operator (BI over Silver/Trino and Gold/TimescaleDB; Keycloak sign-in). Needs superset-image, trino-certs, bi-roles
+	bash deploy/platform/superset/install.sh $(NAMESPACE_PLATFORM) $(PY) $(SUPERSET_OPERATOR_VERSION)
+
+.PHONY: superset-content
+superset-content: ## Import the starter BI content (2 databases, 6 datasets, 7 charts, 2 dashboards) and the IdpData role into Superset
+	COPYFILE_DISABLE=1 tar $$(tar --version 2>/dev/null | grep -q bsdtar && echo --no-xattrs --no-mac-metadata) -C deploy/platform/superset/content -cf - . | kubectl -n $(NAMESPACE_PLATFORM) exec -i deploy/superset-web-server -- \
+	  sh -c 'rm -rf /tmp/idp-content && mkdir -p /tmp/idp-content && tar -xf - -C /tmp/idp-content'
+	kubectl -n $(NAMESPACE_PLATFORM) exec -i deploy/superset-web-server -- python - < deploy/platform/superset/content.py
+
+.PHONY: superset-smoke
+superset-smoke: ## End-to-end BI isolation: sign in as alice (tenant_a) and bob (tenant_b), every starter chart + SQL Lab escapes (REQ-TEN-06)
+	kubectl -n $(NAMESPACE_PLATFORM) exec -i deploy/superset-web-server -- python - < deploy/platform/superset/smoke.py
+
+.PHONY: superset-ui
+superset-ui: ## Open Superset at http://localhost:8088 (forwards Superset 8088 + Keycloak 8080 for the sign-in; needs the hosts entry '127.0.0.1 keycloak.idp-platform.svc')
+	@grep -q "keycloak.idp-platform.svc" /etc/hosts || { echo "Add this hosts entry once (the sign-in redirects to Keycloak's issuer host):"; \
+	  echo "  sudo sh -c 'echo \"127.0.0.1 keycloak.idp-platform.svc\" >> /etc/hosts'"; exit 1; }
+	@echo "Superset on http://localhost:8088 (sign in with Keycloak; dev users alice/bob/ada, password dev-password)."
+	@echo "Port 8080 is used for Keycloak while this runs: stop the Airflow/Kafka UI forwards first. Ctrl-C to stop."
+	@kubectl -n $(NAMESPACE_PLATFORM) port-forward svc/keycloak 8080:8080 >/dev/null & PF=$$!; \
+	  trap "kill $$PF 2>/dev/null" EXIT INT TERM; \
+	  kubectl -n $(NAMESPACE_PLATFORM) port-forward svc/superset-web-server 8088:8088
+
+.PHONY: bi-roles
+bi-roles: ## BI tenant roles (idp_bi_<tenant>) + row-level security on gold.* in TimescaleDB; passwords in the timescaledb-bi Secret (idempotent; needs make image)
+	bash deploy/platform/timescaledb/bi-roles.sh $(NAMESPACE_PLATFORM) $(PY)
 
 .PHONY: lake-catalog
 lake-catalog: ## Create the lake's Iceberg JDBC catalog database (`iceberg` in TimescaleDB) — idempotent

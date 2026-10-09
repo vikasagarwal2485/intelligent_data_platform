@@ -19,6 +19,7 @@
    - [4.4 ML algorithms](#44-ml-algorithms)
    - [4.5 Serving layer](#45-serving-layer)
    - [4.6 MCP analytics server](#46-mcp-analytics-server)
+   - [4.7 BI reports (Superset)](#47-bi-reports-superset)
 
 ---
 
@@ -59,6 +60,7 @@ Shared infrastructure, deployed by `make platform-services` (+ `make kafka`) int
 | **MLflow** | Experiment tracking + model registry (versions, gated `champion` alias) | **Active** (`make mlflow` + `make mlflow-ui`) |
 | **Prometheus + Grafana** | Metrics & dashboards; node-exporter + kube-state-metrics; K8s cluster + Kafka produce/consume dashboards | **Active** (`make monitoring` + `make grafana-ui`) |
 | **Kafka UI** (Kafbat) | Web UI to manage topics/messages/schemas | **Active** (`make kafka-ui`) |
+| **Apache Superset** (through its Kubernetes Operator) | BI dashboards and SQL Lab: Silver through Trino, Gold through TimescaleDB; Keycloak sign-in, every query limited to the signed-in user's tenant | **Active** (`make superset` + `make superset-ui`; section 4.7) |
 
 
 ### 1.3 Applications
@@ -195,6 +197,7 @@ flowchart TB
         SPK["Spark Operator (SparkApplications)"]
         CAT["Iceberg JDBC catalog<br/>(iceberg DB on TimescaleDB)"]
         TR["Trino lake catalog → MCP analytics server"]
+        SUP["Apache Superset (BI)<br/>Silver via Trino, Gold via TimescaleDB"]
         GOV["Tenancy & GDPR: tenant_id partitions,<br/>salted tokens, consent, Keycloak OIDC,<br/>Trino row-level security"]
         MON["Prometheus + Grafana"]
     end
@@ -212,6 +215,8 @@ flowchart TB
     G1 & G2 -->|idp publish| TS
     TS & REG --> API
     S & G1 & G2 --> TR
+    TR -->|impersonated principal| SUP
+    TS -->|tenant role, RLS| SUP
     AF -->|submits| SPK
     SPK -.runs.-> CONF & G1 & TRAIN & SCORE
     CAT -.tables.-> B & S & G1
@@ -248,6 +253,7 @@ flowchart TB
         AF["Airflow (scheduler + webserver)"]
         SOP["Spark Operator (controller + webhook)"]
         MON["Prometheus / Grafana"]
+        SUPOP["Superset Operator + Superset web server"]
       end
       subgraph APP["namespace: idp-app (applications)"]
         direction TB
@@ -1258,6 +1264,68 @@ without the row filter (REQ-TEN-05).
 Make targets: `make mcp` (start), `make mcp-smoke` (verify against Trino),
 `make mcp-config` (Claude Desktop config), `make trino-api` / `make keycloak-api`
 (forwards), `make mcp-trino-test` (integration and leakage tests).
+
+### 4.7 BI reports (Superset)
+
+**Apache Superset** serves dashboards and SQL Lab over the curated lake: Silver
+through Trino, Gold through the TimescaleDB serving tables. It runs in `idp-platform`
+through the **Apache Superset Kubernetes Operator**, the method upstream recommends
+now that the Superset Helm chart is deprecated (`deploy/platform/superset/`,
+ADR-0039).
+
+**Sign-in and tenant.** Users sign in only through Keycloak (realm `idp`, client
+`idp-superset`); Superset has no password login. The Superset user name is the
+token's principal (`alice@tenant_a`), and the user's tenant comes only from the
+token: no dashboard filter, URL or header can change it. The same dashboards serve
+every tenant, and each user sees only their own tenant's rows.
+
+| Who | Superset roles |
+|---|---|
+| a tenant user (`alice`, `bob`) | `Gamma` (view), `sql_lab`, `IdpData` (the two databases) |
+| a member of the realm group `bi-admins` (`ada`) | also `Admin` |
+| a token without a consistent tenant | `Gamma` only; no database connection at all |
+
+**How a query is isolated.** One function, `idp_superset.mutate_connection` (Superset's
+`DB_CONNECTION_MUTATOR`), sets the identity of every connection from the signed-in
+user, never from the query:
+
+| Data | Connection | Enforced by |
+|---|---|---|
+| Silver (Trino `lake`) | `superset` (password) **impersonating** `alice@tenant_a`, HTTPS | Trino's row filter on `tenant_id` (section 4.6) |
+| Gold (TimescaleDB `gold.*`) | the tenant's login role `idp_bi_tenant_a` | a row-level-security policy per table: `tenant_id` = the role's tenant |
+
+- **Gold roles:** `make bi-roles` creates one login role per configured tenant (plus a
+  data-free `idp_bi_meta` for tooling), members of `idp_bi_readers` only, with
+  passwords in the `timescaledb-bi` Secret. It revokes `CONNECT` on every other
+  database of the server (catalog, MLflow, Airflow, Nessie, Superset). `make publish`
+  re-applies the policy inside each table swap, so a published table is never readable
+  without it.
+- **Caching:** chart results are never cached (`NullCache`), so one tenant's result is
+  never served to another. Queries run synchronously (no Celery or Valkey).
+
+**Setup (minikube).**
+```bash
+make bi-roles            # tenant roles + row-level security on gold.* (once; again after adding a tenant)
+make superset-image      # idp/superset:<hash of its inputs> (a new tag makes the operator migrate)
+make superset            # operator + Secret + the Superset resource; waits until ready
+make superset-content    # starter databases, datasets, charts, dashboards + the IdpData role
+make superset-smoke      # signs in as alice and bob: every chart and SQL Lab escape, per tenant
+```
+
+**Open it in a browser.** The sign-in redirects to Keycloak's issuer host, so add
+this hosts entry once, then run `make superset-ui` (forwards Superset on 8088 and
+Keycloak on 8080; stop the Airflow and Kafka UI forwards, which also use 8080):
+```bash
+sudo sh -c 'echo "127.0.0.1 keycloak.idp-platform.svc" >> /etc/hosts'
+make superset-ui          # then http://localhost:8088 -> "Sign in with keycloak" (alice / dev-password)
+```
+
+**Starter content** (`deploy/platform/superset/content/`, a Superset export bundle,
+imported by `make superset-content`): the dashboards *Subscribers and usage* (Silver:
+subscribers by segment, usage by type, recharges by payment method, fee revenue by
+charge type) and *Credit and fraud scores* (Gold: credit and fraud overviews, highest
+fraud scores). The bundle names no tenant and holds no credentials. To change it,
+edit in Superset as a `bi-admins` user, export the dashboards, and replace the bundle.
 
 ---
 
