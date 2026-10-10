@@ -1,0 +1,31 @@
+slice_name: Top 10 highest PD
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 5__table
+  viz_type: table
+  query_mode: raw
+  all_columns:
+  - service_id
+  - pd
+  - affordability_base
+  - recommended_limit
+  groupby: []
+  metrics: []
+  row_limit: 10
+  order_by_cols:
+  - '["pd", false]'
+  adhoc_filters: []
+  server_pagination: false
+query_context: '{"datasource": {"id": 5, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 10, "columns": ["service_id", "pd", "affordability_base", "recommended_limit"], "metrics":
+  [], "orderby": [["pd", false]]}], "form_data": {"datasource": "5__table", "viz_type": "table", "query_mode":
+  "raw", "all_columns": ["service_id", "pd", "affordability_base", "recommended_limit"], "groupby": [],
+  "metrics": [], "row_limit": 10, "order_by_cols": ["[\"pd\", false]"], "adhoc_filters": [], "server_pagination":
+  false}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: 5e305ef8-ec05-57a6-a274-2ed5c631d235
+version: 1.0.0
+dataset_uuid: 1c7f616e-ea3d-486a-a9f9-ff5bf42bec2e

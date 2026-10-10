@@ -346,6 +346,39 @@ make lake-table-rows TABLE=gold.credit_features    # admin, password from trino-
   for the stage (`kubectl -n idp-platform scale deploy/trino-coordinator --replicas=0`)
   or raise the node cap.
 
+**Superset (BI) through its operator** (REQ-PLT-12, REQ-BI-*, ADR-0039). The Superset
+Helm chart is deprecated upstream; Superset runs through the Apache Superset Kubernetes
+Operator (chart `superset-operator` 0.3.0, namespace-scoped to `idp-platform`) as one
+`Superset` resource (`deploy/platform/superset/superset.yaml`, rendered with
+`superset_config.py` by `render.py`). Order:
+```bash
+make trino-certs && make bi-roles     # Trino Secrets; Gold tenant roles + RLS (timescaledb-bi Secret)
+make superset-image                   # idp/superset:<hash>; a new tag makes the operator run db upgrade
+make superset                         # operator, superset-secrets (once), the resource; then bi-roles again
+make superset-content && make superset-smoke
+```
+- **Secrets:** `superset-secrets` (`SECRET_KEY`, `IDP_OAUTH_CLIENT_SECRET`,
+  `IDP_TRINO_SUPERSET_PASSWORD`) is created once and never overwritten;
+  `timescaledb-bi` holds `IDP_BI_PASSWORD_<TENANT>` and `IDP_BI_PASSWORD_META`. The
+  metastore is the `superset` database on TimescaleDB, created by the operator.
+- **Browser access:** a hosts entry `127.0.0.1 keycloak.idp-platform.svc`, then
+  `make superset-ui` (Superset 8088, Keycloak 8080).
+- *`make superset-ui` fails with `connect(… 127.0.0.1:8088): Connection refused` / `lost
+  connection to pod`, and pods across the platform keep restarting on failed probes* —
+  the minikube container's CPU cap is below what Kubernetes schedules for (`docker
+  inspect minikube --format '{{.HostConfig.NanoCpus}}'`; 2 CPUs throttled an 8-CPU node
+  for days). `make mk-check` detects it and prints the live fix, e.g. `docker update
+  --cpus 8 minikube`. Superset, which boots slowly, is the first to never become ready.
+- *Every chart errors with "has no tenant: no data access"* — the user signed in
+  without a consistent `tenant_id`/`idp_principal`, or the tenant isn't configured.
+- *`Unknown signing key ID` from Trino after Keycloak restarted* — Keycloak's in-memory
+  store makes new signing keys at each start; `make keycloak` restarts Trino so it
+  reloads them (do the same after any manual Keycloak restart).
+- *A Gold chart errors with "permission denied for table"* — the table was published
+  before `make bi-roles`; run `make bi-roles` once (later publishes keep the policy).
+- *Superset didn't migrate after a rebuild* — the operator migrates only when the image
+  tag changes; build with `make superset-image` (content-hashed tag), never re-tag.
+
 **MLflow model registry** (REQ-ML-04). `make mlflow` installs community-charts/mlflow
 1.11.2 (MLflow 3.14.0, matching the `mlflow-skinny` client) from
 `deploy/platform/mlflow/mlflow-values.yaml`, after creating its backend database

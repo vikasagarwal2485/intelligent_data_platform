@@ -106,6 +106,20 @@
             "introspection.token.claim": "true",
             "userinfo.token.claim": "true"
           }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     },
@@ -227,6 +241,39 @@
       "groups": [
         "/tenant_b"
       ]
+    },
+    {
+      "username": "ada",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ada@tenant-a.example",
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "attributes": {
+        "tenant_id": [
+          "tenant_a"
+        ],
+        "idp_principal": [
+          "ada@tenant_a"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-password",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/tenant_a",
+        "/bi-admins"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "bi-admins",
+      "attributes": {}
     }
   ]
 }

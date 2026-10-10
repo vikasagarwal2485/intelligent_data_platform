@@ -1,0 +1,12 @@
+# The Apache Superset Kubernetes Operator (REQ-PLT-12), pinned in the Makefile
+# (SUPERSET_OPERATOR_VERSION). Namespace-scoped: it watches only idp-platform, where
+# the one `Superset` resource lives (superset.yaml), and gets a Role there instead
+# of a ClusterRole.
+watch:
+  scope: namespaces
+  namespaces: ["idp-platform"]
+resources:
+  requests: {cpu: 10m, memory: 64Mi}
+  limits: {cpu: 500m, memory: 128Mi}
+metrics:
+  enabled: false

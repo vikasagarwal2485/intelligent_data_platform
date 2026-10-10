@@ -1,0 +1,41 @@
+slice_name: Roaming usage by type
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 7__table
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+  - event_type
+  - traffic_case
+  - unit
+  metrics:
+  - expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: events
+  - expressionType: SQL
+    sqlExpression: SUM(qty)
+    label: quantity
+  row_limit: 1000
+  adhoc_filters:
+  - clause: WHERE
+    subject: is_roaming
+    operator: IS TRUE
+    expressionType: SIMPLE
+  order_desc: true
+query_context: '{"datasource": {"id": 7, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "is_roaming", "op": "IS TRUE"}], "row_limit": 1000, "columns": ["event_type", "traffic_case", "unit"],
+  "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "events"}, {"expressionType":
+  "SQL", "sqlExpression": "SUM(qty)", "label": "quantity"}], "orderby": [[{"expressionType": "SQL", "sqlExpression":
+  "COUNT(*)", "label": "events"}, false]]}], "form_data": {"datasource": "7__table", "viz_type": "table",
+  "query_mode": "aggregate", "groupby": ["event_type", "traffic_case", "unit"], "metrics": [{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "events"}, {"expressionType": "SQL", "sqlExpression": "SUM(qty)",
+  "label": "quantity"}], "row_limit": 1000, "adhoc_filters": [{"clause": "WHERE", "subject": "is_roaming",
+  "operator": "IS TRUE", "expressionType": "SIMPLE"}], "order_desc": true}, "result_format": "json", "result_type":
+  "full"}'
+cache_timeout: null
+uuid: 7350d437-4af8-5ca7-895d-288f6a80de7a
+version: 1.0.0
+dataset_uuid: 200c52f7-a0cb-5167-baeb-24866b1a63ee

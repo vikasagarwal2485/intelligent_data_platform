@@ -1,0 +1,37 @@
+slice_name: Fused score distribution (last 30 days)
+description: null
+certified_by: null
+certification_details: null
+viz_type: histogram_v2
+params:
+  datasource: 6__table
+  viz_type: histogram_v2
+  column: fraud_score
+  groupby: []
+  bins: 10
+  normalize: false
+  cumulative: false
+  x_axis_title: Fused score
+  y_axis_title: services
+  show_value: true
+  show_legend: false
+  row_limit: 10000
+  adhoc_filters:
+  - clause: WHERE
+    subject: scored_at
+    operator: TEMPORAL_RANGE
+    comparator: 'DATEADD(DATETIME("now"), -30, day) : now'
+    expressionType: SIMPLE
+query_context: '{"datasource": {"id": 6, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "scored_at", "op": "TEMPORAL_RANGE", "val": "DATEADD(DATETIME(\"now\"), -30, day) : now"}], "row_limit":
+  10000, "columns": ["fraud_score"], "post_processing": [{"operation": "histogram", "options": {"column":
+  "fraud_score", "groupby": [], "bins": 10, "cumulative": false, "normalize": false}}]}], "form_data":
+  {"datasource": "6__table", "viz_type": "histogram_v2", "column": "fraud_score", "groupby": [], "bins":
+  10, "normalize": false, "cumulative": false, "x_axis_title": "Fused score", "y_axis_title": "services",
+  "show_value": true, "show_legend": false, "row_limit": 10000, "adhoc_filters": [{"clause": "WHERE",
+  "subject": "scored_at", "operator": "TEMPORAL_RANGE", "comparator": "DATEADD(DATETIME(\"now\"), -30,
+  day) : now", "expressionType": "SIMPLE"}]}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: c9910915-3a6d-5b3c-8997-674c5bb15bca
+version: 1.0.0
+dataset_uuid: a08bd494-d2fb-45e2-b9e2-ae8a3031bd82

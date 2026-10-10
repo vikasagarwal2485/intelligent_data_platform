@@ -1320,12 +1320,68 @@ sudo sh -c 'echo "127.0.0.1 keycloak.idp-platform.svc" >> /etc/hosts'
 make superset-ui          # then http://localhost:8088 -> "Sign in with keycloak" (alice / dev-password)
 ```
 
-**Starter content** (`deploy/platform/superset/content/`, a Superset export bundle,
-imported by `make superset-content`): the dashboards *Subscribers and usage* (Silver:
-subscribers by segment, usage by type, recharges by payment method, fee revenue by
-charge type) and *Credit and fraud scores* (Gold: credit and fraud overviews, highest
-fraud scores). The bundle names no tenant and holds no credentials. To change it,
-edit in Superset as a `bi-admins` user, export the dashboards, and replace the bundle.
+#### Dashboards
+
+Four dashboards ship as code (`deploy/platform/superset/content/`, a Superset export
+bundle, imported by `make superset-content`). Each opens at
+`http://localhost:8088/superset/dashboard/<slug>/` and shows only the signed-in user's
+tenant.
+
+**Subscriber overview** (`subscriber-overview`, Silver)
+
+| Chart | Type | Source | Shows |
+|---|---|---|---|
+| Subscribers by segment | table | `silver.dim_subscriber` | subscriber count per segment (B2B, B2C, B2B2C) |
+| Agreement type by business line | pivot table | `silver.dim_subscriber` | subscriber count per business line (rows) and agreement type (columns), with totals |
+| Recharges by payment method | table | `silver.fact_recharge` | recharge count and amount per payment method |
+| Fee revenue by charge type | table | `silver.fact_fee_charge` | fee revenue per charge type (recurring, one-time, overage, discount) |
+
+**Usage overview** (`usage-overview`, Silver)
+
+| Chart | Type | Source | Shows |
+|---|---|---|---|
+| Usage events by type (last 30 days) | pie | `usage_windows` | event count per event type |
+| Usage events change by type, last 7 days vs prior 7 | table | `usage_windows` | events per type in the last 7 days and the 7 before, change in % |
+| Overage revenue change by category, last 7 days vs prior 7 | table | `overage_fee_windows` | overage revenue per category (add-on, subscription, roaming) in both weeks, change in % |
+| Roaming usage by type | table | `usage_windows` | roaming event count and quantity per event type, traffic case and unit |
+
+**Credit scores** (`credit-scores`, Gold)
+
+| Chart | Type | Source | Shows |
+|---|---|---|---|
+| Credit scores overview | table | `gold.credit_scores` | services scored, average PD, affordability and recommended limit |
+| Probability of default (last 30 days) | histogram | `gold.credit_scores` | PD distribution, 10 bins |
+| Affordability vs recommended limit (last 30 days) | bubble | `gold.credit_scores` | one point per service |
+| Affordability gap distribution (last 30 days) | histogram | `gold.credit_scores` | affordability minus recommended limit (the headroom) |
+| Top 10 highest PD / Top 10 lowest PD | tables | `gold.credit_scores` | service ID, PD, affordability, recommended limit |
+
+**Fraud scores** (`fraud-scores`, Gold)
+
+| Chart | Type | Source | Shows |
+|---|---|---|---|
+| Fraud scores overview | table | `gold.fraud_scores` | services scored, average model probability, rule score and fused score, services to review (fused score >= 0.5) |
+| Fraud probability (last 30 days) | histogram | `gold.fraud_scores` | the model's fraud probability (`fraud_proba`) |
+| Rule score distribution (last 30 days) | histogram | `gold.fraud_scores` | the rule score |
+| Fused score distribution (last 30 days) | histogram | `gold.fraud_scores` | the fused score (`fraud_score` = 0.6 model + 0.2 anomaly + 0.2 rules) |
+| Top 10 highest / lowest fraud scores | tables | `gold.fraud_scores` | service ID, fraud probability, rule score, fused score, ranked by the fused score |
+
+**Time windows.**
+- **Gold:** the last 30 days of `scored_at`, up to now (`DATEADD(DATETIME("now"), -30, day) : now`;
+  Superset's "Last 30 days" would stop at today 00:00 and drop today's scores).
+- **Silver:** usage and overage windows count back from the **latest record the
+  signed-in tenant can see**, not from today, because Silver can hold historical data.
+  Two virtual datasets compute them, and Trino's row filter applies inside:
+  - `usage_windows`, over `silver.fact_usage`, adds `period` (`last_7d`, `prior_7d`) and
+    `in_last_30d`;
+  - `overage_fee_windows` does the same over the overage rows of
+    `silver.fact_fee_charge`.
+
+**Changing the content.** The bundle names no tenant and holds no credentials
+(`tests/test_bi_content.py` checks this, and that every layout box points at a bundled
+chart by uuid). To change it, edit in Superset as a `bi-admins` user (`ada`), export the
+dashboards, and replace the bundle. `make superset-content` overwrites datasets, charts
+and dashboards with the same uuid; it doesn't delete content that is no longer in the
+bundle.
 
 ---
 

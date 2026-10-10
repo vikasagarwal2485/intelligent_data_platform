@@ -65,7 +65,7 @@ def test_users_carry_a_consistent_principal_and_group():
     for u in r["users"]:
         tenant = u["attributes"]["tenant_id"][0]
         assert u["attributes"]["idp_principal"] == [f"{u['username']}@{tenant}"]
-        assert u["groups"] == [f"/{tenant}"]
+        assert u["groups"][0] == f"/{tenant}" and set(u["groups"][1:]) <= {"/bi-admins"}
     cli = _clients(r)["idp-dev-cli"]
     attrs = {m["config"]["claim.name"] for m in cli["protocolMappers"]
              if m["protocolMapper"] == "oidc-usermodel-attribute-mapper"}
@@ -101,3 +101,17 @@ def test_cli_check(tmp_path, capsys):
     assert main(["keycloak-realm", "--out", str(out), "--check"]) == 0
     out.write_text("{}")
     assert main(["keycloak-realm", "--out", str(out), "--check"]) == 1
+
+
+def test_superset_client_signs_in_with_tenant_principal_and_groups():
+    # REQ-BI-01: the BI login client carries the principal, the tenant and the groups
+    # (bi-admins -> Superset Admin), and redirects only to Superset
+    r = realm.render(_tenants(), env={})
+    c = _clients(r)["idp-superset"]
+    assert c["standardFlowEnabled"] and not c["directAccessGrantsEnabled"] and not c["publicClient"]
+    claims = {m["config"].get("claim.name") for m in c["protocolMappers"]}
+    assert {"tenant_id", "idp_principal", "groups"} <= claims
+    assert all(u.startswith(("http://localhost:8088/", "http://superset.")) for u in c["redirectUris"])
+    assert "bi-admins" in [g["name"] for g in r["groups"]]
+    ada = next(u for u in r["users"] if u["username"] == "ada")
+    assert ada["groups"] == ["/tenant_a", "/bi-admins"]

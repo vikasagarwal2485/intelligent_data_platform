@@ -1,0 +1,47 @@
+# Apache Superset (REQ-PLT-12, REQ-BI-*), managed by the Superset Kubernetes
+# Operator. render.py fills in spec.image.tag (a hash of the image inputs),
+# spec.config (superset_config.py) and IDP_TENANTS; apply with `make superset`.
+apiVersion: superset.apache.org/v1alpha1
+kind: Superset
+metadata:
+  name: superset
+  namespace: idp-platform
+spec:
+  environment: Production          # every secret from a Secret reference
+  image:
+    repository: idp/superset       # built into minikube by `make superset-image`
+    tag: ""                        # set by render.py
+    pullPolicy: Never
+  secretKeyFrom: {name: superset-secrets, key: SECRET_KEY}
+  metastore:                       # the superset database on the platform TimescaleDB
+    type: PostgreSQL
+    host: timescaledb.idp-platform.svc
+    port: 5432
+    database: superset
+    username: postgres
+    passwordFrom: {name: timescaledb, key: POSTGRES_PASSWORD}
+    createDatabase: true
+  # No valkey, celeryWorker or celeryBeat: no cache, broker or results backend is
+  # rendered, and queries run synchronously in the web server.
+  webServer:
+    replicas: 1
+  lifecycle:
+    init: {}                       # superset init; no admin user (sign-in is Keycloak only)
+  podTemplate:
+    container:
+      envFrom:
+        - secretRef: {name: superset-secrets}     # IDP_OAUTH_CLIENT_SECRET, IDP_TRINO_SUPERSET_PASSWORD
+        - secretRef: {name: timescaledb-bi}       # IDP_BI_PASSWORD_<TENANT>
+      env:
+        - {name: IDP_TRINO_CA_CERT, value: /etc/idp/trino/tls.crt}
+      volumeMounts:
+        - {name: trino-tls, mountPath: /etc/idp/trino, readOnly: true}
+      resources:
+        requests: {cpu: 250m, memory: 768Mi}
+        limits: {memory: 1536Mi}
+    volumes:
+      - name: trino-tls
+        secret:
+          secretName: trino-tls
+          items: [{key: tls.crt, path: tls.crt}]
+  config: ""                       # set by render.py (superset_config.py)

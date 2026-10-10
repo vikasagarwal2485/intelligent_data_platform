@@ -1,0 +1,28 @@
+slice_name: Fee revenue by charge type
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 4__table
+  viz_type: table
+  groupby:
+  - charge_type
+  metrics:
+  - expressionType: SQL
+    sqlExpression: SUM(amount)
+    label: revenue
+  row_limit: 1000
+  adhoc_filters: []
+query_context: '{"datasource": {"id": 4, "type": "table"}, "force": false, "queries":
+  [{"columns": ["charge_type"], "metrics": [{"expressionType": "SQL", "sqlExpression":
+  "SUM(amount)", "label": "revenue"}], "filters": [], "row_limit": 1000, "orderby":
+  [[{"expressionType": "SQL", "sqlExpression": "SUM(amount)", "label": "revenue"},
+  false]]}], "form_data": {"datasource": "4__table", "viz_type": "table", "groupby":
+  ["charge_type"], "metrics": [{"expressionType": "SQL", "sqlExpression": "SUM(amount)",
+  "label": "revenue"}], "row_limit": 1000, "adhoc_filters": []}, "result_format":
+  "json", "result_type": "full"}'
+cache_timeout: null
+uuid: b4166486-0e3e-4430-855c-80faf170d704
+version: 1.0.0
+dataset_uuid: ec1bc8c7-e582-4508-b2ec-2072839fddcf

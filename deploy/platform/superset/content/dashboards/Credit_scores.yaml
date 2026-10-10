@@ -1,0 +1,148 @@
+dashboard_title: Credit scores
+description: null
+css: null
+slug: credit-scores
+certified_by: null
+certification_details: null
+published: true
+uuid: 27af9d58-9a40-5650-b95f-17562252dcf8
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-1
+    - ROW-2
+    - ROW-3
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Credit scores
+  ROW-1:
+    type: ROW
+    id: ROW-1
+    children:
+    - CHART-9c9c4601
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-9c9c4601:
+    type: CHART
+    id: CHART-9c9c4601
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: 9c9c4601-fcf7-42c2-9358-669395385aa8
+      chartId: 0
+      sliceName: Credit scores overview
+      width: 12
+      height: 22
+  ROW-2:
+    type: ROW
+    id: ROW-2
+    children:
+    - CHART-12a7d667
+    - CHART-cc5bc1bc
+    - CHART-46371bb7
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-12a7d667:
+    type: CHART
+    id: CHART-12a7d667
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: 12a7d667-e7cb-53cc-9f1f-fbc9c60f99cd
+      chartId: 0
+      sliceName: Probability of default (last 30 days)
+      width: 4
+      height: 50
+  CHART-cc5bc1bc:
+    type: CHART
+    id: CHART-cc5bc1bc
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: cc5bc1bc-54dc-5afb-b19f-6210de5ee6a9
+      chartId: 0
+      sliceName: Affordability vs recommended limit (last 30 days)
+      width: 4
+      height: 50
+  CHART-46371bb7:
+    type: CHART
+    id: CHART-46371bb7
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: 46371bb7-5a77-582e-add5-4f8137ac1b5b
+      chartId: 0
+      sliceName: Affordability gap distribution (last 30 days)
+      width: 4
+      height: 50
+  ROW-3:
+    type: ROW
+    id: ROW-3
+    children:
+    - CHART-5e305ef8
+    - CHART-387f1b3f
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-5e305ef8:
+    type: CHART
+    id: CHART-5e305ef8
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-3
+    meta:
+      uuid: 5e305ef8-ec05-57a6-a274-2ed5c631d235
+      chartId: 0
+      sliceName: Top 10 highest PD
+      width: 6
+      height: 50
+  CHART-387f1b3f:
+    type: CHART
+    id: CHART-387f1b3f
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-3
+    meta:
+      uuid: 387f1b3f-ae10-58cc-8edb-f3abdc3172ca
+      chartId: 0
+      sliceName: Top 10 lowest PD
+      width: 6
+      height: 50
+theme_uuid: null
+version: 1.0.0

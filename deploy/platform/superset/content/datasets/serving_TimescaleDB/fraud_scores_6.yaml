@@ -1,0 +1,123 @@
+table_name: fraud_scores
+main_dttm_col: scored_at
+currency_code_column: null
+description: null
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: idp
+schema: gold
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+folders: null
+uuid: a08bd494-d2fb-45e2-b9e2-ae8a3031bd82
+metrics:
+- metric_name: count
+  verbose_name: COUNT(*)
+  metric_type: count
+  expression: COUNT(*)
+  description: null
+  d3format: null
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: scored_at
+  verbose_name: null
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITHOUT TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: fraud_proba
+  verbose_name: Fraud probability (model)
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: anomaly_score
+  verbose_name: Anomaly score
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: fraud_score
+  verbose_name: Fused score
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: rule_score
+  verbose_name: Rule score
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: tenant_id
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: service_id
+  verbose_name: Service ID
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+version: 1.0.0
+database_uuid: b2bc0a19-3e41-4385-a34d-4a957527904e

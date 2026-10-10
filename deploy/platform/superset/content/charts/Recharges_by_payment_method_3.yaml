@@ -1,0 +1,32 @@
+slice_name: Recharges by payment method
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 3__table
+  viz_type: table
+  groupby:
+  - payment_method
+  metrics:
+  - expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: count
+  - expressionType: SQL
+    sqlExpression: SUM(amount)
+    label: amount
+  row_limit: 1000
+  adhoc_filters: []
+query_context: '{"datasource": {"id": 3, "type": "table"}, "force": false, "queries":
+  [{"columns": ["payment_method"], "metrics": [{"expressionType": "SQL", "sqlExpression":
+  "COUNT(*)", "label": "count"}, {"expressionType": "SQL", "sqlExpression": "SUM(amount)",
+  "label": "amount"}], "filters": [], "row_limit": 1000, "orderby": [[{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "count"}, false]]}], "form_data": {"datasource":
+  "3__table", "viz_type": "table", "groupby": ["payment_method"], "metrics": [{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "count"}, {"expressionType": "SQL",
+  "sqlExpression": "SUM(amount)", "label": "amount"}], "row_limit": 1000, "adhoc_filters":
+  []}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: df71bdd3-35a0-44d0-beb6-b570be4ba97c
+version: 1.0.0
+dataset_uuid: ab5ba3c5-0ae0-49ac-9b38-5bf98d87149a

@@ -15,6 +15,7 @@ Usage (separated medallion stages):
     idp archive-policy  # render the Bronze archive (lifecycle) rule as JSON
     idp registry-schemas  # write each Kafka topic's TMF JSON Schema (wire contract)
     idp keycloak-realm    # render the Keycloak realm from the configured tenants (--check: compare)
+    idp bi-roles          # BI tenant roles + row-level security on the gold serving tables
     idp maintain   # compact, expire snapshots, remove orphans on every lake table
     idp mcp        # start the MCP analytics server (stdio): 7 analytics tools (5 Silver, 2 Gold scores)
 """
@@ -216,6 +217,19 @@ def _cmd_registry_schemas(args: argparse.Namespace) -> None:
     print(f"Wrote {len(TOPIC_RESOURCES)} topic schemas to {out}")
 
 
+def _cmd_bi_roles(args: argparse.Namespace) -> int:
+    """Provision the BI tenant roles and Gold row-level security (REQ-BI-03)."""
+    from idp.serving import bi_roles, timescale
+
+    cfg = load_config(args.config)
+    ts = cfg.timescale
+    tenants = [t.id for t in cfg.tenants]
+    done = bi_roles.provision(timescale.get_engine(cfg), tenants, bi_roles.passwords_from_env(tenants),
+                              database=ts["database"], schema=ts.get("schema") or "gold")
+    print(json.dumps(done, indent=2))
+    return 0
+
+
 def _cmd_keycloak_realm(args: argparse.Namespace) -> int:
     """Render the Keycloak realm from the configured tenants (REQ-TEN-02). With
     ``--check``, exit 1 when the committed realm differs from the rendering."""
@@ -359,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
                            help="Write each Kafka topic's TMF JSON Schema (the registered wire contract)")
     p_reg.add_argument("--out", required=True, help="Directory to write <suffix>.schema.json into")
     p_reg.set_defaults(func=_cmd_registry_schemas)
+    sub.add_parser("bi-roles", help="BI tenant roles (idp_bi_<tenant>) and row-level security on the gold "
+                   "serving tables; passwords from IDP_BI_PASSWORD_<TENANT>").set_defaults(func=_cmd_bi_roles)
     p_kc = sub.add_parser("keycloak-realm",
                           help="Render the Keycloak realm (groups, tenant clients) from the configured tenants")
     p_kc.add_argument("--out", help="File to write (default deploy/platform/keycloak/idp-realm.json)")

@@ -1,0 +1,44 @@
+slice_name: Fraud scores overview
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 6__table
+  viz_type: table
+  groupby: []
+  metrics:
+  - expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: services
+  - expressionType: SQL
+    sqlExpression: AVG(fraud_proba)
+    label: avg_fraud_probability
+  - expressionType: SQL
+    sqlExpression: AVG(rule_score)
+    label: avg_rule_score
+  - expressionType: SQL
+    sqlExpression: AVG(fraud_score)
+    label: avg_fused_score
+  - expressionType: SQL
+    sqlExpression: SUM(CASE WHEN fraud_score >= 0.5 THEN 1 ELSE 0 END)
+    label: review
+  row_limit: 1000
+  adhoc_filters: []
+query_context: '{"datasource": {"id": 6, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 1000, "columns": [], "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)",
+  "label": "services"}, {"expressionType": "SQL", "sqlExpression": "AVG(fraud_proba)", "label": "avg_fraud_probability"},
+  {"expressionType": "SQL", "sqlExpression": "AVG(rule_score)", "label": "avg_rule_score"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(fraud_score)", "label": "avg_fused_score"}, {"expressionType": "SQL", "sqlExpression":
+  "SUM(CASE WHEN fraud_score >= 0.5 THEN 1 ELSE 0 END)", "label": "review"}], "orderby": [[{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "services"}, false]]}], "form_data": {"datasource": "6__table",
+  "viz_type": "table", "groupby": [], "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)",
+  "label": "services"}, {"expressionType": "SQL", "sqlExpression": "AVG(fraud_proba)", "label": "avg_fraud_probability"},
+  {"expressionType": "SQL", "sqlExpression": "AVG(rule_score)", "label": "avg_rule_score"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(fraud_score)", "label": "avg_fused_score"}, {"expressionType": "SQL", "sqlExpression":
+  "SUM(CASE WHEN fraud_score >= 0.5 THEN 1 ELSE 0 END)", "label": "review"}], "row_limit": 1000, "adhoc_filters":
+  []}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: b4d8b37e-79d4-4754-880e-45236b0939b4
+version: 1.0.0
+dataset_uuid: a08bd494-d2fb-45e2-b9e2-ae8a3031bd82

@@ -1,0 +1,108 @@
+dashboard_title: Subscriber overview
+description: null
+css: null
+slug: subscriber-overview
+certified_by: null
+certification_details: null
+published: true
+uuid: ba337a8a-36c8-5d91-9aaf-eea47afed1c6
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-1
+    - ROW-2
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Subscriber overview
+  ROW-1:
+    type: ROW
+    id: ROW-1
+    children:
+    - CHART-4af2ce5d
+    - CHART-d1319407
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-4af2ce5d:
+    type: CHART
+    id: CHART-4af2ce5d
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: 4af2ce5d-d566-435c-86af-9f87869ebd00
+      chartId: 0
+      sliceName: Subscribers by segment
+      width: 6
+      height: 50
+  CHART-d1319407:
+    type: CHART
+    id: CHART-d1319407
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: d1319407-bbde-568d-90d5-3b455be5d5ec
+      chartId: 0
+      sliceName: Agreement type by business line
+      width: 6
+      height: 50
+  ROW-2:
+    type: ROW
+    id: ROW-2
+    children:
+    - CHART-df71bdd3
+    - CHART-b4166486
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-df71bdd3:
+    type: CHART
+    id: CHART-df71bdd3
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: df71bdd3-35a0-44d0-beb6-b570be4ba97c
+      chartId: 0
+      sliceName: Recharges by payment method
+      width: 6
+      height: 50
+  CHART-b4166486:
+    type: CHART
+    id: CHART-b4166486
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: b4166486-0e3e-4430-855c-80faf170d704
+      chartId: 0
+      sliceName: Fee revenue by charge type
+      width: 6
+      height: 50
+theme_uuid: null
+version: 1.0.0

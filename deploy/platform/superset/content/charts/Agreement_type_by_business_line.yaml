@@ -1,0 +1,35 @@
+slice_name: Agreement type by business line
+description: null
+certified_by: null
+certification_details: null
+viz_type: pivot_table_v2
+params:
+  datasource: 1__table
+  viz_type: pivot_table_v2
+  groupbyRows:
+  - business_line
+  groupbyColumns:
+  - agreement_type
+  metrics:
+  - expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: subscribers
+  metricsLayout: COLUMNS
+  aggregateFunction: Sum
+  rowTotals: true
+  colTotals: true
+  valueFormat: SMART_NUMBER
+  row_limit: 10000
+  adhoc_filters: []
+query_context: '{"datasource": {"id": 1, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 10000, "columns": ["business_line", "agreement_type"], "metrics": [{"expressionType": "SQL",
+  "sqlExpression": "COUNT(*)", "label": "subscribers"}], "orderby": [[{"expressionType": "SQL", "sqlExpression":
+  "COUNT(*)", "label": "subscribers"}, false]]}], "form_data": {"datasource": "1__table", "viz_type":
+  "pivot_table_v2", "groupbyRows": ["business_line"], "groupbyColumns": ["agreement_type"], "metrics":
+  [{"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "subscribers"}], "metricsLayout": "COLUMNS",
+  "aggregateFunction": "Sum", "rowTotals": true, "colTotals": true, "valueFormat": "SMART_NUMBER", "row_limit":
+  10000, "adhoc_filters": []}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: d1319407-bbde-568d-90d5-3b455be5d5ec
+version: 1.0.0
+dataset_uuid: ed80b2ed-7713-475d-96ed-5f461b251879

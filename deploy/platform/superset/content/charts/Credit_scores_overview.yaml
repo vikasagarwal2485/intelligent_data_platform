@@ -1,0 +1,39 @@
+slice_name: Credit scores overview
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 5__table
+  viz_type: table
+  groupby: []
+  metrics:
+  - expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: services
+  - expressionType: SQL
+    sqlExpression: AVG(pd)
+    label: avg_pd
+  - expressionType: SQL
+    sqlExpression: AVG(affordability_base)
+    label: avg_affordability
+  - expressionType: SQL
+    sqlExpression: AVG(recommended_limit)
+    label: avg_recommended_limit
+  row_limit: 1000
+  adhoc_filters: []
+query_context: '{"datasource": {"id": 5, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 1000, "columns": [], "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)",
+  "label": "services"}, {"expressionType": "SQL", "sqlExpression": "AVG(pd)", "label": "avg_pd"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(affordability_base)", "label": "avg_affordability"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(recommended_limit)", "label": "avg_recommended_limit"}], "orderby": [[{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "services"}, false]]}], "form_data": {"datasource": "5__table",
+  "viz_type": "table", "groupby": [], "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)",
+  "label": "services"}, {"expressionType": "SQL", "sqlExpression": "AVG(pd)", "label": "avg_pd"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(affordability_base)", "label": "avg_affordability"}, {"expressionType":
+  "SQL", "sqlExpression": "AVG(recommended_limit)", "label": "avg_recommended_limit"}], "row_limit": 1000,
+  "adhoc_filters": []}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: 9c9c4601-fcf7-42c2-9358-669395385aa8
+version: 1.0.0
+dataset_uuid: 1c7f616e-ea3d-486a-a9f9-ff5bf42bec2e

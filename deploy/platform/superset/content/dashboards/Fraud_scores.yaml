@@ -1,0 +1,148 @@
+dashboard_title: Fraud scores
+description: null
+css: null
+slug: fraud-scores
+certified_by: null
+certification_details: null
+published: true
+uuid: d4ec7354-7bc7-55be-ac40-b48efdf9b5c7
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-1
+    - ROW-2
+    - ROW-3
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Fraud scores
+  ROW-1:
+    type: ROW
+    id: ROW-1
+    children:
+    - CHART-b4d8b37e
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-b4d8b37e:
+    type: CHART
+    id: CHART-b4d8b37e
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: b4d8b37e-79d4-4754-880e-45236b0939b4
+      chartId: 0
+      sliceName: Fraud scores overview
+      width: 12
+      height: 22
+  ROW-2:
+    type: ROW
+    id: ROW-2
+    children:
+    - CHART-ca678148
+    - CHART-854f0df8
+    - CHART-c9910915
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-ca678148:
+    type: CHART
+    id: CHART-ca678148
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: ca678148-bafa-57ac-b696-bc5aaa064e23
+      chartId: 0
+      sliceName: Fraud probability (last 30 days)
+      width: 4
+      height: 50
+  CHART-854f0df8:
+    type: CHART
+    id: CHART-854f0df8
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: 854f0df8-e166-5e09-a9b5-128efbd38a5a
+      chartId: 0
+      sliceName: Rule score distribution (last 30 days)
+      width: 4
+      height: 50
+  CHART-c9910915:
+    type: CHART
+    id: CHART-c9910915
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: c9910915-3a6d-5b3c-8997-674c5bb15bca
+      chartId: 0
+      sliceName: Fused score distribution (last 30 days)
+      width: 4
+      height: 50
+  ROW-3:
+    type: ROW
+    id: ROW-3
+    children:
+    - CHART-b8fa26f6
+    - CHART-cd3d06cf
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-b8fa26f6:
+    type: CHART
+    id: CHART-b8fa26f6
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-3
+    meta:
+      uuid: b8fa26f6-6708-4097-950e-77099d35a70f
+      chartId: 0
+      sliceName: Top 10 highest fraud scores
+      width: 6
+      height: 50
+  CHART-cd3d06cf:
+    type: CHART
+    id: CHART-cd3d06cf
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-3
+    meta:
+      uuid: cd3d06cf-e5ab-5696-b0d8-9c90c81bc2c3
+      chartId: 0
+      sliceName: Top 10 lowest fraud scores
+      width: 6
+      height: 50
+theme_uuid: null
+version: 1.0.0

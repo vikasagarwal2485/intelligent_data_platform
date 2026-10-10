@@ -810,3 +810,43 @@ followed but that had no ADR.
   - Anyone holding the `superset` password can impersonate any tenant principal:
     that's the trust boundary of the coming Superset change.
   - TimescaleDB, MinIO, Kafka and the Iceberg catalog keep shared credentials.
+
+### ADR-0039 — Superset for BI, through its operator; isolation enforced by the stores
+- **Status:** Accepted (2026-10-09) — change `superset-bi-reports`; follows ADR-0038
+- **Context:** Reports and dashboards over the lake were the planned second analytics
+  consumer (ADR-0038), next to the MCP tools. Superset reaches Trino and the TimescaleDB
+  serving tables with ordinary database credentials, and the TimescaleDB `postgres` user
+  sees every tenant. The Superset Helm chart turned out to be deprecated upstream
+  (0.22.8, the last for Superset 6.1.0); the official path is the Apache Superset
+  Kubernetes Operator.
+- **Decision:**
+  - **Deployment:** the Superset Kubernetes Operator 0.3.0 (alpha API
+    `superset.apache.org/v1alpha1`), namespace-scoped, one `Superset` resource in
+    Production mode: metastore on TimescaleDB, no Valkey or Celery (synchronous queries),
+    our image (`apache/superset:6.1.0` + Trino/Postgres drivers + `authlib`) tagged by a
+    hash of its inputs so migrations run.
+  - **Sign-in:** Keycloak only; the user name is `idp_principal`, the tenant only from the
+    token; roles `Gamma` + `sql_lab` + `IdpData` for tenant users, `Admin` for the realm
+    group `bi-admins`.
+  - **One connection mutator** (`idp_superset.mutate_connection`) sets every connection's
+    identity from the signed-in user: Trino as `superset` impersonating the principal
+    (Trino's row filter applies); TimescaleDB as the tenant's login role
+    `idp_bi_<tenant>`, with one row-level-security policy per serving table, re-applied by
+    every publish swap. No user, no tenant: no connection. Content tooling uses a
+    data-free identity (`meta`).
+  - **No result caching** across users (`NullCache`); the content (4 dashboards, 20 charts,
+    8 datasets) is an exported bundle in the repository with no tenant or credential.
+  - **Trino hardening found on the way:** a `queries` section so only `admin` sees other
+    users' queries (the earlier rules let any principal list every query's text);
+    read-only, access-filtered `system.jdbc`/`system.metadata` for BI clients; `make
+    keycloak` restarts Trino because Keycloak's in-memory store rotates signing keys.
+- **Consequences:**
+  - The same dashboards serve every tenant, and both stores refuse cross-tenant reads
+    on their own (`make superset-smoke`: 27 checks; `tests/test_bi_roles.py` against
+    Postgres).
+  - An operator in alpha: upgrades are deliberate, pinned changes.
+  - About 0.45 GiB more on the node (web server and operator).
+  - Browser sign-in needs a hosts entry and Keycloak on local port 8080, until the issuer
+    moves to an ingress hostname with the EKS change.
+  - Scheduled reports and alerts (Celery) are not available; adding them later needs a
+    per-tenant report owner.

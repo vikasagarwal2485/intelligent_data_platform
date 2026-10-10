@@ -1,0 +1,46 @@
+slice_name: Usage events change by type, last 7 days vs prior 7
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 7__table
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+  - event_type
+  metrics:
+  - expressionType: SQL
+    sqlExpression: SUM(CASE WHEN period = 'last_7d' THEN 1 ELSE 0 END)
+    label: events last 7 days
+  - expressionType: SQL
+    sqlExpression: SUM(CASE WHEN period = 'prior_7d' THEN 1 ELSE 0 END)
+    label: events prior 7 days
+  - expressionType: SQL
+    sqlExpression: ROUND(100.0 * (SUM(CASE WHEN period = 'last_7d' THEN 1 ELSE 0 END) - SUM(CASE WHEN
+      period = 'prior_7d' THEN 1 ELSE 0 END)) / NULLIF(SUM(CASE WHEN period = 'prior_7d' THEN 1 ELSE 0
+      END), 0), 1)
+    label: change %
+  row_limit: 1000
+  adhoc_filters: []
+  order_desc: true
+query_context: '{"datasource": {"id": 7, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 1000, "columns": ["event_type"], "metrics": [{"expressionType": "SQL", "sqlExpression":
+  "SUM(CASE WHEN period = ''last_7d'' THEN 1 ELSE 0 END)", "label": "events last 7 days"}, {"expressionType":
+  "SQL", "sqlExpression": "SUM(CASE WHEN period = ''prior_7d'' THEN 1 ELSE 0 END)", "label": "events prior
+  7 days"}, {"expressionType": "SQL", "sqlExpression": "ROUND(100.0 * (SUM(CASE WHEN period = ''last_7d''
+  THEN 1 ELSE 0 END) - SUM(CASE WHEN period = ''prior_7d'' THEN 1 ELSE 0 END)) / NULLIF(SUM(CASE WHEN
+  period = ''prior_7d'' THEN 1 ELSE 0 END), 0), 1)", "label": "change %"}], "orderby": [[{"expressionType":
+  "SQL", "sqlExpression": "SUM(CASE WHEN period = ''last_7d'' THEN 1 ELSE 0 END)", "label": "events last
+  7 days"}, false]]}], "form_data": {"datasource": "7__table", "viz_type": "table", "query_mode": "aggregate",
+  "groupby": ["event_type"], "metrics": [{"expressionType": "SQL", "sqlExpression": "SUM(CASE WHEN period
+  = ''last_7d'' THEN 1 ELSE 0 END)", "label": "events last 7 days"}, {"expressionType": "SQL", "sqlExpression":
+  "SUM(CASE WHEN period = ''prior_7d'' THEN 1 ELSE 0 END)", "label": "events prior 7 days"}, {"expressionType":
+  "SQL", "sqlExpression": "ROUND(100.0 * (SUM(CASE WHEN period = ''last_7d'' THEN 1 ELSE 0 END) - SUM(CASE
+  WHEN period = ''prior_7d'' THEN 1 ELSE 0 END)) / NULLIF(SUM(CASE WHEN period = ''prior_7d'' THEN 1 ELSE
+  0 END), 0), 1)", "label": "change %"}], "row_limit": 1000, "adhoc_filters": [], "order_desc": true},
+  "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: 51a0a5be-af65-5f93-885b-9d4fe11a9b3e
+version: 1.0.0
+dataset_uuid: 200c52f7-a0cb-5167-baeb-24866b1a63ee

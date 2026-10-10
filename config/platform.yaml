@@ -102,6 +102,9 @@ timescale:
   user: "postgres"
   password: "idp-dev-password"     # matches deploy/platform/timescaledb/timescaledb.yaml (dev only)
   schema: "gold"
+  # BI readers (REQ-BI-03): one login role per tenant (idp_bi_<tenant>, passwords in
+  # IDP_BI_PASSWORD_<TENANT>), row-filtered to its tenant. `idp bi-roles` provisions
+  # them and revokes CONNECT from PUBLIC on every other database of the server.
 
 # Spark runtime for the Silver/Gold stages (single transformation engine,
 # REQ-ORC-05). The execution environment only picks the master and resources:

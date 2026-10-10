@@ -143,7 +143,9 @@ cat <<EONOTE
 >> Done. Watch rollout with:  kubectl get pods -n ${NS} -w
 
 Next: 'make kafka' (Kafka cluster + topics) and 'make airflow-wire' (Airflow,
-installed separately — it needs a metadata DB + the DAG image).
+installed separately — it needs a metadata DB + the DAG image). BI: 'make bi-roles',
+'make superset-image' and 'make superset' (Superset through its Kubernetes Operator,
+installed separately — it needs its image, the Trino certificates and the tenant roles).
 
 All components use freely-pullable upstream images (quay.io/minio,
 timescale/timescaledb, quay.io/keycloak, trinodb/trino, projectnessie,

@@ -1,0 +1,38 @@
+slice_name: Usage events by type (last 30 days)
+description: null
+certified_by: null
+certification_details: null
+viz_type: pie
+params:
+  datasource: 7__table
+  viz_type: pie
+  groupby:
+  - event_type
+  metric: &id001
+    expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: events
+  metrics:
+  - *id001
+  row_limit: 1000
+  adhoc_filters:
+  - clause: WHERE
+    subject: in_last_30d
+    operator: IS TRUE
+    expressionType: SIMPLE
+  show_labels: true
+  label_type: key_value
+  show_legend: true
+query_context: '{"datasource": {"id": 7, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "in_last_30d", "op": "IS TRUE"}], "row_limit": 1000, "columns": ["event_type"], "metrics": [{"expressionType":
+  "SQL", "sqlExpression": "COUNT(*)", "label": "events"}], "orderby": [[{"expressionType": "SQL", "sqlExpression":
+  "COUNT(*)", "label": "events"}, false]]}], "form_data": {"datasource": "7__table", "viz_type": "pie",
+  "groupby": ["event_type"], "metric": {"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label":
+  "events"}, "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "events"}], "row_limit":
+  1000, "adhoc_filters": [{"clause": "WHERE", "subject": "in_last_30d", "operator": "IS TRUE", "expressionType":
+  "SIMPLE"}], "show_labels": true, "label_type": "key_value", "show_legend": true}, "result_format": "json",
+  "result_type": "full"}'
+cache_timeout: null
+uuid: abff3dba-652f-4b26-bd67-8abedf11bd04
+version: 1.0.0
+dataset_uuid: 200c52f7-a0cb-5167-baeb-24866b1a63ee

@@ -1,0 +1,37 @@
+slice_name: Probability of default (last 30 days)
+description: null
+certified_by: null
+certification_details: null
+viz_type: histogram_v2
+params:
+  datasource: 5__table
+  viz_type: histogram_v2
+  column: pd
+  groupby: []
+  bins: 10
+  normalize: false
+  cumulative: false
+  x_axis_title: PD
+  y_axis_title: services
+  show_value: true
+  show_legend: false
+  row_limit: 10000
+  adhoc_filters:
+  - clause: WHERE
+    subject: scored_at
+    operator: TEMPORAL_RANGE
+    comparator: 'DATEADD(DATETIME("now"), -30, day) : now'
+    expressionType: SIMPLE
+query_context: '{"datasource": {"id": 5, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "scored_at", "op": "TEMPORAL_RANGE", "val": "DATEADD(DATETIME(\"now\"), -30, day) : now"}], "row_limit":
+  10000, "columns": ["pd"], "post_processing": [{"operation": "histogram", "options": {"column": "pd",
+  "groupby": [], "bins": 10, "cumulative": false, "normalize": false}}]}], "form_data": {"datasource":
+  "5__table", "viz_type": "histogram_v2", "column": "pd", "groupby": [], "bins": 10, "normalize": false,
+  "cumulative": false, "x_axis_title": "PD", "y_axis_title": "services", "show_value": true, "show_legend":
+  false, "row_limit": 10000, "adhoc_filters": [{"clause": "WHERE", "subject": "scored_at", "operator":
+  "TEMPORAL_RANGE", "comparator": "DATEADD(DATETIME(\"now\"), -30, day) : now", "expressionType": "SIMPLE"}]},
+  "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: 12a7d667-e7cb-53cc-9f1f-fbc9c60f99cd
+version: 1.0.0
+dataset_uuid: 1c7f616e-ea3d-486a-a9f9-ff5bf42bec2e

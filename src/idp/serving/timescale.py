@@ -50,9 +50,13 @@ def swap_in(conn, table: str, staging: str, schema: str | None = None,
        name: duplicate keys fail HERE and the transaction rolls back, so the previous
        table is kept (SCN-SRV-05.2)
     4. rename staging to the live name
+    5. on Postgres, re-apply the BI readers' access controls to the new table:
+       row-level security, the tenant policy and their ``SELECT`` grant
+       (``bi_roles.apply_table_controls``), since dropping the old table dropped them
 
     Readers see the old table until the commit and the new one after it; never a
-    partly loaded table (SCN-SRV-01.5).
+    partly loaded table (SCN-SRV-01.5), and never the new one without its policy
+    (SCN-SRV-01.6).
     """
     from sqlalchemy import text
 
@@ -63,6 +67,9 @@ def swap_in(conn, table: str, staging: str, schema: str | None = None,
         cols = ", ".join(f'"{c}"' for c in key_columns)
         conn.execute(text(f'CREATE UNIQUE INDEX "ux_{table}_key" ON {_qualified(staging, schema)} ({cols})'))
     conn.execute(text(f'ALTER TABLE {_qualified(staging, schema)} RENAME TO "{table}"'))
+    if conn.dialect.name == "postgresql":
+        from idp.serving import bi_roles
+        bi_roles.apply_table_controls(conn, table, schema)
 
 
 def publish_frame(engine, name: str, df: pd.DataFrame, schema: str | None = None) -> None:

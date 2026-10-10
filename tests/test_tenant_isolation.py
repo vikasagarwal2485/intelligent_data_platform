@@ -205,3 +205,37 @@ def test_credentials_only_over_https(trino_lake):
     assert post(https, auth=("admin", "wrong")) == 401
     assert post("http://127.0.0.1:18080/v1/statement", headers=bearer) == 403
     assert post(https, headers=bearer) == 200
+
+
+# --------------------------------------------------------------------------- #
+# Query visibility and client metadata (SCN-PLT-11.5/11.6, SCN-TEN-03.7)        #
+# --------------------------------------------------------------------------- #
+def _query_list(**auth) -> list[dict]:
+    r = requests.get(f"https://127.0.0.1:{stack.HTTPS_PORT}/v1/query", verify=stack.ca_cert(), timeout=30, **auth)
+    assert r.status_code == 200, r.text[:200]
+    return r.json()
+
+
+def test_another_tenants_query_text_is_invisible(trino_lake):
+    # SCN-TEN-03.7 / SCN-PLT-11.5: bob's query (with a literal) never shows up in alice's list
+    marker = "QUERY_TEXT_OF_TENANT_B_7f3a"
+    stack.rows(stack.connect(principal="bob@tenant_b"),
+               f"SELECT count(*) FROM silver.fact_usage WHERE service_id = '{marker}'")
+    stack.rows(stack.connect(principal="alice@tenant_a"), "SELECT count(*) FROM silver.dim_subscriber")
+    alice = _query_list(headers={"Authorization": "Bearer " + stack.token("alice@tenant_a")})
+    assert alice and {q["session"]["user"] for q in alice} == {"alice@tenant_a"}
+    assert not any(marker in q.get("query", "") for q in alice)
+    admin = _query_list(auth=("admin", stack.password("admin")))
+    assert any(marker in q.get("query", "") for q in admin)            # admin still sees everything
+
+
+def test_client_metadata_is_filtered_and_runtime_denied(trino_lake):
+    # SCN-PLT-11.6: system.jdbc/metadata list only what the principal can read
+    a = {"principal": "alice@tenant_a"}
+    schemas = stack.rows(stack.connect(**a), "SELECT DISTINCT table_schem FROM system.jdbc.tables WHERE table_cat = 'lake'")
+    assert {r[0] for r in schemas} <= {"silver", "gold", "information_schema"} and "silver" in {r[0] for r in schemas}
+    comments = stack.rows(stack.connect(**a), "SELECT DISTINCT schema_name FROM system.metadata.table_comments "
+                                              "WHERE catalog_name = 'lake'")
+    assert "bronze" not in {r[0] for r in comments}
+    for table in ("system.runtime.queries", "system.runtime.nodes"):
+        _denied(lambda t=table: stack.rows(stack.connect(**a), f"SELECT count(*) FROM {t}"))

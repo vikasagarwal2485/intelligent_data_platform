@@ -1,0 +1,37 @@
+slice_name: Affordability gap distribution (last 30 days)
+description: null
+certified_by: null
+certification_details: null
+viz_type: histogram_v2
+params:
+  datasource: 5__table
+  viz_type: histogram_v2
+  column: affordability_gap
+  groupby: []
+  bins: 10
+  normalize: false
+  cumulative: false
+  x_axis_title: Affordability - recommended limit
+  y_axis_title: services
+  show_value: true
+  show_legend: false
+  row_limit: 10000
+  adhoc_filters:
+  - clause: WHERE
+    subject: scored_at
+    operator: TEMPORAL_RANGE
+    comparator: 'DATEADD(DATETIME("now"), -30, day) : now'
+    expressionType: SIMPLE
+query_context: '{"datasource": {"id": 5, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "scored_at", "op": "TEMPORAL_RANGE", "val": "DATEADD(DATETIME(\"now\"), -30, day) : now"}], "row_limit":
+  10000, "columns": ["affordability_gap"], "post_processing": [{"operation": "histogram", "options": {"column":
+  "affordability_gap", "groupby": [], "bins": 10, "cumulative": false, "normalize": false}}]}], "form_data":
+  {"datasource": "5__table", "viz_type": "histogram_v2", "column": "affordability_gap", "groupby": [],
+  "bins": 10, "normalize": false, "cumulative": false, "x_axis_title": "Affordability - recommended limit",
+  "y_axis_title": "services", "show_value": true, "show_legend": false, "row_limit": 10000, "adhoc_filters":
+  [{"clause": "WHERE", "subject": "scored_at", "operator": "TEMPORAL_RANGE", "comparator": "DATEADD(DATETIME(\"now\"),
+  -30, day) : now", "expressionType": "SIMPLE"}]}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: 46371bb7-5a77-582e-add5-4f8137ac1b5b
+version: 1.0.0
+dataset_uuid: 1c7f616e-ea3d-486a-a9f9-ff5bf42bec2e

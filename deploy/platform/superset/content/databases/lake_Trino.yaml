@@ -1,0 +1,18 @@
+database_name: lake (Trino)
+sqlalchemy_uri: trino://superset@trino.idp-platform.svc:8443/lake
+cache_timeout: null
+expose_in_sqllab: true
+allow_run_async: false
+allow_ctas: false
+allow_cvas: false
+allow_dml: false
+allow_file_upload: false
+extra:
+  metadata_params: {}
+  engine_params: {}
+  metadata_cache_timeout: {}
+  schemas_allowed_for_file_upload: []
+impersonate_user: true
+configuration_method: sqlalchemy_form
+uuid: 70d5ce42-06af-4730-994d-993e8c9f7277
+version: 1.0.0

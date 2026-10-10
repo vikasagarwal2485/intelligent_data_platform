@@ -1,0 +1,46 @@
+slice_name: Overage revenue change by category, last 7 days vs prior 7
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 8__table
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+  - category
+  metrics:
+  - expressionType: SQL
+    sqlExpression: SUM(CASE WHEN period = 'last_7d' THEN amount ELSE 0 END)
+    label: revenue last 7 days
+  - expressionType: SQL
+    sqlExpression: SUM(CASE WHEN period = 'prior_7d' THEN amount ELSE 0 END)
+    label: revenue prior 7 days
+  - expressionType: SQL
+    sqlExpression: ROUND(100.0 * (SUM(CASE WHEN period = 'last_7d' THEN amount ELSE 0 END) - SUM(CASE
+      WHEN period = 'prior_7d' THEN amount ELSE 0 END)) / NULLIF(SUM(CASE WHEN period = 'prior_7d' THEN
+      amount ELSE 0 END), 0), 1)
+    label: change %
+  row_limit: 1000
+  adhoc_filters: []
+  order_desc: true
+query_context: '{"datasource": {"id": 8, "type": "table"}, "force": false, "queries": [{"filters": [],
+  "row_limit": 1000, "columns": ["category"], "metrics": [{"expressionType": "SQL", "sqlExpression": "SUM(CASE
+  WHEN period = ''last_7d'' THEN amount ELSE 0 END)", "label": "revenue last 7 days"}, {"expressionType":
+  "SQL", "sqlExpression": "SUM(CASE WHEN period = ''prior_7d'' THEN amount ELSE 0 END)", "label": "revenue
+  prior 7 days"}, {"expressionType": "SQL", "sqlExpression": "ROUND(100.0 * (SUM(CASE WHEN period = ''last_7d''
+  THEN amount ELSE 0 END) - SUM(CASE WHEN period = ''prior_7d'' THEN amount ELSE 0 END)) / NULLIF(SUM(CASE
+  WHEN period = ''prior_7d'' THEN amount ELSE 0 END), 0), 1)", "label": "change %"}], "orderby": [[{"expressionType":
+  "SQL", "sqlExpression": "SUM(CASE WHEN period = ''last_7d'' THEN amount ELSE 0 END)", "label": "revenue
+  last 7 days"}, false]]}], "form_data": {"datasource": "8__table", "viz_type": "table", "query_mode":
+  "aggregate", "groupby": ["category"], "metrics": [{"expressionType": "SQL", "sqlExpression": "SUM(CASE
+  WHEN period = ''last_7d'' THEN amount ELSE 0 END)", "label": "revenue last 7 days"}, {"expressionType":
+  "SQL", "sqlExpression": "SUM(CASE WHEN period = ''prior_7d'' THEN amount ELSE 0 END)", "label": "revenue
+  prior 7 days"}, {"expressionType": "SQL", "sqlExpression": "ROUND(100.0 * (SUM(CASE WHEN period = ''last_7d''
+  THEN amount ELSE 0 END) - SUM(CASE WHEN period = ''prior_7d'' THEN amount ELSE 0 END)) / NULLIF(SUM(CASE
+  WHEN period = ''prior_7d'' THEN amount ELSE 0 END), 0), 1)", "label": "change %"}], "row_limit": 1000,
+  "adhoc_filters": [], "order_desc": true}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: d3f2cb10-8963-53a1-ad03-6cc37471313b
+version: 1.0.0
+dataset_uuid: 1516cbea-e7a0-5b1c-b8ad-de1890d0bc4d

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Node headroom check (REQ-ORC-07): with the Docker driver the minikube node is a
-# container with its own memory cap, which Kubernetes doesn't see. If the cap can't
-# hold the platform plus the largest Spark stage (driver + executors, heap +
-# overhead), the kernel's OOM killer takes the biggest process (a Spark JVM) long
-# before any pod reaches its own limit. This checks that before you run a stage.
+# container with its own memory and CPU caps, which Kubernetes doesn't see.
+# - Memory: if the cap can't hold the platform plus the largest Spark stage (driver +
+#   executors, heap + overhead), the kernel's OOM killer takes the biggest process (a
+#   Spark JVM) long before any pod reaches its own limit.
+# - CPU: Kubernetes schedules for the CPUs it reports; a lower container cap throttles
+#   the whole node, every pod's health probes time out, and services restart in a loop
+#   (Superset, Kafka, Airflow, the operators).
+# This checks both before you run a stage.
 #
 # Usage:  bash deploy/platform/mk-check.sh     (make mk-check)
 #         IDP_CONFIG=<platform.yaml> to check other profiles
@@ -59,5 +63,20 @@ fi
 if [ "${cap}" -lt "${node}" ]; then
   echo "note: Kubernetes sees $(mib "${node}") MiB but the container is capped at $(mib "${cap}") MiB;"
   echo "      schedulable memory is overstated, so keep to one Spark stage at a time."
+fi
+
+# CPU: the container's cap vs the CPUs Kubernetes schedules for
+nano=$(docker inspect minikube --format '{{.HostConfig.NanoCpus}}' 2>/dev/null || echo 0)
+node_cpus=$(kubectl get node minikube -o jsonpath='{.status.capacity.cpu}')
+vm_cpus=$(docker info --format '{{.NCPU}}' 2>/dev/null || echo "${node_cpus}")
+cpus=$(( nano > 0 ? nano / 1000000000 : vm_cpus ))
+pressure=$(docker exec minikube sh -c 'head -1 /sys/fs/cgroup/cpu.pressure' 2>/dev/null | sed -n 's/.*avg60=\([0-9.]*\).*/\1/p')
+echo "minikube node container CPUs: ${cpus}   (Kubernetes reports ${node_cpus}; CPU pressure avg60 ${pressure:-?}%)"
+if [ "${cpus}" -lt "${node_cpus}" ]; then
+  fix=$(( node_cpus < vm_cpus ? node_cpus : vm_cpus ))
+  echo "FAIL: the node container is capped at ${cpus} CPUs but Kubernetes schedules for ${node_cpus}; the" >&2
+  echo "      node is throttled, health probes time out and services restart. Raise the cap (live, keeps state):" >&2
+  echo "        docker update --cpus ${fix} minikube" >&2
+  exit 1
 fi
 echo "OK"

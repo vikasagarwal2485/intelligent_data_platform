@@ -1,0 +1,52 @@
+slice_name: Affordability vs recommended limit (last 30 days)
+description: null
+certified_by: null
+certification_details: null
+viz_type: bubble_v2
+params:
+  datasource: 5__table
+  viz_type: bubble_v2
+  entity: service_id
+  x:
+    expressionType: SQL
+    sqlExpression: MAX(affordability_base)
+    label: Affordability
+  y:
+    expressionType: SQL
+    sqlExpression: MAX(recommended_limit)
+    label: Recommended limit
+  size:
+    expressionType: SQL
+    sqlExpression: COUNT(*)
+    label: services
+  max_bubble_size: '5'
+  row_limit: 10000
+  adhoc_filters:
+  - clause: WHERE
+    subject: scored_at
+    operator: TEMPORAL_RANGE
+    comparator: 'DATEADD(DATETIME("now"), -30, day) : now'
+    expressionType: SIMPLE
+  x_axis_label: Affordability
+  y_axis_label: Recommended limit
+  x_axis_format: SMART_NUMBER
+  y_axis_format: SMART_NUMBER
+  show_legend: false
+query_context: '{"datasource": {"id": 5, "type": "table"}, "force": false, "queries": [{"filters": [{"col":
+  "scored_at", "op": "TEMPORAL_RANGE", "val": "DATEADD(DATETIME(\"now\"), -30, day) : now"}], "row_limit":
+  10000, "columns": ["service_id"], "metrics": [{"expressionType": "SQL", "sqlExpression": "MAX(affordability_base)",
+  "label": "Affordability"}, {"expressionType": "SQL", "sqlExpression": "MAX(recommended_limit)", "label":
+  "Recommended limit"}, {"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "services"}],
+  "orderby": [[{"expressionType": "SQL", "sqlExpression": "MAX(affordability_base)", "label": "Affordability"},
+  false]]}], "form_data": {"datasource": "5__table", "viz_type": "bubble_v2", "entity": "service_id",
+  "x": {"expressionType": "SQL", "sqlExpression": "MAX(affordability_base)", "label": "Affordability"},
+  "y": {"expressionType": "SQL", "sqlExpression": "MAX(recommended_limit)", "label": "Recommended limit"},
+  "size": {"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "services"}, "max_bubble_size":
+  "5", "row_limit": 10000, "adhoc_filters": [{"clause": "WHERE", "subject": "scored_at", "operator": "TEMPORAL_RANGE",
+  "comparator": "DATEADD(DATETIME(\"now\"), -30, day) : now", "expressionType": "SIMPLE"}], "x_axis_label":
+  "Affordability", "y_axis_label": "Recommended limit", "x_axis_format": "SMART_NUMBER", "y_axis_format":
+  "SMART_NUMBER", "show_legend": false}, "result_format": "json", "result_type": "full"}'
+cache_timeout: null
+uuid: cc5bc1bc-54dc-5afb-b19f-6210de5ee6a9
+version: 1.0.0
+dataset_uuid: 1c7f616e-ea3d-486a-a9f9-ff5bf42bec2e

@@ -1,0 +1,153 @@
+table_name: usage_windows
+main_dttm_col: started_at
+currency_code_column: null
+description: Silver usage events with 7-day and 30-day windows, measured back from the latest event
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: lake
+schema: silver
+sql: "SELECT u.tenant_id, u.event_type, u.traffic_case, u.unit, u.is_roaming, u.qty, u.started_at,\n \
+  \      CASE WHEN u.started_at > l.latest - INTERVAL '7' DAY THEN 'last_7d'\n            WHEN u.started_at\
+  \ > l.latest - INTERVAL '14' DAY THEN 'prior_7d' END AS period,\n       u.started_at > l.latest - INTERVAL\
+  \ '30' DAY AS in_last_30d\nFROM silver.fact_usage u\nCROSS JOIN (SELECT max(started_at) AS latest FROM\
+  \ silver.fact_usage) l\n"
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+folders: null
+uuid: 200c52f7-a0cb-5167-baeb-24866b1a63ee
+metrics:
+- metric_name: count
+  verbose_name: COUNT(*)
+  metric_type: count
+  expression: COUNT(*)
+  description: null
+  d3format: null
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: tenant_id
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: event_type
+  verbose_name: Event type
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: traffic_case
+  verbose_name: Traffic case
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: unit
+  verbose_name: Unit
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: is_roaming
+  verbose_name: Roaming
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: qty
+  verbose_name: Quantity
+  is_dttm: false
+  is_active: true
+  type: BIGINT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: started_at
+  verbose_name: Started at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP(6) WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: period
+  verbose_name: Period
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+- column_name: in_last_30d
+  verbose_name: In last 30 days
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  datetime_format: null
+  extra: null
+version: 1.0.0
+database_uuid: 70d5ce42-06af-4730-994d-993e8c9f7277

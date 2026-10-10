@@ -1,0 +1,108 @@
+dashboard_title: Usage overview
+description: null
+css: null
+slug: usage-overview
+certified_by: null
+certification_details: null
+published: true
+uuid: db0d61a7-0453-53eb-b806-a8482d111aa2
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-1
+    - ROW-2
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Usage overview
+  ROW-1:
+    type: ROW
+    id: ROW-1
+    children:
+    - CHART-abff3dba
+    - CHART-51a0a5be
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-abff3dba:
+    type: CHART
+    id: CHART-abff3dba
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: abff3dba-652f-4b26-bd67-8abedf11bd04
+      chartId: 0
+      sliceName: Usage events by type (last 30 days)
+      width: 6
+      height: 50
+  CHART-51a0a5be:
+    type: CHART
+    id: CHART-51a0a5be
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-1
+    meta:
+      uuid: 51a0a5be-af65-5f93-885b-9d4fe11a9b3e
+      chartId: 0
+      sliceName: Usage events change by type, last 7 days vs prior 7
+      width: 6
+      height: 50
+  ROW-2:
+    type: ROW
+    id: ROW-2
+    children:
+    - CHART-d3f2cb10
+    - CHART-7350d437
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta:
+      background: BACKGROUND_TRANSPARENT
+  CHART-d3f2cb10:
+    type: CHART
+    id: CHART-d3f2cb10
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: d3f2cb10-8963-53a1-ad03-6cc37471313b
+      chartId: 0
+      sliceName: Overage revenue change by category, last 7 days vs prior 7
+      width: 6
+      height: 50
+  CHART-7350d437:
+    type: CHART
+    id: CHART-7350d437
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-2
+    meta:
+      uuid: 7350d437-4af8-5ca7-895d-288f6a80de7a
+      chartId: 0
+      sliceName: Roaming usage by type
+      width: 6
+      height: 50
+theme_uuid: null
+version: 1.0.0

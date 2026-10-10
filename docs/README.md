@@ -65,6 +65,7 @@ Capability codes (`<CAP>`):
 | `SLV` | silver-curation | `PLT` | platform-deployment |
 | `GLD` | gold-features | `ORC` | orchestration |
 | `MCP` | mcp-analytics | `TEN` | tenant-isolation |
+| `BI` | bi-reports | | |
 
 Each `changes/phase-N/proposal.md` **What Changes** item cites the `REQ-*` id(s)
 it implements, so every implementation task traces back to a spec requirement and
