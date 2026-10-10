@@ -36,8 +36,7 @@
     "portIn": { "latestWithin": "NEVER" },
     "portOut": { "requestPending": false },
     "callForwarding": { "unconditionalActive": true, "conditionalActive": false, "lastChangedWithin": "WITHIN_24H" },
-    "roaming": { "status": "NOT_ROAMING" },
-    "connectionsUnderSameIdentity": "C2_3",
+    "roaming": { "latestWithin": "WITHIN_24H", "roamingInLast90d": 1 },
     "regulatoryFlags": { "mnrlListed": "NO", "financialFraudRiskIndicator": "NOT_FLAGGED" }
   },
   "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6IlRJUC1PUDEtMjAyNi0wMSJ9..Qm9ndXNTaWduYXR1cmVGb3JFeGFtcGxlT25seQ"
