@@ -40,6 +40,6 @@ cases showing that the rules above reject non-conforming statements.
 **Open for the standards body**
 - the band boundaries;
 - the name-match algorithm;
-- whether `connectionsUnderSameIdentity` and DoT's flags may be relayed;
+- whether DoT's flags may be relayed;
 - whether a circle or region field is ever allowed;
 - the signature canonicalisation profile.

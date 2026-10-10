@@ -30,7 +30,7 @@
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["validUntil", "numberStatus", "kycTenure", "kycMethod", "simChange", "deviceChange", "portIn", "portOut", "callForwarding", "connectionsUnderSameIdentity", "regulatoryFlags"],
+      "required": ["validUntil", "numberStatus", "kycTenure", "kycMethod", "simChange", "deviceChange", "portIn", "portOut", "callForwarding", "regulatoryFlags"],
       "properties": {
         "validUntil": {
           "description": "After this moment the TIU must not rely on the signals and should request a new statement.",
