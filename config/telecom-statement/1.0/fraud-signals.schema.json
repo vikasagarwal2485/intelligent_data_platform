@@ -104,10 +104,6 @@
           "required": ["status"],
           "properties": { "status": { "enum": ["NOT_ROAMING", "DOMESTIC", "INTERNATIONAL", "UNKNOWN"] } }
         },
-        "connectionsUnderSameIdentity": {
-          "description": "Active connections, across all operators, registered to the same identity document as this subscriber, as known to the DoT. Many connections are a mule-account signal. NOT_PROVIDED where the regulator hasn't permitted sharing it.",
-          "enum": ["C1", "C2_3", "C4_6", "C7_9", "OVER_9", "NOT_PROVIDED"]
-        },
         "regulatoryFlags": {
           "description": "DoT's own indicators, relayed only where DoT permits it, so lenders don't receive conflicting values from two sources.",
           "type": "object",
